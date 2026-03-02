@@ -27,7 +27,7 @@ STATE_FILE="/data/run_state.json"
 bashio::log.info "Habitus v2.5.0 | Schedule: ${SCHEDULE} | Train: ${TRAIN_TIME} | Scan: ${SCAN}h"
 
 # Start web server
-cd /app && python3 webserver.py &
+cd /app && python3 habitus/webserver.py &
 WEB_PID=$!
 bashio::log.info "Web server PID: ${WEB_PID}"
 
@@ -57,7 +57,7 @@ while true; do
     # Check web server is still alive
     if ! kill -0 $WEB_PID 2>/dev/null; then
         bashio::log.warning "Web server died — restarting"
-        python3 webserver.py &
+        python3 habitus/webserver.py &
         WEB_PID=$!
     fi
 
