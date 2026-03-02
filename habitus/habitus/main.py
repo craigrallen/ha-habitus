@@ -6,6 +6,7 @@ On first run: train on full history window.
 On subsequent runs: only fetch NEW data (since last_data_to), merge with existing model.
 """
 import asyncio, json, os, datetime, argparse, pickle
+from habitus import patterns as pattern_engine
 import pandas as pd
 import numpy as np
 import requests
