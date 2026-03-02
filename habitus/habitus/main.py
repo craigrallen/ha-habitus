@@ -56,45 +56,73 @@ FEATURE_COLS = [
     "activity_diversity",
 ]
 
-BEHAVIORAL_KEYWORDS = [
-    "energy",
-    "temperature",
-    "humidity",
-    "power",
-    "watt",
-    "consumed",
-    "production",
-    "solar",
-    "battery",
-    "pump",
-    "motion",
-    "door",
-    "contact",
-    "occupancy",
-    "presence",
-    "bilge",
-    "shore",
-    "inverter",
-    "mppt",
-    "epever",
-    "scm",
-    "mcu",
-]
+# Domains that produce useful behavioral time-series data
+BEHAVIORAL_DOMAINS = {
+    "sensor",
+    "binary_sensor",
+    "light",
+    "switch",
+    "climate",
+    "media_player",
+    "cover",
+    "fan",
+    "lock",
+    "alarm_control_panel",
+    "input_boolean",
+    "input_number",
+}
+
+# Entity ID fragments that are useless noise — always skip these
 SKIP = [
     "rssi",
     "signal_strength",
+    "lqi",
+    "link_quality",
     "fossil_fuel",
     "co2_intensity",
     "grid_fossil",
     "firmware",
-    "battery_level",
-    "lqi",
+    "software_version",
+    "uptime",
+    "battery_level",  # device battery % — not a behavioral signal
+    "ip_address",
+    "mac_address",
+    "ssid",
+    "latitude",
+    "longitude",
+    "update.",  # HA update entities
+]
+
+# Unit-of-measurement fragments to skip — purely diagnostic, not behavioral
+SKIP_UNITS_IN_NAME = [
+    "_db",
+    "_dbm",
+    "_lqi",
+    "_rssi",
 ]
 
 
-def is_behavioral(eid):
+def is_behavioral(eid: str) -> bool:
+    """Return True if this entity ID is worth tracking for behavioral analysis.
+
+    Strategy: accept anything from a useful domain, then drop known-noise
+    suffixes/prefixes.  This keeps ~5-10× more sensors than the old keyword
+    allowlist while still excluding diagnostic junk.
+    """
     e = eid.lower()
-    return any(k in e for k in BEHAVIORAL_KEYWORDS) and not any(k in e for k in SKIP)
+    domain = e.split(".")[0]
+
+    # Must be a domain that produces time-series state values
+    if domain not in BEHAVIORAL_DOMAINS:
+        return False
+
+    # Skip known noise patterns
+    if any(k in e for k in SKIP):
+        return False
+    if any(k in e for k in SKIP_UNITS_IN_NAME):
+        return False
+
+    return True
 
 
 def load_state():
