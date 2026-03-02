@@ -586,6 +586,11 @@ async def run(days_history: int, mode: str = "full") -> None:
     save_state(state)
     clear_progress()
 
+    send_notification(
+        "🧠 Habitus — Training complete",
+        f"Model trained on {training_days} days · {entity_count} sensors · "
+        f"Anomaly score: {anomaly_score}/100",
+    )
     is_anomalous = anomaly_score > THRESHOLD
     log.info(f"Score: {anomaly_score}/100 ({'⚠ ANOMALY' if is_anomalous else '✓ normal'})")
     if is_anomalous:
