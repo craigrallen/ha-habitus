@@ -321,7 +321,13 @@ def score_current(features):
     if not row.empty:
         X = row[FEATURE_COLS].values
     else:
-        X = np.array([[now.hour, now.weekday(), int(now.weekday() >= 5), now.month, 0, 0, 0]])
+        # Fallback: build a zero-padded row matching FEATURE_COLS exactly
+        zeros = [0.0] * len(FEATURE_COLS)
+        zeros[FEATURE_COLS.index("hour_of_day")] = now.hour
+        zeros[FEATURE_COLS.index("day_of_week")] = now.weekday()
+        zeros[FEATURE_COLS.index("is_weekend")] = int(now.weekday() >= 5)
+        zeros[FEATURE_COLS.index("month")] = now.month
+        X = np.array([zeros])
     score, model_used = seasonal.score_with_best_model(X)
     log.info(f"Scored with {model_used} model")
     return score
@@ -572,7 +578,11 @@ async def run(days_history: int, mode: str = "full") -> None:
         )
         entity_count = len(stat_ids)
         state["data_from"] = full_from
-        log.info(f"Discovery: {full_from} → {now_iso} ({training_days}d)")
+        # Record actual first data point date (not the query start)
+        if not df.empty and "hour" in df.columns:
+            actual_start = df["hour"].min().strftime("%Y-%m-%dT%H:%M:%S+00:00")
+            state["data_from"] = actual_start
+        log.info(f"Discovery: {state.get('data_from', full_from)} → {now_iso} ({training_days}d)")
 
     # Per-entity and activity scoring
     entity_anomalies = anomaly_breakdown.score_entities()
