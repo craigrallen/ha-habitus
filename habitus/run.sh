@@ -8,8 +8,9 @@ export HA_URL="http://supervisor/core"
 export HA_WS="ws://supervisor/core/api/websocket"
 export SUPERVISOR_TOKEN="${SUPERVISOR_TOKEN}"
 export DATA_DIR="/data"
+RESCAN_FLAG="/data/.rescan_requested"
 
-bashio::log.info "Habitus v0.7.0 — web UI on port ${PORT}, scan every ${SCAN}h"
+bashio::log.info "Habitus v0.8.0 — web UI on port ${PORT}, scan every ${SCAN}h"
 
 # Start web server in background
 python3 -c "
@@ -18,12 +19,23 @@ from habitus.web import start_web
 start_web(int('${PORT}'))
 " &
 
-# Wait for HA to be ready
 bashio::log.info "Waiting 30s for HA to start..."
 sleep 30
 
 while true; do
+    if [ -f "$RESCAN_FLAG" ]; then
+        bashio::log.info "Full rescan requested via web UI — running now"
+        rm -f "$RESCAN_FLAG"
+    fi
     python3 -u /app/habitus/main.py --days $DAYS || bashio::log.warning "Run failed, will retry"
     bashio::log.info "Next run in ${SCAN}h"
-    sleep $((SCAN * 3600))
+    # Check flag every 5 min instead of sleeping full interval
+    for i in $(seq 1 $((SCAN * 12))); do
+        sleep 300
+        if [ -f "$RESCAN_FLAG" ]; then
+            bashio::log.info "Full rescan requested — triggering early run"
+            rm -f "$RESCAN_FLAG"
+            break
+        fi
+    done
 done
