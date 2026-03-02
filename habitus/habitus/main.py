@@ -81,6 +81,7 @@ async def fetch_stats(entity_ids, start_iso, end_iso=None):
     all_rows = []
     done = 0
     total = len(entity_ids)
+    import time as _t; _fetch_start = _t.time()
     for eid in entity_ids:
         try:
             ws = await ws_connect()
@@ -101,12 +102,23 @@ async def fetch_stats(entity_ids, start_iso, end_iso=None):
                                      'mean': p.get('mean'), 'sum': p.get('sum')})
             done += 1
             if done % 10 == 0 or done == total:
-                log.info(f"  {done}/{total} sensors queried")
+                log.info(f"  {done}/{total} sensors queried, {len(all_rows):,} rows so far")
                 try:
+                    import time as _t, json as _j
                     pct = round(done / total * 100)
-                    with open(PROGRESS_PATH, 'w') as _pf:
-                        import json as _j
-                        _j.dump({"running": True, "done": done, "total": total, "pct": pct}, _pf)
+                    elapsed = _t.time() - _fetch_start
+                    eta_s = int((elapsed / done) * (total - done)) if done > 0 else 0
+                    eta_min = round(eta_s / 60, 1)
+                    _j.dump({
+                        "running": True,
+                        "done": done,
+                        "total": total,
+                        "pct": pct,
+                        "rows": len(all_rows),
+                        "elapsed_min": round(elapsed / 60, 1),
+                        "eta_min": eta_min,
+                        "phase": "fetching"
+                    }, open(PROGRESS_PATH, 'w'))
                 except Exception:
                     pass
         except Exception as e:

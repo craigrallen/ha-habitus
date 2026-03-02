@@ -102,18 +102,37 @@ function toast(msg, type='success') {
 async function load() {
   const progress = await fetch('api/progress').then(r=>r.json()).catch(()=>({}));
   if (progress.running) {
-    document.getElementById('subtitle').textContent = '⏳ Training in progress...';
-    const pct = progress.pct || 0;
-    const done = progress.done || 0;
-    const total = progress.total || '?';
+    const pct    = progress.pct || 0;
+    const done   = progress.done || 0;
+    const total  = progress.total || '?';
+    const rows   = (progress.rows || 0).toLocaleString();
+    const eta    = progress.eta_min > 0 ? `~${progress.eta_min} min remaining` : '';
+    const elapsed = progress.elapsed_min ? `${progress.elapsed_min} min elapsed` : '';
+    const phase  = progress.phase === 'training' ? 'Training model…' : `Fetching sensor history`;
+    const phaseIcon = progress.phase === 'training' ? '🧠' : '📡';
+
+    document.getElementById('subtitle').textContent = `${phaseIcon} ${phase} — ${elapsed}${eta ? ' · ' + eta : ''}`;
     document.getElementById('score').textContent = '…';
-    document.getElementById('badge-wrap').innerHTML = `<span class="badge badge-warn">Training ${pct}%</span>`;
+    document.getElementById('badge-wrap').innerHTML = `<span class="badge badge-warn">${pct}% complete</span>`;
     document.getElementById('training-days').innerHTML = '—<span class="unit">days</span>';
-    document.getElementById('entity-count').innerHTML = `${done}<span class="unit"> / ${total}</span>`;
-    document.getElementById('baseline-table').innerHTML = `<tr><td colspan="4" style="color:var(--muted);padding:20px 8px">
-      ⏳ Fetching history from ${total} sensors (${done} done, ${pct}%)…<br>
-      <span style="font-size:0.78rem;margin-top:6px;display:block">First run fetches your full HA history — this takes 20–40 minutes. The page refreshes automatically.</span>
-      <div class="bar-wrap" style="margin-top:12px"><div class="bar" style="width:${pct}%"></div></div>
+    document.getElementById('entity-count').innerHTML = `${done}<span class="unit"> / ${total} sensors</span>`;
+    document.getElementById('baseline-table').innerHTML = `<tr><td colspan="4" style="padding:20px 8px">
+      <div style="margin-bottom:10px">
+        <strong style="color:var(--text)">${phaseIcon} ${phase}</strong>
+      </div>
+      <div style="color:var(--muted);font-size:0.85rem;line-height:1.8">
+        ${progress.phase !== 'training' ? `
+        📊 <strong style="color:var(--text)">${done} of ${total}</strong> sensors queried<br>
+        🗄️ <strong style="color:var(--text)">${rows}</strong> hourly data points loaded so far<br>` : `
+        🗄️ <strong style="color:var(--text)">${rows.toLocaleString()}</strong> hourly snapshots — fitting Isolation Forest…<br>`}
+        ⏱️ ${elapsed}${eta ? ` · <strong style="color:var(--accent)">${eta}</strong>` : ''}
+      </div>
+      <div class="bar-wrap" style="margin-top:14px;height:8px">
+        <div class="bar" style="width:${pct}%;transition:width 1s ease"></div>
+      </div>
+      <div style="color:var(--muted);font-size:0.75rem;margin-top:8px">
+        This page refreshes automatically every 30 seconds.
+      </div>
     </td></tr>`;
     document.getElementById('run-state').textContent = JSON.stringify(progress, null, 2);
     return;
@@ -198,7 +217,7 @@ async function doRescan() {
 }
 
 load();
-setInterval(load, 60000);
+setInterval(load, 30000);
 </script>
 </body>
 </html>
