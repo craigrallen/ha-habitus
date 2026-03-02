@@ -1,17 +1,11 @@
 """
 Habitus — behavioral intelligence for Home Assistant.
 
-Design principle: HA is the source of truth. We never duplicate raw data.
-/data contains only inference artifacts: trained model, scaler, patterns, suggestions.
-
-Each run:
-  1. Query HA long-term statistics (live, no local copy)
-  2. Train/update behavioral model
-  3. Score current hour
-  4. Save model artifacts only
-  5. Publish sensors back to HA
+Design: HA is source of truth. We store only inference artifacts.
+On first run: train on full history window.
+On subsequent runs: only fetch NEW data (since last_data_to), merge with existing model.
 """
-import asyncio, json, os, sys, datetime, argparse, pickle
+import asyncio, json, os, datetime, argparse, pickle
 import pandas as pd
 import numpy as np
 import requests
@@ -20,31 +14,43 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger('habitus')
 
-DATA_DIR = os.environ.get("DATA_DIR", "/data")
-HA_URL = os.environ.get("HA_URL", "http://supervisor/core")
-HA_WS  = os.environ.get("HA_WS",  "ws://supervisor/core/api/websocket")
-HA_TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
+DATA_DIR  = os.environ.get("DATA_DIR", "/data")
+HA_URL    = os.environ.get("HA_URL",   "http://supervisor/core")
+HA_WS     = os.environ.get("HA_WS",    "ws://supervisor/core/api/websocket")
+HA_TOKEN  = os.environ.get("SUPERVISOR_TOKEN", "")
 
-# Artifacts (small — model params only, no raw data)
 MODEL_PATH    = os.path.join(DATA_DIR, "model.pkl")
 SCALER_PATH   = os.path.join(DATA_DIR, "scaler.pkl")
-PATTERNS_PATH = os.path.join(DATA_DIR, "patterns.json")
+BASELINE_PATH = os.path.join(DATA_DIR, "baseline.json")
 STATE_PATH    = os.path.join(DATA_DIR, "run_state.json")
 
 BEHAVIORAL_KEYWORDS = [
-    'energy', 'temperature', 'humidity', 'power', 'watt',
-    'consumed', 'production', 'solar', 'battery', 'pump',
-    'motion', 'door', 'contact', 'occupancy', 'presence'
+    'energy','temperature','humidity','power','watt',
+    'consumed','production','solar','battery','pump',
+    'motion','door','contact','occupancy','presence'
 ]
-SKIP = ['rssi', 'signal_strength', 'fossil_fuel', 'co2_intensity',
-        'grid_fossil', 'firmware', 'battery_level']
+SKIP = ['rssi','signal_strength','fossil_fuel','co2_intensity',
+        'grid_fossil','firmware','battery_level']
+
+FEATURE_COLS = ['hour_of_day','day_of_week','is_weekend','month',
+                'total_power_w','avg_temp_c','sensor_changes']
 
 def is_behavioral(eid):
-    eid_l = eid.lower()
-    return (any(k in eid_l for k in BEHAVIORAL_KEYWORDS) and
-            not any(k in eid_l for k in SKIP))
+    e = eid.lower()
+    return any(k in e for k in BEHAVIORAL_KEYWORDS) and not any(k in e for k in SKIP)
 
-# ── WebSocket helpers ──────────────────────────────────────────────────────────
+def load_state():
+    if os.path.exists(STATE_PATH):
+        with open(STATE_PATH) as f:
+            return json.load(f)
+    return {}
+
+def save_state(state):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(STATE_PATH, 'w') as f:
+        json.dump(state, f, indent=2)
+
+# ── WebSocket ─────────────────────────────────────────────────────────────────
 
 async def ws_connect():
     import websockets
@@ -66,24 +72,23 @@ async def get_stat_ids():
     log.info(f"Found {len(behavioral)} behavioral sensors (from {len(all_ids)} total)")
     return behavioral
 
-async def fetch_stats(entity_ids, days_back):
-    """Query HA long-term stats. Returns DataFrame — not stored to disk."""
-    start = (datetime.datetime.now(datetime.timezone.utc)
-             - datetime.timedelta(days=days_back)).strftime('%Y-%m-%dT00:00:00+00:00')
-    
+async def fetch_stats(entity_ids, start_iso, end_iso=None):
+    """Fetch stats from start_iso to end_iso. No local raw data stored."""
+    if end_iso is None:
+        end_iso = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:00:00+00:00')
+
     all_rows = []
     done = 0
     for eid in entity_ids:
         try:
             ws = await ws_connect()
-            await ws.send(json.dumps({
-                "id": 1,
-                "type": "recorder/statistics_during_period",
-                "start_time": start,
-                "statistic_ids": [eid],
-                "period": "hour",
-                "types": ["mean", "sum"]
-            }))
+            payload = {
+                "id": 1, "type": "recorder/statistics_during_period",
+                "start_time": start_iso, "end_time": end_iso,
+                "statistic_ids": [eid], "period": "hour",
+                "types": ["mean","sum"]
+            }
+            await ws.send(json.dumps(payload))
             result = json.loads(await asyncio.wait_for(ws.recv(), timeout=30))
             await ws.close()
             for sid, points in result.get('result', {}).items():
@@ -94,24 +99,22 @@ async def fetch_stats(entity_ids, days_back):
                                      'mean': p.get('mean'), 'sum': p.get('sum')})
             done += 1
             if done % 50 == 0:
-                log.info(f"Queried {done}/{len(entity_ids)} sensors")
+                log.info(f"  {done}/{len(entity_ids)} sensors queried")
         except Exception as e:
-            log.warning(f"Error on {eid}: {e}")
+            log.warning(f"Error {eid}: {e}")
 
     if not all_rows:
         return pd.DataFrame()
     df = pd.DataFrame(all_rows)
     df['ts'] = pd.to_datetime(df['ts'], unit='s', utc=True)
-    log.info(f"Loaded {len(df):,} hourly points across {df['entity_id'].nunique()} entities "
-             f"({df['ts'].min().date()} → {df['ts'].max().date()})")
+    log.info(f"Fetched {len(df):,} rows | {df['ts'].min().date()} → {df['ts'].max().date()}")
     return df
 
-# ── Feature engineering ────────────────────────────────────────────────────────
+# ── Features ──────────────────────────────────────────────────────────────────
 
 def build_features(df):
     df = df.copy()
     df['hour'] = df['ts'].dt.floor('h')
-
     hours = pd.DataFrame({'hour': pd.date_range(df['hour'].min(), df['hour'].max(), freq='h')})
     hours['hour_of_day'] = hours['hour'].dt.hour
     hours['day_of_week']  = hours['hour'].dt.dayofweek
@@ -135,63 +138,46 @@ def build_features(df):
 
 # ── Model ─────────────────────────────────────────────────────────────────────
 
-FEATURE_COLS = ['hour_of_day', 'day_of_week', 'is_weekend', 'month',
-                'total_power_w', 'avg_temp_c', 'sensor_changes']
-
 def train_model(features):
     from sklearn.ensemble import IsolationForest
     from sklearn.preprocessing import StandardScaler
 
     X = features[FEATURE_COLS].values
     scaler = StandardScaler()
-    X_s = scaler.fit_transform(X)
+    Xs = scaler.fit_transform(X)
     model = IsolationForest(contamination=0.05, random_state=42, n_jobs=-1)
-    model.fit(X_s)
-    n_days = round((features['hour'].max() - features['hour'].min()).total_seconds() / 86400)
-    log.info(f"Model trained on {len(X):,} hourly snapshots ({n_days} days)")
+    model.fit(Xs)
+    days = round((features['hour'].max() - features['hour'].min()).total_seconds() / 86400)
+    log.info(f"Model trained on {len(X):,} hourly snapshots ({days} days)")
     return model, scaler
 
-def save_artifacts(model, scaler, features, entity_count, days):
-    """Save only inference artifacts — no raw data."""
+def save_artifacts(model, scaler, features):
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(MODEL_PATH, 'wb') as f: pickle.dump(model, f)
     with open(SCALER_PATH, 'wb') as f: pickle.dump(scaler, f)
-
-    # Compute hourly baselines (expected ranges per hour/day combination)
     baseline = {}
-    for (h, d), g in features.groupby(['hour_of_day', 'day_of_week']):
+    for (h, d), g in features.groupby(['hour_of_day','day_of_week']):
         baseline[f"{h}_{d}"] = {
             'mean_power': round(float(g['total_power_w'].mean()), 1),
             'std_power':  round(float(g['total_power_w'].std()), 1),
             'mean_temp':  round(float(g['avg_temp_c'].mean()), 1),
             'n_samples':  len(g)
         }
-    with open(os.path.join(DATA_DIR, 'baseline.json'), 'w') as f:
-        json.dump(baseline, f)
-
-    state = {
-        'last_run': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        'training_days': days,
-        'entity_count': entity_count,
-        'feature_rows': len(features),
-        'model_size_kb': round(os.path.getsize(MODEL_PATH) / 1024, 1)
-    }
-    with open(STATE_PATH, 'w') as f: json.dump(state, f, indent=2)
-    log.info(f"Artifacts saved ({state['model_size_kb']}KB model, {len(baseline)} baselines)")
+    with open(BASELINE_PATH, 'w') as f: json.dump(baseline, f)
+    log.info(f"Artifacts saved ({os.path.getsize(MODEL_PATH)//1024}KB model, {len(baseline)} baselines)")
 
 def score_current(model, scaler, features):
     now = datetime.datetime.now(datetime.timezone.utc).replace(minute=0, second=0, microsecond=0)
-    this_hour = features[features['hour'] == pd.Timestamp(now)]
-    if not this_hour.empty:
-        X = this_hour[FEATURE_COLS].values
+    row = features[features['hour'] == pd.Timestamp(now)]
+    if not row.empty:
+        X = row[FEATURE_COLS].values
     else:
-        X = np.array([[now.hour, now.weekday(), int(now.weekday()>=5),
-                       now.month, 0, 0, 0]])
-    X_s = scaler.transform(X)
-    score = model.score_samples(X_s)[0]
+        X = np.array([[now.hour, now.weekday(), int(now.weekday()>=5), now.month, 0, 0, 0]])
+    Xs = scaler.transform(X)
+    score = model.score_samples(Xs)[0]
     return int(max(0, min(100, (-score + 0.5) * 100)))
 
-# ── HA publishing ──────────────────────────────────────────────────────────────
+# ── HA publish ────────────────────────────────────────────────────────────────
 
 def publish(entity_id, state, attributes=None):
     headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
@@ -202,53 +188,94 @@ def publish(entity_id, state, attributes=None):
         if r.status_code not in (200, 201):
             log.error(f"Publish {entity_id}: {r.status_code}")
     except Exception as e:
-        log.error(f"Publish failed {entity_id}: {e}")
+        log.error(f"Publish {entity_id}: {e}")
 
-# ── Main ───────────────────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 async def run(days_history):
     os.makedirs(DATA_DIR, exist_ok=True)
+    now_iso = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:00:00+00:00')
+    state = load_state()
 
     stat_ids = await get_stat_ids()
     if not stat_ids:
         log.error("No behavioral sensors found"); return
 
-    # Query HA — live data, not stored
-    df = await fetch_stats(stat_ids, days_history)
-    if df.empty:
-        log.warning("No data returned"); return
+    # Determine fetch window
+    if state.get('data_to') and os.path.exists(MODEL_PATH):
+        # Incremental: only fetch new data since last run
+        fetch_from = state['data_to']
+        log.info(f"Incremental run: fetching {fetch_from} → {now_iso}")
+        df_new = await fetch_stats(stat_ids, fetch_from, now_iso)
+        if df_new.empty or len(df_new) < 24:
+            log.info("Not enough new data — skipping retraining, scoring with existing model")
+            with open(MODEL_PATH,'rb') as f: model = pickle.load(f)
+            with open(SCALER_PATH,'rb') as f: scaler = pickle.load(f)
+            features_for_score = build_features(df_new) if not df_new.empty else pd.DataFrame()
+            anomaly_score = score_current(model, scaler, features_for_score) if not features_for_score.empty else 0
+            training_days = state.get('training_days', 0)
+            entity_count = state.get('entity_count', len(stat_ids))
+        else:
+            # Retrain on full window (HA keeps the data; we just re-query)
+            full_from = (datetime.datetime.now(datetime.timezone.utc)
+                         - datetime.timedelta(days=days_history)).strftime('%Y-%m-%dT00:00:00+00:00')
+            log.info(f"Retraining on full window {full_from} → {now_iso}")
+            df_full = await fetch_stats(stat_ids, full_from, now_iso)
+            if df_full.empty: log.warning("No data for full retrain"); return
+            features = build_features(df_full)
+            del df_full
+            model, scaler = train_model(features)
+            save_artifacts(model, scaler, features)
+            anomaly_score = score_current(model, scaler, features)
+            training_days = round((features['hour'].max() - features['hour'].min()).total_seconds() / 86400)
+            entity_count = len(stat_ids)
+    else:
+        # First run: full history fetch
+        full_from = (datetime.datetime.now(datetime.timezone.utc)
+                     - datetime.timedelta(days=days_history)).strftime('%Y-%m-%dT00:00:00+00:00')
+        log.info(f"First run: full history {full_from} → {now_iso}")
+        df = await fetch_stats(stat_ids, full_from, now_iso)
+        if df.empty: log.warning("No data returned"); return
+        features = build_features(df)
+        del df
+        model, scaler = train_model(features)
+        save_artifacts(model, scaler, features)
+        anomaly_score = score_current(model, scaler, features)
+        training_days = round((features['hour'].max() - features['hour'].min()).total_seconds() / 86400)
+        entity_count = len(stat_ids)
+        # Save discovery window
+        state['data_from'] = full_from
+        log.info(f"Discovery window: {full_from} → {now_iso} ({training_days} days)")
 
-    actual_days = round((df['ts'].max() - df['ts'].min()).total_seconds() / 86400)
-    features = build_features(df)
-    del df  # free memory — we only need features from here
-
-    if len(features) < 72:
-        log.warning(f"Only {len(features)}h of data — need at least 72h"); return
-
-    model, scaler = train_model(features)
-    anomaly_score = score_current(model, scaler, features)
-    save_artifacts(model, scaler, features, len(stat_ids), actual_days)
+    # Always update state with latest run info
+    state.update({
+        'last_run': now_iso,
+        'data_to': now_iso,
+        'training_days': training_days,
+        'entity_count': entity_count,
+        'anomaly_score': anomaly_score,
+    })
+    save_state(state)
 
     is_anomalous = anomaly_score > 70
-    log.info(f"Anomaly score: {anomaly_score}/100 ({'⚠ ANOMALOUS' if is_anomalous else '✓ normal'})")
+    log.info(f"Score: {anomaly_score}/100 ({'⚠ ANOMALY' if is_anomalous else '✓ normal'})")
 
     publish("sensor.habitus_anomaly_score", anomaly_score, {
-        "friendly_name": "Habitus Anomaly Score",
-        "unit_of_measurement": "", "icon": "mdi:brain",
-        "state_class": "measurement",
+        "friendly_name": "Habitus Anomaly Score", "unit_of_measurement": "",
+        "icon": "mdi:brain", "state_class": "measurement",
     })
     publish("binary_sensor.habitus_anomaly_detected", "on" if is_anomalous else "off", {
         "friendly_name": "Habitus Anomaly", "device_class": "problem",
     })
-    publish("sensor.habitus_training_days", actual_days, {
+    publish("sensor.habitus_training_days", training_days, {
         "friendly_name": "Habitus Training Days",
         "unit_of_measurement": "days", "icon": "mdi:calendar-range",
     })
-    publish("sensor.habitus_entity_count", len(stat_ids), {
+    publish("sensor.habitus_entity_count", entity_count, {
         "friendly_name": "Habitus Tracked Sensors",
         "unit_of_measurement": "sensors", "icon": "mdi:chip",
     })
-    log.info("Done — published 4 sensors to HA")
+    log.info("Done.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
