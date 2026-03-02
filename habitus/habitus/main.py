@@ -23,6 +23,7 @@ MODEL_PATH    = os.path.join(DATA_DIR, "model.pkl")
 SCALER_PATH   = os.path.join(DATA_DIR, "scaler.pkl")
 BASELINE_PATH = os.path.join(DATA_DIR, "baseline.json")
 STATE_PATH    = os.path.join(DATA_DIR, "run_state.json")
+PROGRESS_PATH = os.path.join(DATA_DIR, "progress.json")
 
 BEHAVIORAL_KEYWORDS = [
     'energy','temperature','humidity','power','watt',
@@ -79,6 +80,7 @@ async def fetch_stats(entity_ids, start_iso, end_iso=None):
 
     all_rows = []
     done = 0
+    total = len(entity_ids)
     for eid in entity_ids:
         try:
             ws = await ws_connect()
@@ -98,8 +100,15 @@ async def fetch_stats(entity_ids, start_iso, end_iso=None):
                     all_rows.append({'entity_id': sid, 'ts': ts,
                                      'mean': p.get('mean'), 'sum': p.get('sum')})
             done += 1
-            if done % 50 == 0:
-                log.info(f"  {done}/{len(entity_ids)} sensors queried")
+            if done % 10 == 0 or done == total:
+                log.info(f"  {done}/{total} sensors queried")
+                try:
+                    pct = round(done / total * 100)
+                    with open(PROGRESS_PATH, 'w') as _pf:
+                        import json as _j
+                        _j.dump({"running": True, "done": done, "total": total, "pct": pct}, _pf)
+                except Exception:
+                    pass
         except Exception as e:
             log.warning(f"Error {eid}: {e}")
 
@@ -273,6 +282,8 @@ async def run(days_history):
         "friendly_name": "Habitus Tracked Sensors",
         "unit_of_measurement": "sensors", "icon": "mdi:chip",
     })
+    if os.path.exists(PROGRESS_PATH):
+        os.remove(PROGRESS_PATH)
     log.info("Done.")
 
 if __name__ == "__main__":

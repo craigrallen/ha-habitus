@@ -100,6 +100,24 @@ function toast(msg, type='success') {
 }
 
 async function load() {
+  const progress = await fetch('api/progress').then(r=>r.json()).catch(()=>({}));
+  if (progress.running) {
+    document.getElementById('subtitle').textContent = '⏳ Training in progress...';
+    const pct = progress.pct || 0;
+    const done = progress.done || 0;
+    const total = progress.total || '?';
+    document.getElementById('score').textContent = '…';
+    document.getElementById('badge-wrap').innerHTML = `<span class="badge badge-warn">Training ${pct}%</span>`;
+    document.getElementById('training-days').innerHTML = '—<span class="unit">days</span>';
+    document.getElementById('entity-count').innerHTML = `${done}<span class="unit"> / ${total}</span>`;
+    document.getElementById('baseline-table').innerHTML = `<tr><td colspan="4" style="color:var(--muted);padding:20px 8px">
+      ⏳ Fetching history from ${total} sensors (${done} done, ${pct}%)…<br>
+      <span style="font-size:0.78rem;margin-top:6px;display:block">First run fetches your full HA history — this takes 20–40 minutes. The page refreshes automatically.</span>
+      <div class="bar-wrap" style="margin-top:12px"><div class="bar" style="width:${pct}%"></div></div>
+    </td></tr>`;
+    document.getElementById('run-state').textContent = JSON.stringify(progress, null, 2);
+    return;
+  }
   const [state, baseline] = await Promise.all([
     fetch('api/state').then(r => r.json()).catch(() => ({})),
     fetch('api/baseline').then(r => r.json()).catch(() => ({}))
@@ -191,6 +209,15 @@ setInterval(load, 60000);
 @app.route('/ingress/')
 def index():
     return render_template_string(PAGE)
+
+@app.route('/api/progress')
+@app.route('/ingress/api/progress')
+def api_progress():
+    progress_path = os.path.join(DATA_DIR, 'progress.json')
+    if os.path.exists(progress_path):
+        with open(progress_path) as f:
+            return jsonify(json.load(f))
+    return jsonify({})
 
 @app.route('/api/state')
 @app.route('/ingress/api/state')
