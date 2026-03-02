@@ -1,25 +1,33 @@
 """Habitus v2.1 — polished web UI."""
-import json, os, yaml as _yaml
-from flask import Flask, render_template_string, jsonify, request
 
-DATA_DIR          = os.environ.get("DATA_DIR", "/data")
-STATE_PATH        = os.path.join(DATA_DIR, "run_state.json")
-BASELINE_PATH     = os.path.join(DATA_DIR, "baseline.json")
-PATTERNS_PATH     = os.path.join(DATA_DIR, "patterns.json")
-SUGGESTIONS_PATH  = os.path.join(DATA_DIR, "suggestions.json")
-ANOMALIES_PATH    = os.path.join(DATA_DIR, "entity_anomalies.json")
-PROGRESS_PATH     = os.path.join(DATA_DIR, "progress.json")
-MODEL_PATH        = os.path.join(DATA_DIR, "model.pkl")
-RESCAN_FLAG       = os.path.join(DATA_DIR, ".rescan_requested")
+import json
+import os
+
+import yaml as _yaml
+from flask import Flask, jsonify, render_template_string, request
+
+DATA_DIR = os.environ.get("DATA_DIR", "/data")
+STATE_PATH = os.path.join(DATA_DIR, "run_state.json")
+BASELINE_PATH = os.path.join(DATA_DIR, "baseline.json")
+PATTERNS_PATH = os.path.join(DATA_DIR, "patterns.json")
+SUGGESTIONS_PATH = os.path.join(DATA_DIR, "suggestions.json")
+ANOMALIES_PATH = os.path.join(DATA_DIR, "entity_anomalies.json")
+PROGRESS_PATH = os.path.join(DATA_DIR, "progress.json")
+MODEL_PATH = os.path.join(DATA_DIR, "model.pkl")
+RESCAN_FLAG = os.path.join(DATA_DIR, ".rescan_requested")
 
 app = Flask(__name__)
+
 
 def _read(path, default=None):
     try:
         if os.path.exists(path):
-            with open(path) as f: return json.load(f)
-    except Exception: pass
+            with open(path) as f:
+                return json.load(f)
+    except Exception:
+        pass
     return default
+
 
 PAGE = r"""<!DOCTYPE html>
 <html lang="en">
@@ -935,69 +943,100 @@ setInterval(load, 30000);
 </body>
 </html>"""
 
-@app.route('/')
-@app.route('/ingress')
-@app.route('/ingress/')
+
+@app.route("/")
+@app.route("/ingress")
+@app.route("/ingress/")
 def index():
-    schedule   = os.environ.get("HABITUS_SCHEDULE",   "overnight")
+    schedule = os.environ.get("HABITUS_SCHEDULE", "overnight")
     train_time = os.environ.get("HABITUS_TRAIN_TIME", "02:00")
-    page = PAGE.replace("'{{ schedule }}'",   f"'{schedule}'")               .replace("'{{ train_time }}'", f"'{train_time}'")
+    page = PAGE.replace("'{{ schedule }}'", f"'{schedule}'").replace(
+        "'{{ train_time }}'", f"'{train_time}'"
+    )
     return render_template_string(page)
 
-@app.route('/api/state')
-@app.route('/ingress/api/state')
-def api_state(): return jsonify(_read(STATE_PATH) or {})
 
-@app.route('/api/baseline')
-@app.route('/ingress/api/baseline')
-def api_baseline(): return jsonify(_read(BASELINE_PATH) or {})
+@app.route("/api/state")
+@app.route("/ingress/api/state")
+def api_state():
+    return jsonify(_read(STATE_PATH) or {})
 
-@app.route('/api/progress')
-@app.route('/ingress/api/progress')
-def api_progress(): return jsonify(_read(PROGRESS_PATH) or {})
 
-@app.route('/api/patterns')
-@app.route('/ingress/api/patterns')
-def api_patterns(): return jsonify(_read(PATTERNS_PATH) or {})
+@app.route("/api/baseline")
+@app.route("/ingress/api/baseline")
+def api_baseline():
+    return jsonify(_read(BASELINE_PATH) or {})
 
-@app.route('/api/suggestions')
-@app.route('/ingress/api/suggestions')
-def api_suggestions(): return jsonify(_read(SUGGESTIONS_PATH) or [])
 
-@app.route('/api/anomalies')
-@app.route('/ingress/api/anomalies')
-def api_anomalies(): return jsonify(_read(ANOMALIES_PATH) or {})
+@app.route("/api/progress")
+@app.route("/ingress/api/progress")
+def api_progress():
+    return jsonify(_read(PROGRESS_PATH) or {})
 
-@app.route('/api/rescan', methods=['POST'])
-@app.route('/ingress/api/rescan', methods=['POST'])
+
+@app.route("/api/patterns")
+@app.route("/ingress/api/patterns")
+def api_patterns():
+    return jsonify(_read(PATTERNS_PATH) or {})
+
+
+@app.route("/api/suggestions")
+@app.route("/ingress/api/suggestions")
+def api_suggestions():
+    return jsonify(_read(SUGGESTIONS_PATH) or [])
+
+
+@app.route("/api/anomalies")
+@app.route("/ingress/api/anomalies")
+def api_anomalies():
+    return jsonify(_read(ANOMALIES_PATH) or {})
+
+
+@app.route("/api/rescan", methods=["POST"])
+@app.route("/ingress/api/rescan", methods=["POST"])
 def api_rescan():
     try:
         for p in [MODEL_PATH, STATE_PATH, BASELINE_PATH, PATTERNS_PATH, SUGGESTIONS_PATH]:
-            if os.path.exists(p): os.remove(p)
-        open(RESCAN_FLAG,'w').write('1')
+            if os.path.exists(p):
+                os.remove(p)
+        with open(RESCAN_FLAG, "w") as _rf:
+            _rf.write("1")
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
-@app.route('/api/add_automation', methods=['POST'])
-@app.route('/ingress/api/add_automation', methods=['POST'])
+
+@app.route("/api/add_automation", methods=["POST"])
+@app.route("/ingress/api/add_automation", methods=["POST"])
 def api_add_automation():
     import requests as req
+
     data = request.get_json()
-    yaml_str = data.get('yaml','')
-    ha_url = os.environ.get('HA_URL','http://supervisor/core')
-    token  = os.environ.get('SUPERVISOR_TOKEN','')
+    yaml_str = data.get("yaml", "")
+    ha_url = os.environ.get("HA_URL", "http://supervisor/core")
+    token = os.environ.get("SUPERVISOR_TOKEN", "")
     try:
         parsed = _yaml.safe_load(yaml_str)
-        auto   = parsed.get('automation', parsed)
-        alias  = auto.get('alias','habitus_auto').lower().replace(' ','_').replace('—','').replace('–','')
-        r = req.post(f"{ha_url}/api/config/automation/config/{alias}",
-                     headers={"Authorization":f"Bearer {token}","Content-Type":"application/json"},
-                     json=auto, timeout=10)
-        if r.status_code in (200,201,204): return jsonify({"ok":True})
-        return jsonify({"ok":False,"error":f"HA {r.status_code}"}), 400
+        auto = parsed.get("automation", parsed)
+        alias = (
+            auto.get("alias", "habitus_auto")
+            .lower()
+            .replace(" ", "_")
+            .replace("—", "")
+            .replace("–", "")
+        )
+        r = req.post(
+            f"{ha_url}/api/config/automation/config/{alias}",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json=auto,
+            timeout=10,
+        )
+        if r.status_code in (200, 201, 204):
+            return jsonify({"ok": True})
+        return jsonify({"ok": False, "error": f"HA {r.status_code}"}), 400
     except Exception as e:
-        return jsonify({"ok":False,"error":str(e)}), 500
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 
 def start_web(port=8099):
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)

@@ -74,35 +74,63 @@ ACTIVITY_ANOMALIES_PATH = os.path.join(DATA_DIR, "activity_anomalies.json")
 
 #: Entity ID fragments that indicate a MOTION sensor
 MOTION_PATTERNS: tuple[str, ...] = (
-    "motion", "pir", "movement", "occupancy",
+    "motion",
+    "pir",
+    "movement",
+    "occupancy",
 )
 
 #: Fragments for LIGHT entities (domain prefix checked separately)
 LIGHT_PATTERNS: tuple[str, ...] = (
-    "light", "lamp", "bulb", "ceiling", "spot",
+    "light",
+    "lamp",
+    "bulb",
+    "ceiling",
+    "spot",
 )
 
 #: Fragments for PRESENCE / PERSON tracking
 PRESENCE_PATTERNS: tuple[str, ...] = (
-    "person.", "device_tracker.", "presence", "phone",
-    "iphone", "android",
+    "person.",
+    "device_tracker.",
+    "presence",
+    "phone",
+    "iphone",
+    "android",
 )
 
 #: Fragments for MEDIA PLAYER activity
 MEDIA_PATTERNS: tuple[str, ...] = (
-    "media_player.", "tv", "speaker", "sonos", "spotify",
-    "plex", "kodi", "chromecast", "firetv", "appletv",
+    "media_player.",
+    "tv",
+    "speaker",
+    "sonos",
+    "spotify",
+    "plex",
+    "kodi",
+    "chromecast",
+    "firetv",
+    "appletv",
 )
 
 #: Door / window sensors
 DOOR_PATTERNS: tuple[str, ...] = (
-    "door", "window", "gate", "garage", "entry",
+    "door",
+    "window",
+    "gate",
+    "garage",
+    "entry",
 )
 
 #: Outdoor / weather context
 WEATHER_PATTERNS: tuple[str, ...] = (
-    "outdoor", "outside", "weather", "openweather",
-    "met_office", "yr_", "accuweather",
+    "outdoor",
+    "outside",
+    "weather",
+    "openweather",
+    "met_office",
+    "yr_",
+    "accuweather",
 )
 
 
@@ -170,9 +198,7 @@ def extract_activity_features(df: pd.DataFrame) -> pd.DataFrame:
 
     active = df.dropna(subset=["category", "v"])
 
-    hours = pd.DataFrame(
-        {"hour": pd.date_range(df["hour"].min(), df["hour"].max(), freq="h")}
-    )
+    hours = pd.DataFrame({"hour": pd.date_range(df["hour"].min(), df["hour"].max(), freq="h")})
 
     def _agg(cat: str, fn: str) -> pd.Series:
         """Filter to category and aggregate by hour."""
@@ -199,9 +225,7 @@ def extract_activity_features(df: pd.DataFrame) -> pd.DataFrame:
             .rename("presence_count")
         )
         total_presence = presence_sub["entity_id"].nunique()
-        people_home_pct = (
-            presence_count / max(total_presence, 1)
-        ).rename("people_home_pct")
+        people_home_pct = (presence_count / max(total_presence, 1)).rename("people_home_pct")
     else:
         presence_count = pd.Series(dtype=float, name="presence_count")
         people_home_pct = pd.Series(dtype=float, name="people_home_pct")
@@ -217,17 +241,20 @@ def extract_activity_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # Activity diversity: how many distinct sensor categories fired this hour
     diversity = (
-        active[active["v"] > 0]
-        .groupby("hour")["category"]
-        .nunique()
-        .rename("activity_diversity")
+        active[active["v"] > 0].groupby("hour")["category"].nunique().rename("activity_diversity")
     )
 
     # Join all features
     result = hours.set_index("hour")
     for series in [
-        lights_on, motion_events, presence_count, people_home_pct,
-        media_active, door_events, outdoor_temp, diversity,
+        lights_on,
+        motion_events,
+        presence_count,
+        people_home_pct,
+        media_active,
+        door_events,
+        outdoor_temp,
+        diversity,
     ]:
         result = result.join(series, how="left")
 
@@ -257,8 +284,14 @@ def build_activity_baseline(activity_features: pd.DataFrame) -> dict[str, Any]:
     feats["day_of_week"] = feats["hour"].dt.dayofweek
 
     activity_cols = [
-        "lights_on", "motion_events", "presence_count", "people_home_pct",
-        "media_active", "door_events", "outdoor_temp_c", "activity_diversity",
+        "lights_on",
+        "motion_events",
+        "presence_count",
+        "people_home_pct",
+        "media_active",
+        "door_events",
+        "outdoor_temp_c",
+        "activity_diversity",
     ]
 
     baseline: dict[str, Any] = {}
@@ -335,21 +368,23 @@ def score_activity_anomalies(current_states: dict[str, float] | None = None) -> 
         direction = "high" if val > stats["mean"] else "low"
         day_name = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][now.weekday()]
 
-        anomalies.append({
-            "feature": feat,
-            "label": _feature_label(feat),
-            "current_value": round(val, 2),
-            "baseline_mean": round(stats["mean"], 2),
-            "baseline_std": round(stats["std"], 2),
-            "z_score": round(z, 2),
-            "direction": direction,
-            "description": (
-                f"{_feature_label(feat)} is {_fmt_feature(feat, val)} — "
-                f"expected {_fmt_feature(feat, stats['mean'])} "
-                f"±{_fmt_feature(feat, stats['std'])} "
-                f"on {day_name} at {now.hour:02d}:00"
-            ),
-        })
+        anomalies.append(
+            {
+                "feature": feat,
+                "label": _feature_label(feat),
+                "current_value": round(val, 2),
+                "baseline_mean": round(stats["mean"], 2),
+                "baseline_std": round(stats["std"], 2),
+                "z_score": round(z, 2),
+                "direction": direction,
+                "description": (
+                    f"{_feature_label(feat)} is {_fmt_feature(feat, val)} — "
+                    f"expected {_fmt_feature(feat, stats['mean'])} "
+                    f"±{_fmt_feature(feat, stats['std'])} "
+                    f"on {day_name} at {now.hour:02d}:00"
+                ),
+            }
+        )
 
     anomalies.sort(key=lambda x: x["z_score"], reverse=True)
 
@@ -358,10 +393,7 @@ def score_activity_anomalies(current_states: dict[str, float] | None = None) -> 
         "slot": key,
         "anomalies": anomalies,
         "current": current,
-        "summary": (
-            f"{len(anomalies)} activity anomalies at {now.hour:02d}:00 "
-            f"({day_name})"
-        ),
+        "summary": (f"{len(anomalies)} activity anomalies at {now.hour:02d}:00 " f"({day_name})"),
     }
 
     with open(ACTIVITY_ANOMALIES_PATH, "w") as f:
@@ -398,10 +430,14 @@ def _fetch_activity_states() -> dict[str, float]:
             except (ValueError, TypeError):
                 # Map string states to numeric
                 val = {
-                    "on": 1.0, "off": 0.0,
-                    "home": 1.0, "not_home": 0.0,
-                    "playing": 1.0, "paused": 0.5,
-                    "idle": 0.0, "standby": 0.0,
+                    "on": 1.0,
+                    "off": 0.0,
+                    "home": 1.0,
+                    "not_home": 0.0,
+                    "playing": 1.0,
+                    "paused": 0.5,
+                    "idle": 0.0,
+                    "standby": 0.0,
                     "unavailable": float("nan"),
                     "unknown": float("nan"),
                 }.get(state.lower(), float("nan"))
@@ -439,11 +475,13 @@ def _derive_current_features(states: dict[str, float]) -> dict[str, float]:
         "door_events": float(sum(v for v in doors)),
         "outdoor_temp_c": float(np.mean(weather)) if weather else 0.0,
         "activity_diversity": float(
-            len({
-                classify_entity(eid)
-                for eid, v in states.items()
-                if v > 0.5 and classify_entity(eid) is not None
-            })
+            len(
+                {
+                    classify_entity(eid)
+                    for eid, v in states.items()
+                    if v > 0.5 and classify_entity(eid) is not None
+                }
+            )
         ),
     }
 
