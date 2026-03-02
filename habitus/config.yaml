@@ -1,6 +1,6 @@
 name: "Habitus"
 description: "Behavioral intelligence — learns patterns from HA, detects anomalies, publishes sensors."
-version: "0.8.0"
+version: "0.9.0"
 slug: "habitus"
 init: false
 arch:
@@ -17,7 +17,7 @@ map:
   - data:rw
 options:
   scan_interval_hours: 6
-  days_history: 365
+  days_history: 3650
 schema:
   scan_interval_hours: int
   days_history: int

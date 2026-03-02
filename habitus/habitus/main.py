@@ -216,9 +216,8 @@ async def run(days_history):
             training_days = state.get('training_days', 0)
             entity_count = state.get('entity_count', len(stat_ids))
         else:
-            # Retrain on full window (HA keeps the data; we just re-query)
-            full_from = (datetime.datetime.now(datetime.timezone.utc)
-                         - datetime.timedelta(days=days_history)).strftime('%Y-%m-%dT00:00:00+00:00')
+            # Retrain on full window — use earliest known data_from (all of HA history)
+            full_from = state.get('data_from', '2000-01-01T00:00:00+00:00')
             log.info(f"Retraining on full window {full_from} → {now_iso}")
             df_full = await fetch_stats(stat_ids, full_from, now_iso)
             if df_full.empty: log.warning("No data for full retrain"); return
@@ -230,10 +229,9 @@ async def run(days_history):
             training_days = round((features['hour'].max() - features['hour'].min()).total_seconds() / 86400)
             entity_count = len(stat_ids)
     else:
-        # First run: full history fetch
-        full_from = (datetime.datetime.now(datetime.timezone.utc)
-                     - datetime.timedelta(days=days_history)).strftime('%Y-%m-%dT00:00:00+00:00')
-        log.info(f"First run: full history {full_from} → {now_iso}")
+        # First run: fetch ALL available history (from HA epoch, not just N days)
+        full_from = '2000-01-01T00:00:00+00:00'
+        log.info(f"First run: fetching all available history from {full_from}")
         df = await fetch_stats(stat_ids, full_from, now_iso)
         if df.empty: log.warning("No data returned"); return
         features = build_features(df)
