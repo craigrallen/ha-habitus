@@ -732,8 +732,9 @@ async function load() {
     fetch('api/anomalies').then(r=>r.json()).catch(()=>({})),
   ]);
 
-  // Progress overlay
-  if (progress && progress.running) {
+  // Progress overlay — only block UI if no data at all yet
+  const hasData = state.last_run || state.phase === 'baselines_ready' || state.phase === 'model_ready';
+  if (progress && progress.running && !hasData) {
     document.getElementById('prog-overlay').style.display = 'flex';
     const phase = progress.phase||'fetching';
     const icons = {fetching:'📡',building_baselines:'🗄️',training:'🧠',seasonal_training:'🌱',pattern_analysis:'🔍'};
@@ -767,10 +768,9 @@ async function load() {
     });
     document.getElementById('hdr-dot').className = 'status-dot warn';
     document.getElementById('hdr-label').textContent = `Training ${progress.pct||0}%`;
-    return;
-  } else {
-    document.getElementById('prog-overlay').style.display = 'none';
+    if (!hasData) return;  // only block if no data yet
   }
+  document.getElementById('prog-overlay').style.display = 'none';
 
   // Header
   const score = state.anomaly_score ?? 0;
