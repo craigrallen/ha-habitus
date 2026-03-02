@@ -1,26 +1,85 @@
 <p align="center">
-  <img src="logo.png" width="120" alt="Habitus">
+  <img src="logo.png" width="100" alt="Habitus">
 </p>
 
-# Habitus
+<h1 align="center">Habitus</h1>
 
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow?style=flat-square&logo=buy-me-a-coffee)](https://buymeacoffee.com/craigrallen)
-[![HA Version](https://img.shields.io/badge/Home%20Assistant-2024.1%2B-blue?style=flat-square&logo=home-assistant)](https://www.home-assistant.io)
-[![License](https://img.shields.io/github/license/craigrallen/ha-habitus?style=flat-square)](LICENSE)
+<p align="center">
+  <strong>Behavioral intelligence for Home Assistant — 100% local, zero cloud, zero compromise.</strong>
+</p>
 
-**Behavioral intelligence for Home Assistant.**
-
-Habitus learns the normal patterns of your home — energy use, temperatures, sensor activity — and tells you when something's off. No cloud. No accounts. Runs entirely on your HA device.
+<p align="center">
+  <a href="https://github.com/craigrallen/ha-habitus/actions/workflows/ci.yml">
+    <img src="https://github.com/craigrallen/ha-habitus/actions/workflows/ci.yml/badge.svg" alt="CI">
+  </a>
+  <a href="https://codecov.io/gh/craigrallen/ha-habitus">
+    <img src="https://codecov.io/gh/craigrallen/ha-habitus/branch/main/graph/badge.svg" alt="Coverage">
+  </a>
+  <a href="https://github.com/craigrallen/ha-habitus/blob/main/LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-green?style=flat" alt="MIT">
+  </a>
+  <a href="https://buymeacoffee.com/craigrallen">
+    <img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow?style=flat&logo=buy-me-a-coffee" alt="Buy Me A Coffee">
+  </a>
+</p>
 
 ---
 
-## What it does
+## 🔒 Local First. Always.
 
-- 📊 **Learns your home** — trains on years of long-term statistics already in your HA recorder
-- 🔍 **Detects anomalies** — flags unusual patterns across all circuits, temperatures, and sensors
-- 📡 **Publishes sensors** — `sensor.habitus_anomaly_score`, `binary_sensor.habitus_anomaly_detected`, and more
-- 🌐 **Web UI** — built-in insights dashboard with hourly power baselines and run state
-- 🔒 **100% local** — no data leaves your device, ever
+Habitus is built on a single principle: **your home's data belongs to you**.
+
+Every byte of analysis happens on your Home Assistant device. No data is sent to any server, no API calls leave your network, no account is required. Your behavioural patterns — when you wake up, when you're home, what you watch, how you live — stay exactly where they belong.
+
+This isn't a marketing claim. It's architectural:
+
+- **No outbound network calls** from the add-on (only to your own HA instance)
+- **No telemetry** of any kind
+- **No cloud model** — the ML runs on your hardware
+- **Offline-first** — works without internet after install
+- **Open source** — audit every line yourself
+
+---
+
+## What Habitus Does
+
+Habitus learns the *living patterns* of your home — not just power consumption, but the full picture of daily life:
+
+### 🏃 Activity Baseline
+Beyond simple power usage, Habitus tracks:
+
+| Signal | What it reveals |
+|--------|----------------|
+| Motion sensors | Movement patterns — corridors, rooms, garden |
+| Light switches | Which rooms are occupied, what time |
+| Presence sensors | Who is home, when they arrive and leave |
+| Media players | TV on, music playing, which room is active |
+| Door/window sensors | Arrivals, departures, ventilation habits |
+| Person entities | Occupancy fraction, device tracker signals |
+| Weather sensors | Outdoor context — cold days mean heating, not anomaly |
+
+The key insight: **power alone lies**. A 2kW spike at 07:00 is normal if the kitchen is active with someone home. It's anomalous if nobody is home, no lights are on, and no motion has been detected.
+
+### 🧠 Anomaly Detection
+An IsolationForest model trained on your actual history detects when the combination of power, activity, presence and environmental signals deviates from what's normal *for this time of day, day of week, and season*.
+
+### 🌱 Seasonal Intelligence
+Separate models for each season. Cold winter mornings with high heating load won't trigger false anomalies in summer.
+
+### 🤖 Proposed Automations
+Habitus generates ready-to-use HA automation YAML based on discovered patterns:
+- Morning routines, night modes
+- High power alerts calibrated to *your* baseline
+- Boat-specific: bilge alerts, battery protection, shore power monitoring
+- Occupancy-aware load control
+- Daily energy digests
+
+### 📊 Insights Dashboard
+A polished web UI served via HA ingress (sidebar button):
+- Animated anomaly score gauge
+- Per-entity anomaly breakdown (z-score ranked)
+- Hourly and seasonal baselines
+- One-click Copy YAML / Add to HA for all suggestions
 
 ---
 
@@ -28,60 +87,153 @@ Habitus learns the normal patterns of your home — energy use, temperatures, se
 
 1. In Home Assistant: **Settings → Add-ons → Add-on Store → ⋮ → Repositories**
 2. Add: `https://github.com/craigrallen/ha-habitus`
-3. Find **Habitus** in the store and click **Install**
-4. Start the add-on — it will appear in your sidebar automatically
+3. Find **Habitus** in the store → **Install**
+4. Configure (optional) → **Start**
+5. Click the 🧠 icon in the sidebar
 
----
-
-## Sensors
-
-| Entity | Description |
-|--------|-------------|
-| `sensor.habitus_anomaly_score` | 0–100 anomaly score (0 = normal, 100 = very unusual) |
-| `binary_sensor.habitus_anomaly_detected` | `on` when score exceeds 70 |
-| `sensor.habitus_training_days` | Days of history used to train the model |
-| `sensor.habitus_entity_count` | Number of behavioral sensors being tracked |
+**First run** fetches all available HA long-term statistics (can take 20–40 minutes for large installations). Subsequent runs are incremental.
 
 ---
 
 ## Configuration
 
 ```yaml
-scan_interval_hours: 6   # How often to re-score (default: 6)
-days_history: 365        # Training window in days (default: 365)
+scan_interval_hours: 6       # How often to re-score (default: 6h)
+days_history: 3650           # Training window — set high, HA limits to what it has
+notify_service: notify.notify # HA notify service for anomaly alerts
+notify_on_anomaly: true       # Send notification when anomaly detected
+anomaly_threshold: 70         # Score threshold for anomaly notification (0–100)
 ```
 
 ---
 
-## How it works
+## Published Sensors
 
-On first run, Habitus queries your HA long-term statistics (no raw data is stored locally — HA is the source of truth). It builds a behavioral model using an Isolation Forest trained on hourly feature vectors: total power, average temperature, sensor activity, and time patterns.
-
-Every subsequent run only fetches new data since the last run. The model is retrained periodically against the full window. Only the trained model weights and baseline statistics are stored (~100KB total).
+| Entity | Description |
+|--------|-------------|
+| `sensor.habitus_anomaly_score` | 0–100 combined anomaly score |
+| `binary_sensor.habitus_anomaly_detected` | `on` when score > threshold |
+| `sensor.habitus_training_days` | Days of history used |
+| `sensor.habitus_entity_count` | Number of behavioral sensors tracked |
 
 ---
 
-## Automation example
+## Architecture
 
-```yaml
-automation:
-  - alias: "Habitus anomaly alert"
-    trigger:
-      - platform: state
-        entity_id: binary_sensor.habitus_anomaly_detected
-        to: "on"
-    action:
-      - service: notify.mobile_app
-        data:
-          title: "🧠 Habitus Alert"
-          message: "Unusual behavior detected in your home."
 ```
+HA Recorder DB (your data)
+        │
+        ▼
+  WebSocket API          ← No raw data stored locally
+  (live query each run)
+        │
+        ▼
+  Feature extraction     ← Power + Activity + Presence + Weather
+        │
+        ├── IsolationForest (main model)
+        ├── IsolationForest (seasonal × 4)
+        │
+        ▼
+  /data (artifacts only) ← ~200KB total
+  ├── model.pkl          ← Trained model weights
+  ├── scaler.pkl         ← Normalization params
+  ├── baseline.json      ← Hourly power norms
+  ├── activity_baseline.json  ← Per-sensor activity norms
+  ├── entity_baselines.json   ← Per-entity z-score baselines
+  ├── patterns.json      ← Discovered routines
+  ├── suggestions.json   ← Generated automation YAML
+  └── run_state.json     ← Discovery window + last run
+        │
+        ▼
+  HA REST API            ← Publish 4 sensors back to HA
+```
+
+HA is the source of truth. Habitus stores only what it *learned*, never what it *read*.
+
+---
+
+## Development
+
+### Prerequisites
+
+```bash
+git clone https://github.com/craigrallen/ha-habitus
+cd ha-habitus
+pip install -e ".[dev]"
+```
+
+### Running tests
+
+```bash
+pytest                              # All tests with coverage
+pytest tests/test_activity.py -v   # Specific module
+pytest --co -q                     # List all tests
+```
+
+### Linting
+
+```bash
+ruff check habitus/habitus/        # Lint
+black habitus/habitus/             # Format
+mypy habitus/habitus/              # Type check
+```
+
+### Code standards
+
+- All public functions must have docstrings (Google style)
+- Type annotations required on all function signatures
+- New features require tests before merge (70% coverage minimum, enforced by CI)
+- Ruff + Black must pass — no exceptions
+- PRs require passing CI before merge
+
+### Project structure
+
+```
+habitus/
+  Dockerfile            — Add-on container
+  config.yaml           — HA add-on manifest
+  build.yaml            — Build architecture matrix
+  requirements.txt      — Runtime dependencies
+  run.sh                — Container entrypoint
+  logo.png              — Add-on logo
+  habitus/
+    __init__.py
+    main.py             — Orchestration: fetch → train → score → publish
+    activity.py         — Activity baseline engine (lights, motion, presence, media)
+    anomaly_breakdown.py — Per-entity z-score scoring
+    patterns.py         — Pattern discovery + automation suggestion generation
+    seasonal.py         — Per-season IsolationForest models
+    web.py              — Flask ingress web UI
+tests/
+  conftest.py           — Shared fixtures
+  test_activity.py
+  test_anomaly_breakdown.py
+  test_patterns.py
+  test_seasonal.py
+.github/
+  workflows/
+    ci.yml              — Lint + test + build gate
+    release.yml         — Tag → GitHub Release
+```
+
+---
+
+## Contributing
+
+Pull requests welcome. Please:
+
+1. Fork and create a feature branch
+2. Write tests for new functionality
+3. Ensure `pytest`, `ruff check`, and `black --check` all pass locally
+4. Open a PR — CI will gate on coverage and lint
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 
 ---
 
 ## Support
 
-If Habitus is useful to you, consider buying me a coffee ☕
+If Habitus is useful, consider buying me a coffee ☕
 
 [![Buy Me A Coffee](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://buymeacoffee.com/craigrallen)
 
@@ -89,4 +241,4 @@ If Habitus is useful to you, consider buying me a coffee ☕
 
 ## License
 
-MIT
+MIT © Craig Allen

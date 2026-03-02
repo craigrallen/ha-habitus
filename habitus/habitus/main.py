@@ -10,6 +10,7 @@ import requests
 from habitus import patterns as pattern_engine
 from habitus import seasonal
 from habitus import anomaly_breakdown
+from habitus import activity as activity_engine
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger('habitus')
@@ -29,7 +30,14 @@ STATE_PATH      = os.path.join(DATA_DIR, "run_state.json")
 PROGRESS_PATH   = os.path.join(DATA_DIR, "progress.json")
 RESCAN_FLAG     = os.path.join(DATA_DIR, ".rescan_requested")
 
-FEATURE_COLS = ['hour_of_day','day_of_week','is_weekend','month','total_power_w','avg_temp_c','sensor_changes']
+FEATURE_COLS = [
+    "hour_of_day", "day_of_week", "is_weekend", "month",
+    "total_power_w", "avg_temp_c", "sensor_changes",
+    # Activity features — provide richer context beyond power alone
+    "lights_on", "motion_events", "presence_count",
+    "people_home_pct", "media_active", "door_events",
+    "outdoor_temp_c", "activity_diversity",
+]
 
 BEHAVIORAL_KEYWORDS = ['energy','temperature','humidity','power','watt','consumed','production','solar','battery','pump','motion','door','contact','occupancy','presence','bilge','shore','inverter','mppt','epever','scm','mcu']
 SKIP = ['rssi','signal_strength','fossil_fuel','co2_intensity','grid_fossil','firmware','battery_level','lqi']
@@ -115,7 +123,20 @@ async def fetch_stats(entity_ids, start_iso, end_iso=None):
     return df
 
 # ── Features ───────────────────────────────────────────────────────────────────
-def build_features(df):
+def build_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Build hourly feature matrix combining power and activity signals.
+
+    Merges power metrics (total load, temperature, sensor change rate) with
+    activity features (lights, motion, presence, media) so the model can
+    distinguish a cold-morning heating spike from a genuine anomaly.
+
+    Args:
+        df: Raw stats DataFrame from ``fetch_stats`` with columns
+            ``[entity_id, ts, mean, sum]``.
+
+    Returns:
+        DataFrame with one row per hour and all FEATURE_COLS populated.
+    """
     df = df.copy()
     df['hour'] = df['ts'].dt.floor('h')
     hours = pd.DataFrame({'hour': pd.date_range(df['hour'].min(), df['hour'].max(), freq='h')})
@@ -133,6 +154,14 @@ def build_features(df):
     features = hours.set_index('hour')
     for s in [total_power, avg_temp, activity]:
         features = features.join(s, how='left')
+    # Merge activity features from activity engine
+    try:
+        act_features = activity_engine.extract_activity_features(df)
+        if not act_features.empty:
+            act_features = act_features.set_index('hour')
+            features = features.join(act_features, how='left')
+    except Exception as e:
+        log.warning("Activity feature extraction failed: %s", e)
     return features.fillna(0).reset_index()
 
 # ── Model ──────────────────────────────────────────────────────────────────────
@@ -247,6 +276,9 @@ async def run(days_history):
         if df.empty: log.warning("No data returned"); return
         set_progress("building_baselines", len(stat_ids), len(stat_ids), len(df), 0, 0)
         anomaly_breakdown.build_entity_baselines(df)
+        activity_engine.build_activity_baseline(
+            activity_engine.extract_activity_features(df)
+        )
         features = build_features(df)
         del df
         set_progress("training", len(stat_ids), len(stat_ids), len(features), 0, 0)
@@ -262,8 +294,9 @@ async def run(days_history):
         state['data_from'] = full_from
         log.info(f"Discovery: {full_from} → {now_iso} ({training_days}d)")
 
-    # Per-entity scoring
+    # Per-entity and activity scoring
     entity_anomalies = anomaly_breakdown.score_entities()
+    activity_summary = activity_engine.get_activity_summary()
     top_anomaly = entity_anomalies[0]['description'] if entity_anomalies else None
 
     state.update({'last_run':now_iso,'data_to':now_iso,'training_days':training_days,
@@ -275,9 +308,14 @@ async def run(days_history):
 
     is_anomalous = anomaly_score > THRESHOLD
     log.info(f"Score: {anomaly_score}/100 ({'⚠ ANOMALY' if is_anomalous else '✓ normal'})")
-    if is_anomalous and top_anomaly:
+    if is_anomalous:
+        msg_parts = [f"Score: {anomaly_score}/100"]
+        if top_anomaly:
+            msg_parts.append(top_anomaly)
+        if activity_summary.get("highlights"):
+            msg_parts.append(activity_summary["highlights"][0])
         send_notification("🧠 Habitus — Unusual Activity",
-            f"Score: {anomaly_score}/100\n{top_anomaly}")
+            "\n".join(msg_parts))
 
     publish("sensor.habitus_anomaly_score", anomaly_score, {
         "friendly_name":"Habitus Anomaly Score","unit_of_measurement":"",

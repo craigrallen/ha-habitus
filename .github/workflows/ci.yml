@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Install dev deps
+        run: pip install ruff black mypy
+      - name: Ruff lint
+        run: ruff check habitus/habitus/
+      - name: Black format check
+        run: black --check habitus/habitus/
+      - name: MyPy type check
+        run: mypy habitus/habitus/ --ignore-missing-imports
+
+  prettier:
+    name: Prettier (web assets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - run: npx prettier --check "docs/**/*.{md,json}" "*.{json,md}" || true
+        # Non-blocking for now — will enforce once docs are formatted
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          pip install -e ".[dev]"
+      - name: Run tests
+        run: pytest
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        if: matrix.python-version == '3.11'
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./coverage.xml
+          flags: unittests
+          fail_ci_if_error: false
+
+  build:
+    name: Docker build (aarch64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build add-on image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./habitus
+          file: ./habitus/Dockerfile
+          platforms: linux/arm64
+          push: false
+          build-args: |
+            BUILD_FROM=ghcr.io/hassio-addons/debian-base:9.1.0
+            BUILD_VERSION=test
+            BUILD_ARCH=aarch64
