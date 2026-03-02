@@ -935,29 +935,37 @@ setInterval(load, 30000);
 </body>
 </html>"""
 
-@app.route('/'); @app.route('/ingress'); @app.route('/ingress/')
+@app.route('/')
+@app.route('/ingress')
+@app.route('/ingress/')
 def index():
     schedule   = os.environ.get("HABITUS_SCHEDULE",   "overnight")
     train_time = os.environ.get("HABITUS_TRAIN_TIME", "02:00")
     page = PAGE.replace("'{{ schedule }}'",   f"'{schedule}'")               .replace("'{{ train_time }}'", f"'{train_time}'")
     return render_template_string(page)
 
-@app.route('/api/state'); @app.route('/ingress/api/state')
+@app.route('/api/state')
+@app.route('/ingress/api/state')
 def api_state(): return jsonify(_read(STATE_PATH) or {})
 
-@app.route('/api/baseline'); @app.route('/ingress/api/baseline')
+@app.route('/api/baseline')
+@app.route('/ingress/api/baseline')
 def api_baseline(): return jsonify(_read(BASELINE_PATH) or {})
 
-@app.route('/api/progress'); @app.route('/ingress/api/progress')
+@app.route('/api/progress')
+@app.route('/ingress/api/progress')
 def api_progress(): return jsonify(_read(PROGRESS_PATH) or {})
 
-@app.route('/api/patterns'); @app.route('/ingress/api/patterns')
+@app.route('/api/patterns')
+@app.route('/ingress/api/patterns')
 def api_patterns(): return jsonify(_read(PATTERNS_PATH) or {})
 
-@app.route('/api/suggestions'); @app.route('/ingress/api/suggestions')
+@app.route('/api/suggestions')
+@app.route('/ingress/api/suggestions')
 def api_suggestions(): return jsonify(_read(SUGGESTIONS_PATH) or [])
 
-@app.route('/api/anomalies'); @app.route('/ingress/api/anomalies')
+@app.route('/api/anomalies')
+@app.route('/ingress/api/anomalies')
 def api_anomalies(): return jsonify(_read(ANOMALIES_PATH) or {})
 
 @app.route('/api/rescan', methods=['POST']); @app.route('/ingress/api/rescan', methods=['POST'])
