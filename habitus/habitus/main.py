@@ -542,8 +542,9 @@ async def run(days_history: int, mode: str = "full") -> None:
             entity_count = len(stat_ids)
     else:
         # First run — all history
-        full_from = "2000-01-01T00:00:00+00:00"
-        log.info(f"First run: all history from {full_from}")
+        cap = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days_history)
+        full_from = cap.strftime("%Y-%m-%dT%H:00:00+00:00")
+        log.info(f"First run: fetching last {days_history} days from {full_from}")
         set_progress("fetching", 0, len(stat_ids), 0, 0, 0)
         df = await fetch_stats(stat_ids, full_from, now_iso)
         if df.empty:
