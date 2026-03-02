@@ -1,0 +1,19 @@
+name: "Habitus"
+description: "Behavioral intelligence — learns patterns from recorder DB, detects anomalies, publishes sensors."
+version: "0.1.0"
+slug: "habitus"
+init: false
+arch:
+  - aarch64
+  - amd64
+  - armv7
+homeassistant_api: true
+map:
+  - homeassistant_config:ro
+  - data:rw
+options:
+  scan_interval_hours: 6
+  days_history: 365
+schema:
+  scan_interval_hours: int
+  days_history: int
