@@ -6,6 +6,8 @@ import os
 import yaml as _yaml
 from flask import Flask, jsonify, render_template_string, request
 
+from habitus import trainer as _trainer
+
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 STATE_PATH = os.path.join(DATA_DIR, "run_state.json")
 BASELINE_PATH = os.path.join(DATA_DIR, "baseline.json")
@@ -233,6 +235,12 @@ tr:hover td { background: var(--bg2); }
 
 /* ── Bar ── */
 .bar-wrap { background: var(--border); border-radius: 3px; height: 4px; }
+.train-banner { display:none; position:fixed; bottom:0; left:0; right:0; background:var(--card2);
+  border-top:1px solid var(--border2); padding:10px 18px; font-size:.8rem; color:var(--text2);
+  z-index:999; display:flex; align-items:center; gap:10px; }
+.train-banner .spin { width:14px;height:14px;border:2px solid var(--border2);
+  border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0; }
+#train-banner { display:none; }
 .bar { height: 4px; border-radius: 3px; background: var(--accent); transition: width .5s cubic-bezier(.4,0,.2,1); }
 .bar.green { background: var(--green); }
 .bar.amber { background: var(--amber); }
@@ -944,6 +952,11 @@ async function doRescan(){
 load();
 setInterval(load, 30000);
 </script>
+  <div id="train-banner" class="train-banner">
+    <div class="spin"></div>
+    <span id="train-banner-text">Training in background…</span>
+    <span id="train-banner-pct" style="margin-left:auto;color:var(--accent);font-weight:600"></span>
+  </div>
 </body>
 </html>"""
 
@@ -1003,11 +1016,17 @@ def api_rescan():
         for p in [MODEL_PATH, STATE_PATH, BASELINE_PATH, PATTERNS_PATH, SUGGESTIONS_PATH]:
             if os.path.exists(p):
                 os.remove(p)
-        with open(RESCAN_FLAG, "w") as _rf:
-            _rf.write("1")
-        return jsonify({"ok": True})
+        days = int(os.environ.get("HABITUS_DAYS", "3650"))
+        started = _trainer.start(days=days, mode="full")
+        return jsonify({"ok": True, "started": started, "already_running": not started})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/training_status")
+@app.route("/ingress/api/training_status")
+def api_training_status():
+    return jsonify({"running": _trainer.is_running()})
 
 
 @app.route("/api/add_automation", methods=["POST"])
