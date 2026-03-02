@@ -487,15 +487,19 @@ async def run(days_history: int, mode: str = "full") -> None:
                 log.warning("No data")
                 return
             set_progress("building_baselines", len(stat_ids), len(stat_ids), len(df_full), 0, 0)
+            log.info("Building entity baselines...")
             anomaly_breakdown.build_entity_baselines(df_full)
             features = build_features(df_full)
             del df_full
             set_progress("training", len(stat_ids), len(stat_ids), len(features), 0, 0)
+            log.info(f"Training IsolationForest on {len(features):,} rows...")
             model, scaler = train_model(features)
             save_artifacts(model, scaler, features)
             set_progress("seasonal_training", len(stat_ids), len(stat_ids), len(features), 0, 0)
+            log.info("Training seasonal models...")
             seasonal.train_seasonal_models(features)
             set_progress("pattern_analysis", len(stat_ids), len(stat_ids), len(features), 0, 0)
+            log.info("Discovering patterns...")
             pattern_engine.run(features, stat_ids)
             anomaly_score = score_current(features)
             training_days = round(
@@ -512,16 +516,20 @@ async def run(days_history: int, mode: str = "full") -> None:
             log.warning("No data returned")
             return
         set_progress("building_baselines", len(stat_ids), len(stat_ids), len(df), 0, 0)
+        log.info("Building entity baselines...")
         anomaly_breakdown.build_entity_baselines(df)
         activity_engine.build_activity_baseline(activity_engine.extract_activity_features(df))
         features = build_features(df)
         del df
         set_progress("training", len(stat_ids), len(stat_ids), len(features), 0, 0)
+        log.info(f"Training IsolationForest on {len(features):,} rows...")
         model, scaler = train_model(features)
         save_artifacts(model, scaler, features)
         set_progress("seasonal_training", len(stat_ids), len(stat_ids), len(features), 0, 0)
+        log.info("Training seasonal models...")
         seasonal.train_seasonal_models(features)
         set_progress("pattern_analysis", len(stat_ids), len(stat_ids), len(features), 0, 0)
+        log.info("Discovering patterns...")
         pattern_engine.run(features, stat_ids)
         anomaly_score = score_current(features)
         training_days = round(

@@ -736,8 +736,12 @@ async function load() {
     const d=progress.done||0, t=progress.total||'?';
     const desc = {
       fetching: `${d} of ${t} sensors queried — ${rows} data points loaded so far`,
-      building_baselines: `Computing per-entity baselines from ${rows} hourly data points`,
-      training: `Fitting Isolation Forest on ${rows} hourly snapshots`,
+      fetching:           `Fetching history — ${done}/${total} sensors, ${rows.toLocaleString()} rows`,
+      building_baselines: `Building baselines — ${rows.toLocaleString()} data points (this takes 1–2 min)`,
+      training:           `Training model on ${rows.toLocaleString()} snapshots — CPU-intensive, please wait…`,
+      seasonal_training:  `Training seasonal models (spring/summer/autumn/winter)…`,
+      pattern_analysis:   `Discovering daily & weekly patterns…`,
+      scoring:            `Scoring current state…`,
       seasonal_training: 'Building separate models for winter, spring, summer and autumn',
       pattern_analysis: 'Discovering routines and generating automation suggestions'
     }[phase] || phase;
