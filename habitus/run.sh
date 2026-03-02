@@ -24,10 +24,21 @@ export HABITUS_TRAIN_TIME="${TRAIN_TIME}"
 RESCAN_FLAG="/data/.rescan_requested"
 STATE_FILE="/data/run_state.json"
 
-bashio::log.info "Habitus v2.5.0 | Schedule: ${SCHEDULE} | Train: ${TRAIN_TIME} | Scan: ${SCAN}h"
+bashio::log.info "Habitus v2.7.0 | Schedule: ${SCHEDULE} | Train: ${TRAIN_TIME} | Scan: ${SCAN}h"
 
-# Start web server
-cd /app && python3 habitus/webserver.py &
+# Start web server inline — PYTHONPATH=/app so 'import habitus.web' resolves
+cd /app && python3 -u -c "
+import sys, os, traceback
+sys.path.insert(0, '/app')
+try:
+    from habitus.web import start_web
+    port = int(os.environ.get('INGRESS_PORT', '8099'))
+    print(f'[web] Starting on :{port}', flush=True)
+    start_web(port)
+except Exception as e:
+    print(f'[web] FAILED: {e}', flush=True)
+    traceback.print_exc(file=sys.stdout)
+" 2>&1 &
 WEB_PID=$!
 bashio::log.info "Web server PID: ${WEB_PID}"
 
@@ -44,35 +55,31 @@ is_train_time() {
     [ "$diff" -lt 16 ]
 }
 
-# Force full retrain if state file says data_to is "now" (stale from previous bad runs)
-if [ -f "$STATE_FILE" ]; then
-    DATA_TO=$(python3 -c "import json; d=json.load(open('$STATE_FILE')); print(d.get('data_to',''))" 2>/dev/null)
-    bashio::log.info "Existing state: data_to=${DATA_TO}"
-fi
-
 FIRST_RUN=true
 cd /app
 
 while true; do
-    # Check web server is still alive
     if ! kill -0 $WEB_PID 2>/dev/null; then
         bashio::log.warning "Web server died — restarting"
-        python3 habitus/webserver.py &
+        python3 -u -c "
+import sys, os; sys.path.insert(0, '/app')
+from habitus.web import start_web
+start_web(int(os.environ.get('INGRESS_PORT','8099')))
+" 2>&1 &
         WEB_PID=$!
     fi
 
     if [ -f "$RESCAN_FLAG" ]; then
-        bashio::log.info "Full rescan requested — wiping state"
+        bashio::log.info "Full rescan — wiping state"
         rm -f "$RESCAN_FLAG" "$STATE_FILE" /data/model*.pkl /data/scaler*.pkl
         FIRST_RUN=true
     fi
 
     if [ "$FIRST_RUN" = "true" ]; then
         FIRST_RUN=false
-        bashio::log.info "Running full training"
+        bashio::log.info "Full training run"
         python3 -u -m habitus.main --days "$DAYS" --mode full \
             || bashio::log.warning "Full training failed"
-
     elif [ "$SCHEDULE" = "overnight" ]; then
         if is_train_time; then
             bashio::log.info "Overnight training window"
