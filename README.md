@@ -1,4 +1,8 @@
-# 🧠 Habitus
+<p align="center">
+  <img src="logo.png" width="120" alt="Habitus">
+</p>
+
+# Habitus
 
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow?style=flat-square&logo=buy-me-a-coffee)](https://buymeacoffee.com/craigrallen)
 [![HA Version](https://img.shields.io/badge/Home%20Assistant-2024.1%2B-blue?style=flat-square&logo=home-assistant)](https://www.home-assistant.io)
