@@ -968,7 +968,8 @@ def api_suggestions(): return jsonify(_read(SUGGESTIONS_PATH) or [])
 @app.route('/ingress/api/anomalies')
 def api_anomalies(): return jsonify(_read(ANOMALIES_PATH) or {})
 
-@app.route('/api/rescan', methods=['POST']); @app.route('/ingress/api/rescan', methods=['POST'])
+@app.route('/api/rescan', methods=['POST'])
+@app.route('/ingress/api/rescan', methods=['POST'])
 def api_rescan():
     try:
         for p in [MODEL_PATH, STATE_PATH, BASELINE_PATH, PATTERNS_PATH, SUGGESTIONS_PATH]:
@@ -978,7 +979,8 @@ def api_rescan():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
-@app.route('/api/add_automation', methods=['POST']); @app.route('/ingress/api/add_automation', methods=['POST'])
+@app.route('/api/add_automation', methods=['POST'])
+@app.route('/ingress/api/add_automation', methods=['POST'])
 def api_add_automation():
     import requests as req
     data = request.get_json()
