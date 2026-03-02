@@ -14,6 +14,7 @@ export HA_WS="ws://supervisor/core/api/websocket"
 export SUPERVISOR_TOKEN="${SUPERVISOR_TOKEN}"
 export DATA_DIR="/data"
 export PYTHONPATH="/app"
+export INGRESS_PORT="${PORT}"
 export HABITUS_NOTIFY_SERVICE="${NOTIFY}"
 export HABITUS_NOTIFY_ON="${NOTIFY_ON}"
 export HABITUS_ANOMALY_THRESHOLD="${THRESHOLD}"
@@ -21,43 +22,56 @@ export HABITUS_SCHEDULE="${SCHEDULE}"
 export HABITUS_TRAIN_TIME="${TRAIN_TIME}"
 
 RESCAN_FLAG="/data/.rescan_requested"
+STATE_FILE="/data/run_state.json"
 
-bashio::log.info "Habitus v2.3.0 | Schedule: ${SCHEDULE} | Train: ${TRAIN_TIME} | Scan: ${SCAN}h"
+bashio::log.info "Habitus v2.5.0 | Schedule: ${SCHEDULE} | Train: ${TRAIN_TIME} | Scan: ${SCAN}h"
 
-# Web server — imports are habitus.web (relative to /app)
-cd /app && python3 -c "
-from habitus.web import start_web
-start_web(int('${PORT}'))
-" &
+# Start web server
+cd /app && python3 webserver.py &
+WEB_PID=$!
+bashio::log.info "Web server PID: ${WEB_PID}"
 
 bashio::log.info "Waiting 30s for HA..."
 sleep 30
 
 is_train_time() {
     local th tm nh nm diff
-    th=$(echo "${TRAIN_TIME}" | cut -d: -f1 | sed 's/^0*/0/;s/^0\([0-9]\)/\1/')
-    tm=$(echo "${TRAIN_TIME}" | cut -d: -f2 | sed 's/^0*/0/;s/^0\([0-9]\)/\1/')
+    th=$(echo "${TRAIN_TIME}" | cut -d: -f1 | sed 's/^0*//' | grep . || echo 0)
+    tm=$(echo "${TRAIN_TIME}" | cut -d: -f2 | sed 's/^0*//' | grep . || echo 0)
     nh=$(date +%-H); nm=$(date +%-M)
     diff=$(( (nh * 60 + nm) - (th * 60 + tm) ))
     [ "$diff" -lt 0 ] && diff=$(( -diff ))
     [ "$diff" -lt 16 ]
 }
 
+# Force full retrain if state file says data_to is "now" (stale from previous bad runs)
+if [ -f "$STATE_FILE" ]; then
+    DATA_TO=$(python3 -c "import json; d=json.load(open('$STATE_FILE')); print(d.get('data_to',''))" 2>/dev/null)
+    bashio::log.info "Existing state: data_to=${DATA_TO}"
+fi
+
 FIRST_RUN=true
 cd /app
 
 while true; do
-    if [ -f "$RESCAN_FLAG" ]; then
-        bashio::log.info "Full rescan requested"
-        rm -f "$RESCAN_FLAG"
-        python3 -u -m habitus.main --days "$DAYS" --mode full \
-            || bashio::log.warning "Rescan failed"
+    # Check web server is still alive
+    if ! kill -0 $WEB_PID 2>/dev/null; then
+        bashio::log.warning "Web server died — restarting"
+        python3 webserver.py &
+        WEB_PID=$!
+    fi
 
-    elif [ "$FIRST_RUN" = "true" ]; then
+    if [ -f "$RESCAN_FLAG" ]; then
+        bashio::log.info "Full rescan requested — wiping state"
+        rm -f "$RESCAN_FLAG" "$STATE_FILE" /data/model*.pkl /data/scaler*.pkl
+        FIRST_RUN=true
+    fi
+
+    if [ "$FIRST_RUN" = "true" ]; then
         FIRST_RUN=false
-        bashio::log.info "First run — full training"
+        bashio::log.info "Running full training"
         python3 -u -m habitus.main --days "$DAYS" --mode full \
-            || bashio::log.warning "First run failed"
+            || bashio::log.warning "Full training failed"
 
     elif [ "$SCHEDULE" = "overnight" ]; then
         if is_train_time; then
