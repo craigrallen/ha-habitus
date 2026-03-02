@@ -448,7 +448,7 @@ pre.raw {
 
 <div class="header">
   <div class="header-left">
-    <h1>Habitus <span class="version">v0.12</span></h1>
+    <h1>Habitus <span class="version">v2.2</span></h1>
   </div>
   <div class="header-right">
     <div class="status-dot" id="hdr-dot"></div>
