@@ -312,7 +312,14 @@ def send_notification(title, message):
         r = requests.post(
             f"{HA_URL}/api/services/{service}",
             headers=headers,
-            json={"title": title, "message": message},
+            json={
+                "title": title,
+                "message": message,
+                "data": {
+                    "url": "/hassio/ingress/57582523_habitus",
+                    "clickAction": "/hassio/ingress/57582523_habitus",
+                },
+            },
             timeout=5,
         )
         log.info(f"Notification sent via {NOTIFY_SVC}: {r.status_code}")
