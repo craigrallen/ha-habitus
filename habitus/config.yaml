@@ -1,6 +1,6 @@
 name: "Habitus"
 description: "Behavioral intelligence — learns patterns from HA, detects anomalies, proposes automations."
-version: "2.22.0"
+version: "2.23.0"
 slug: "habitus"
 init: false
 arch:
@@ -17,7 +17,7 @@ map:
   - data:rw
 options:
   scan_interval_hours: 6
-  days_history: 3650
+  days_history: 365
   notify_service: "notify.notify"
   notify_on_anomaly: true
   anomaly_threshold: 70
@@ -25,7 +25,7 @@ options:
   overnight_train_time: "02:00"
 schema:
   scan_interval_hours: int
-  days_history: int
+  days_history: int?
   notify_service: str
   notify_on_anomaly: bool
   anomaly_threshold: int

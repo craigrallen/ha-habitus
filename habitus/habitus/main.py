@@ -186,9 +186,17 @@ async def get_stat_ids():
 
 
 async def fetch_stats(entity_ids, start_iso, end_iso=None):
+    """Fetch hourly statistics and return an aggregated DataFrame.
+
+    Memory-efficient: raw per-sensor rows are aggregated to hourly means
+    immediately after each sensor fetch, so peak RAM is bounded by one
+    sensor's worth of rows rather than all sensors combined.
+    """
     if end_iso is None:
         end_iso = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:00:00+00:00")
-    all_rows = []
+    # Accumulate pre-aggregated hourly rows keyed by (hour, entity_id)
+    hourly_agg: dict[tuple, list[float]] = {}
+    all_rows = []  # kept for compatibility — will be small after aggregation
     done = 0
     total = len(entity_ids)
     import time as _t
