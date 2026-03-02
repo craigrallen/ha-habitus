@@ -225,10 +225,62 @@ def publish(entity_id, state, attributes=None):
     except Exception as e: log.error(f"Publish {entity_id}: {e}")
 
 # ── Main ──────────────────────────────────────────────────────────────────────
-async def run(days_history):
+async def run(days_history: int, mode: str = "full") -> None:
+    """Main Habitus run loop — fetch, train (if needed), score, publish.
+
+    In ``overnight`` schedule mode, daytime invocations pass ``mode='score'``
+    to skip the expensive training step and only re-score the current hour
+    using the existing model.  Training is deferred to the overnight window
+    (default 02:00) when the home is typically idle.
+
+    In ``continuous`` mode every run does a full retrain.
+
+    Args:
+        days_history: Maximum history window.  HA returns whatever it has.
+        mode: ``"full"`` to fetch + train + score, ``"score"`` to score only.
+    """
     os.makedirs(DATA_DIR, exist_ok=True)
     now_iso = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:00:00+00:00')
     state = load_state()
+
+    # ── Score-only mode ────────────────────────────────────────────────────────
+    # Used in overnight schedule during daytime hours.
+    # Re-scores current state using the existing trained model — fast (<5s).
+    # Skips all data fetching and retraining.
+    if mode == "score":
+        if not os.path.exists(MODEL_PATH):
+            log.info("No model yet — falling back to full run")
+            mode = "full"
+        else:
+            log.info("Score-only mode — using existing model")
+            now = datetime.datetime.now(datetime.timezone.utc).replace(
+                minute=0, second=0, microsecond=0
+            )
+            X = np.array([[
+                now.hour, now.weekday(), int(now.weekday() >= 5),
+                now.month, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            ]])
+            anomaly_score, _ = seasonal.score_with_best_model(X)
+            entity_anomalies = anomaly_breakdown.score_entities()
+            activity_summary = activity_engine.get_activity_summary()
+            training_days = state.get("training_days", 0)
+            entity_count = state.get("entity_count", 0)
+            top_anomaly = entity_anomalies[0]["description"] if entity_anomalies else None
+            state.update({
+                "last_score": now_iso,
+                "anomaly_score": anomaly_score,
+                "mode": "score",
+            })
+            save_state(state)
+            is_anomalous = anomaly_score > THRESHOLD
+            log.info("Score-only: %d/100 (%s)", anomaly_score, "⚠ ANOMALY" if is_anomalous else "✓ normal")
+            if is_anomalous:
+                msg_parts = [f"Score: {anomaly_score}/100"]
+                if top_anomaly: msg_parts.append(top_anomaly)
+                send_notification("🧠 Habitus — Unusual Activity", "\n".join(msg_parts))
+            _publish_sensors(anomaly_score, is_anomalous, training_days, entity_count)
+            return
+
     stat_ids = await get_stat_ids()
     if not stat_ids: log.error("No behavioral sensors found"); return
 
@@ -317,19 +369,54 @@ async def run(days_history):
         send_notification("🧠 Habitus — Unusual Activity",
             "\n".join(msg_parts))
 
-    publish("sensor.habitus_anomaly_score", anomaly_score, {
-        "friendly_name":"Habitus Anomaly Score","unit_of_measurement":"",
-        "icon":"mdi:brain","state_class":"measurement"})
-    publish("binary_sensor.habitus_anomaly_detected","on" if is_anomalous else "off",{
-        "friendly_name":"Habitus Anomaly","device_class":"problem"})
-    publish("sensor.habitus_training_days", training_days, {
-        "friendly_name":"Habitus Training Days","unit_of_measurement":"days","icon":"mdi:calendar-range"})
-    publish("sensor.habitus_entity_count", entity_count, {
-        "friendly_name":"Habitus Tracked Sensors","unit_of_measurement":"sensors","icon":"mdi:chip"})
+    _publish_sensors(anomaly_score, is_anomalous, training_days, entity_count)
     log.info("Done.")
 
+
+def _publish_sensors(
+    anomaly_score: int,
+    is_anomalous: bool,
+    training_days: int,
+    entity_count: int,
+) -> None:
+    """Publish the 4 Habitus sensor entities to HA.
+
+    Called from both full and score-only run modes.
+
+    Args:
+        anomaly_score: Current 0–100 anomaly score.
+        is_anomalous: Whether score exceeds the configured threshold.
+        training_days: Days of history the model was trained on.
+        entity_count: Number of behavioral sensors being tracked.
+    """
+    publish("sensor.habitus_anomaly_score", anomaly_score, {
+        "friendly_name": "Habitus Anomaly Score", "unit_of_measurement": "",
+        "icon": "mdi:brain", "state_class": "measurement"})
+    publish("binary_sensor.habitus_anomaly_detected", "on" if is_anomalous else "off", {
+        "friendly_name": "Habitus Anomaly", "device_class": "problem"})
+    publish("sensor.habitus_training_days", training_days, {
+        "friendly_name": "Habitus Training Days",
+        "unit_of_measurement": "days", "icon": "mdi:calendar-range"})
+    publish("sensor.habitus_entity_count", entity_count, {
+        "friendly_name": "Habitus Tracked Sensors",
+        "unit_of_measurement": "sensors", "icon": "mdi:chip"})
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--days', type=int, default=365)
+    parser = argparse.ArgumentParser(
+        description="Habitus ML engine — trains behavioral model and scores current state."
+    )
+    parser.add_argument(
+        "--days", type=int, default=365,
+        help="Maximum history window in days (HA limits to what it has)"
+    )
+    parser.add_argument(
+        "--mode", choices=["full", "score"], default="full",
+        help=(
+            "full: fetch new data, retrain model, score, publish. "
+            "score: skip training, only score current state and publish. "
+            "In overnight schedule, daytime runs use 'score' to avoid "
+            "resource-intensive training during active hours."
+        )
+    )
     args = parser.parse_args()
-    asyncio.run(run(days_history=args.days))
+    asyncio.run(run(days_history=args.days, mode=args.mode))

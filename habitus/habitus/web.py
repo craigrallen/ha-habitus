@@ -871,6 +871,42 @@ async function load() {
 
   // Settings
   document.getElementById('raw-state').textContent = JSON.stringify(state,null,2);
+
+  // Schedule info
+  const schedule = '{{ schedule }}' || state.schedule || 'overnight';
+  const trainTime = '{{ train_time }}' || state.train_time || '02:00';
+  const lastScore = state.last_score ? new Date(state.last_score).toLocaleString() : 'never';
+  const lastTrain = state.last_run  ? new Date(state.last_run).toLocaleString()   : 'never';
+  const modeLabels = {
+    overnight: `<span class="badge b-info">🌙 Overnight</span>`,
+    continuous: `<span class="badge b-warn">🔄 Continuous</span>`,
+  };
+  document.getElementById('schedule-info').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+      <div class="pat-item">
+        <div class="pi-label">Mode</div>
+        <div style="margin-top:4px">${modeLabels[schedule] || schedule}</div>
+      </div>
+      <div class="pat-item">
+        <div class="pi-label">Train Time</div>
+        <div class="pi-val">${schedule === 'overnight' ? trainTime : 'every run'}</div>
+      </div>
+      <div class="pat-item">
+        <div class="pi-label">Last Full Train</div>
+        <div style="font-size:.78rem;color:var(--text2);margin-top:2px">${lastTrain}</div>
+      </div>
+      <div class="pat-item">
+        <div class="pi-label">Last Score</div>
+        <div style="font-size:.78rem;color:var(--text2);margin-top:2px">${lastScore}</div>
+      </div>
+    </div>
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:.8rem;color:var(--text2);line-height:1.6">
+      ${schedule === 'overnight'
+        ? `🌙 <strong style="color:var(--text)">Overnight mode</strong> — model retrains once per day at <strong>${trainTime}</strong> when your home is idle. During the day, Habitus scores every ${state.scan_interval_hours || 6}h using the existing model (fast, no resource usage).`
+        : `🔄 <strong style="color:var(--text)">Continuous mode</strong> — model retrains on every scan cycle. More responsive to pattern changes but uses more CPU. Not recommended for low-powered devices.`
+      }
+      <br><br>Change this in <strong>Settings → Add-on → Configuration</strong> in Home Assistant.
+    </div>`;
 }
 
 function doRefresh(){load();toast('Refreshed ✓');}
@@ -900,7 +936,11 @@ setInterval(load, 30000);
 </html>"""
 
 @app.route('/'); @app.route('/ingress'); @app.route('/ingress/')
-def index(): return render_template_string(PAGE)
+def index():
+    schedule   = os.environ.get("HABITUS_SCHEDULE",   "overnight")
+    train_time = os.environ.get("HABITUS_TRAIN_TIME", "02:00")
+    page = PAGE.replace("'{{ schedule }}'",   f"'{schedule}'")               .replace("'{{ train_time }}'", f"'{train_time}'")
+    return render_template_string(page)
 
 @app.route('/api/state'); @app.route('/ingress/api/state')
 def api_state(): return jsonify(_read(STATE_PATH) or {})
