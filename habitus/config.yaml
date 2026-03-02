@@ -1,6 +1,6 @@
 name: "Habitus"
 description: "Behavioral intelligence — learns patterns from recorder DB, detects anomalies, publishes sensors."
-version: "0.3.0"
+version: "0.4.0"
 slug: "habitus"
 init: false
 arch:
