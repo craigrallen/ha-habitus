@@ -1,6 +1,6 @@
 name: "Habitus"
-description: "Behavioral intelligence — learns patterns from recorder DB, detects anomalies, publishes sensors."
-version: "0.6.0"
+description: "Behavioral intelligence — learns patterns from HA, detects anomalies, publishes sensors."
+version: "0.7.0"
 slug: "habitus"
 init: false
 arch:
@@ -8,6 +8,10 @@ arch:
   - amd64
   - armv7
 homeassistant_api: true
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:brain
+panel_title: Habitus
 map:
   - homeassistant_config:ro
   - data:rw
