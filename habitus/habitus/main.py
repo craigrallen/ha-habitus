@@ -495,6 +495,19 @@ async def run(days_history: int, mode: str = "full") -> None:
             log.info(f"Training IsolationForest on {len(features):,} rows...")
             model, scaler = train_model(features)
             save_artifacts(model, scaler, features)
+            # Partial score after training — baseline + initial anomaly data visible
+            _partial_score = score_current(features)
+            state.update(
+                {
+                    "phase": "model_ready",
+                    "anomaly_score": _partial_score,
+                    "training_days": round(
+                        (features["hour"].max() - features["hour"].min()).total_seconds() / 86400
+                    ),
+                }
+            )
+            save_state(state)
+            log.info(f"Model ready — preliminary score {_partial_score}/100")
             set_progress("seasonal_training", len(stat_ids), len(stat_ids), len(features), 0, 0)
             log.info("Training seasonal models...")
             seasonal.train_seasonal_models(features)
@@ -519,12 +532,27 @@ async def run(days_history: int, mode: str = "full") -> None:
         log.info("Building entity baselines...")
         anomaly_breakdown.build_entity_baselines(df)
         activity_engine.build_activity_baseline(activity_engine.extract_activity_features(df))
+        # Partial state write — unblocks UI baseline tab
+        state.update({"phase": "baselines_ready", "entity_count": len(stat_ids)})
+        save_state(state)
         features = build_features(df)
         del df
         set_progress("training", len(stat_ids), len(stat_ids), len(features), 0, 0)
         log.info(f"Training IsolationForest on {len(features):,} rows...")
         model, scaler = train_model(features)
         save_artifacts(model, scaler, features)
+        _partial_score = score_current(features)
+        state.update(
+            {
+                "phase": "model_ready",
+                "anomaly_score": _partial_score,
+                "training_days": round(
+                    (features["hour"].max() - features["hour"].min()).total_seconds() / 86400
+                ),
+            }
+        )
+        save_state(state)
+        log.info(f"Model ready — preliminary score {_partial_score}/100")
         set_progress("seasonal_training", len(stat_ids), len(stat_ids), len(features), 0, 0)
         log.info("Training seasonal models...")
         seasonal.train_seasonal_models(features)
