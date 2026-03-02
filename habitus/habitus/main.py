@@ -387,6 +387,13 @@ async def run(days_history: int, mode: str = "full") -> None:
     now_iso = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:00:00+00:00")
     state = load_state()
 
+    if mode == "full":
+        send_notification(
+            "🧠 Habitus — Training started",
+            "Fetching sensor history and retraining behavioral model. "
+            "The app stays usable — data appears progressively as each phase completes.",
+        )
+
     # ── Score-only mode ────────────────────────────────────────────────────────
     # Used in overnight schedule during daytime hours.
     # Re-scores current state using the existing trained model — fast (<5s).
