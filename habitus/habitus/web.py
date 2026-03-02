@@ -815,7 +815,7 @@ async function load() {
 
   // Baseline table
   const byH={};
-  for(const[k,v] of Object.entries(baseline)){const[h]=k.split('_');if(!byH[h]){byH[h]={sum:0,n:0,std:0}}byH[h].sum+=v.mean_power;byH[h].n++;byH[h].std=Math.max(byH[h].std,v.std_power)}
+  for(const[k,v] of Object.entries(baseline)){const h=parseInt(k.split('_')[0],10);if(!byH[h]){byH[h]={sum:0,n:0,std:0}}byH[h].sum+=v.mean_power;byH[h].n++;byH[h].std=Math.max(byH[h].std,v.std_power)}
   const mxP=Math.max(...Object.values(byH).map(v=>v.sum/v.n),1);
   const nowH=new Date().getHours();
   document.getElementById('bl-table').innerHTML=Array.from({length:24},(_,h)=>{
