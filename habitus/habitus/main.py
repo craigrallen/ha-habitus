@@ -119,10 +119,7 @@ def is_behavioral(eid: str) -> bool:
     # Skip known noise patterns
     if any(k in e for k in SKIP):
         return False
-    if any(k in e for k in SKIP_UNITS_IN_NAME):
-        return False
-
-    return True
+    return not any(k in e for k in SKIP_UNITS_IN_NAME)
 
 
 def load_state():
