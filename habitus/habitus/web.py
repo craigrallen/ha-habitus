@@ -1297,6 +1297,22 @@ def api_anomalies():
 
 @app.route("/api/rescan", methods=["POST"])
 @app.route("/ingress/api/rescan", methods=["POST"])
+@app.route("/api/full_train", methods=["POST"])
+@app.route("/ingress/api/full_train", methods=["POST"])
+def api_full_train():
+    """Trigger a full 365-day training run without progressive steps."""
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    from habitus.main import run
+    
+    def do_train():
+        asyncio.run(run(days_history=365, mode="full"))
+    
+    with ThreadPoolExecutor() as pool:
+        pool.submit(do_train)
+    return jsonify({"ok": True, "message": "Full 365d training started"})
+
+
 def api_rescan():
     try:
         import glob as _glob  # noqa: PLC0415
