@@ -504,7 +504,7 @@ pre.raw {
 <div class="header">
   <div class="header-left">
     <h1>Habitus <span class="version" id="hdr-version">v—</span></h1>
-    <div style="font-size:.78rem;color:var(--text3)">Built in Europe. Your data stays home.</div>
+    <div style="font-size:.78rem;color:var(--text3)">Built in Europe. Private by architecture.</div>
   </div>
   <div class="header-right">
     <button id="theme-toggle" onclick="toggleTheme()" title="Toggle theme" style="background:var(--card2);border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--text);cursor:pointer;font-size:1rem;margin-right:12px">🌙</button>
@@ -1160,7 +1160,7 @@ async function load() {
       <div class="pat-item"><div class="pi-label">Est. Sleep</div><div class="pi-val">${r.estimated_sleep_hour!=null?r.estimated_sleep_hour+':00':'—'}</div></div>
       <div class="pat-item"><div class="pi-label">Peak Hour</div><div class="pi-val">${r.peak_usage_hour}:00 · ${r.peak_usage_watts}W</div></div>
       <div class="pat-item"><div class="pi-label">Night Base</div><div class="pi-val">${fmtW(r.night_baseline_watts)}</div></div>
-    </div>` : '<div style="color:var(--text3);font-size:.82rem">No patterns yet — run Habitus first.</div>';
+    </div>` : '<div style="color:var(--text3);font-size:.82rem">No patterns yet — baseline first, then flow.</div>';
 
   // Top anomalies
   const ents = (anomalies.anomalies||[]).slice(0,5);
@@ -1391,7 +1391,7 @@ async function load() {
       </div>`;
     }).join('');
   } else {
-    document.getElementById('scenes-list').innerHTML = '<div style="color:var(--text3);padding:12px;font-size:.82rem">No implicit scenes detected yet. Habitus needs a few days of data to find patterns in how you use your home.</div>';
+    document.getElementById('scenes-list').innerHTML = '<div style="color:var(--text3);padding:12px;font-size:.82rem">No implicit scenes yet. Give it a few days — signal comes before noise drops.</div>';
   }
 
   // HA Automations
@@ -1421,7 +1421,7 @@ async function load() {
     }
     document.getElementById('ha-automations-list').innerHTML = haHtml;
   } else {
-    document.getElementById('ha-automations-list').innerHTML = '<div style="color:var(--text3);padding:12px">No automations loaded from HA. They\'ll appear after the next Habitus run.</div>';
+    document.getElementById('ha-automations-list').innerHTML = '<div style="color:var(--text3);padding:12px">No automations loaded yet. Next run should bring them through clean.</div>';
   }
 
   // Weekly

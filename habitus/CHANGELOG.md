@@ -641,3 +641,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Training notification now reports the actual selected history window
 - Saving history depth now updates runtime `HABITUS_DAYS`
 
+
+## [3.8.0] - 2026-03-03
+
+### Changed
+- Stealth tone pass in UI + README: subtler wordplay, less obvious references
+- Updated header strapline and empty-state copy for cleaner cadence
+
