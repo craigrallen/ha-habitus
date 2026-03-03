@@ -42,6 +42,75 @@ DAILY_DIGEST_HOUR = int(os.environ.get("HABITUS_DAILY_DIGEST_HOUR", "8"))
 # Minimum training days before anomaly scoring is trusted — assume normal until then
 MIN_SCORING_DAYS = int(os.environ.get("HABITUS_MIN_SCORING_DAYS", "7"))
 
+
+def contamination_for_days(days: int) -> float:
+    """Return the IsolationForest contamination parameter for the given training age.
+
+    Ramps from very conservative (0.005) during the early warmup phase to the
+    full 0.05 once the model has 90+ days of history.  Low contamination during
+    warmup avoids the excessive false-positive rate that occurs when the model
+    has seen very little historical behaviour.
+
+    Args:
+        days: Training age in days (0 = no history yet).
+
+    Returns:
+        Contamination fraction in the range 0.005–0.05.
+    """
+    if days < 7:
+        return 0.005
+    if days < 14:
+        return 0.01
+    if days < 30:
+        return 0.02
+    if days < 90:
+        return 0.04
+    return 0.05
+
+
+def contamination_tier_name(days: int) -> str:
+    """Return a stable string identifier for the contamination tier at a given age.
+
+    Tier names are stored in ``run_state.json`` so that a tier transition can be
+    detected on the next run and the model retrained with the new contamination.
+
+    Args:
+        days: Training age in days.
+
+    Returns:
+        One of ``"warmup"``, ``"early"``, ``"growing"``, ``"mature"``, or
+        ``"established"``.
+    """
+    if days < 7:
+        return "warmup"
+    if days < 14:
+        return "early"
+    if days < 30:
+        return "growing"
+    if days < 90:
+        return "mature"
+    return "established"
+
+
+def should_retrain_for_tier_change(state: dict, current_days: int) -> bool:
+    """Return True when the contamination tier has advanced and a retrain is needed.
+
+    Only triggers when a previous tier is on record — first runs always train
+    normally and store the initial tier without this check.
+
+    Args:
+        state: Current ``run_state.json`` contents.
+        current_days: Training age in days (computed from available history).
+
+    Returns:
+        True if the stored tier differs from the tier implied by ``current_days``.
+    """
+    old_tier = str(state.get("contamination_tier", ""))
+    if not old_tier:
+        return False
+    return old_tier != contamination_tier_name(current_days)
+
+
 MODEL_PATH = os.path.join(DATA_DIR, "model.pkl")
 SCALER_PATH = os.path.join(DATA_DIR, "scaler.pkl")
 SUGGESTIONS_PATH = os.path.join(DATA_DIR, "suggestions.json")
@@ -376,14 +445,37 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ── Model ──────────────────────────────────────────────────────────────────────
-def train_model(features):
+def train_model(features: pd.DataFrame, training_days: int = 0) -> tuple:
+    """Train an IsolationForest model with contamination scaled to training age.
+
+    Uses :func:`contamination_for_days` to select a conservative contamination
+    value during the early learning phase and ramps up to the steady-state value
+    once enough history has been accumulated.
+
+    Args:
+        features: Hourly feature matrix produced by :func:`build_features`.
+        training_days: Age of the training data in days.  Defaults to 0
+            (conservative warmup contamination) when not supplied.
+
+    Returns:
+        Tuple of ``(model, scaler)`` — a fitted IsolationForest and the
+        StandardScaler used to normalise the training data.
+    """
     from sklearn.ensemble import IsolationForest
     from sklearn.preprocessing import StandardScaler
 
     X = features[FEATURE_COLS].values
     scaler = StandardScaler()
     Xs = scaler.fit_transform(X)
-    model = IsolationForest(contamination=0.05, random_state=42, n_jobs=-1)
+    contamination = contamination_for_days(training_days)
+    tier = contamination_tier_name(training_days)
+    log.info(
+        "Training IsolationForest: contamination=%.4f tier=%s days=%d",
+        contamination,
+        tier,
+        training_days,
+    )
+    model = IsolationForest(contamination=contamination, random_state=42, n_jobs=-1)
     model.fit(Xs)
     days = round((features["hour"].max() - features["hour"].min()).total_seconds() / 86400)
     log.info(f"Main model trained on {len(X):,} snapshots ({days}d)")
@@ -769,6 +861,17 @@ async def run(days_history: int, mode: str = "full") -> None:
     now_iso = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:00:00+00:00")
     state = load_state()
 
+    # Adaptive contamination — force retrain when training age crosses a tier boundary
+    _stored_days = state.get("training_days", 0)
+    if should_retrain_for_tier_change(state, _stored_days):
+        log.info(
+            "Contamination tier advanced: %s → %s (%d days) — forcing full retrain",
+            state.get("contamination_tier"),
+            contamination_tier_name(_stored_days),
+            _stored_days,
+        )
+        mode = "full"
+
     if mode == "full":
         send_notification(
             "🧠 Habitus — Training started",
@@ -953,7 +1056,10 @@ async def run(days_history: int, mode: str = "full") -> None:
             del df
             set_progress("training", len(stat_ids), len(stat_ids), len(features), 0, 0)
             log.info(f"Training IsolationForest on {len(features):,} rows...")
-            model, scaler = train_model(features)
+            _train_days = round(
+                (features["hour"].max() - features["hour"].min()).total_seconds() / 86400
+            )
+            model, scaler = train_model(features, _train_days)
             save_artifacts(model, scaler, features)
             # Partial score after training — baseline + initial anomaly data visible
             _partial_score = score_current(features)
@@ -962,11 +1068,10 @@ async def run(days_history: int, mode: str = "full") -> None:
                 {
                     "phase": "warming_up" if _warming_up else "model_ready",
                     "anomaly_score": _partial_score,
-                    "training_days": round(
-                        (features["hour"].max() - features["hour"].min()).total_seconds() / 86400
-                    ),
+                    "training_days": _train_days,
                     "warming_up": training_days < MIN_SCORING_DAYS,
                     "warmup_days_remaining": max(0, MIN_SCORING_DAYS - training_days),
+                    "contamination_tier": contamination_tier_name(_train_days),
                 }
             )
             save_state(state)
@@ -1041,16 +1146,18 @@ async def run(days_history: int, mode: str = "full") -> None:
         del df
         set_progress("training", len(stat_ids), len(stat_ids), len(features), 0, 0)
         log.info(f"Training IsolationForest on {len(features):,} rows...")
-        model, scaler = train_model(features)
+        _train_days = round(
+            (features["hour"].max() - features["hour"].min()).total_seconds() / 86400
+        )
+        model, scaler = train_model(features, _train_days)
         save_artifacts(model, scaler, features)
         _partial_score = score_current(features)
         state.update(
             {
                 "phase": "model_ready",
                 "anomaly_score": _partial_score,
-                "training_days": round(
-                    (features["hour"].max() - features["hour"].min()).total_seconds() / 86400
-                ),
+                "training_days": _train_days,
+                "contamination_tier": contamination_tier_name(_train_days),
             }
         )
         save_state(state)
@@ -1128,6 +1235,7 @@ async def run(days_history: int, mode: str = "full") -> None:
             "anomaly_score": anomaly_score,
             "top_anomaly": top_anomaly,
             "seasonal_models": seasonal.seasonal_status(),
+            "contamination_tier": contamination_tier_name(training_days),
         }
     )
     save_state(state)
