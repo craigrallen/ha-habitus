@@ -776,6 +776,20 @@ async def run(days_history: int, mode: str = "full") -> None:
             os.environ["HABITUS_WATER_ENTITIES"] = ",".join(energy["water"])
             log.info("Water meters: %s", energy["water"])
 
+    # Cache HA unit_of_measurement for all sensors — used by phantom load hunter
+    try:
+        _ha_states = requests.get(
+            f"{HA_URL}/api/states",
+            headers={"Authorization": f"Bearer {HA_TOKEN}"},
+            timeout=10,
+        ).json()
+        phantom.cache_watt_entities(_ha_states)
+        # Also set currency from env (user configurable)
+        if not os.environ.get("HABITUS_CURRENCY"):
+            os.environ["HABITUS_CURRENCY"] = "kr"  # default SEK for now, overridable
+    except Exception as _e:
+        log.warning("Could not cache HA entity units: %s", _e)
+
     stat_ids = await get_stat_ids()
     if not stat_ids:
         log.error("No behavioral sensors found")
