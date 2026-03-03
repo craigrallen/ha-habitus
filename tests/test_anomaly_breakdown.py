@@ -37,10 +37,17 @@ class TestBuildEntityBaselines:
         with open(tmp_data_dir / "entity_baselines.json") as f:
             data = json.load(f)
         assert len(data) > 0
-        # Pick an entity and verify slot structure
-        entity = next(iter(data.values()))
-        slot = next(iter(entity.values()))
-        assert "mean" in slot and "std" in slot and "n" in slot
+        # Find an absolute-type slot and verify its structure
+        for eid, entity in data.items():
+            if eid.startswith("_"):
+                continue
+            for key, slot in entity.items():
+                if key.startswith("_") or not isinstance(slot, dict):
+                    continue
+                if slot.get("baseline_type") == "absolute":
+                    assert "mean" in slot and "std" in slot and "n" in slot
+                    return
+        pytest.skip("No absolute-type slots found in baselines")
 
     def test_empty_df_safe(self, tmp_data_dir):
         import habitus.habitus.anomaly_breakdown as ab
@@ -202,13 +209,19 @@ class TestScoreEntities:
         # Use the current time's slot so score_entities() looks up the same slot we read
         current_key = f"{now.hour}_{now.weekday()}"
         for eid, slots in baselines.items():
-            if current_key in slots:
-                mean_val = slots[current_key]["mean"]
-                # Pass value exactly at mean → z_score = 0, below 0.5 threshold → excluded
-                result = score_entities({eid: mean_val})
-                ids = [r["entity_id"] for r in result]
-                assert eid not in ids
-                break
+            if eid.startswith("_"):
+                continue
+            if current_key not in slots:
+                continue
+            slot = slots[current_key]
+            if not isinstance(slot, dict) or slot.get("baseline_type") != "absolute":
+                continue  # skip binary/rate sensors — they use on_fraction not mean
+            mean_val = slot["mean"]
+            # Pass value exactly at mean → z_score = 0, below 0.5 threshold → excluded
+            result = score_entities({eid: mean_val})
+            ids = [r["entity_id"] for r in result]
+            assert eid not in ids
+            break
 
     def test_anomaly_result_has_required_fields(self, sample_df, tmp_data_dir):
         import habitus.habitus.anomaly_breakdown as ab
@@ -401,3 +414,226 @@ class TestComputeBreakdown:
         # Entity baselines should still be there alongside _z_score_run
         entity_keys = [k for k in data if not k.startswith("_")]
         assert len(entity_keys) > 0
+
+
+class TestBinaryBaseline:
+    def test_binary_baseline_has_on_fraction(self, sample_df, tmp_data_dir):
+        """Binary sensors must have on_fraction in their baseline slots."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        build_entity_baselines(sample_df)
+        with open(tmp_data_dir / "entity_baselines.json") as f:
+            data = json.load(f)
+        assert "binary_sensor.front_door" in data
+        entity = data["binary_sensor.front_door"]
+        found_slot = False
+        for key, slot in entity.items():
+            if key.startswith("_") or not isinstance(slot, dict):
+                continue
+            assert slot["baseline_type"] == "binary"
+            assert "on_fraction" in slot
+            assert 0.0 <= slot["on_fraction"] <= 1.0
+            assert "avg_transitions" in slot
+            found_slot = True
+        assert found_slot, "No binary slot found for binary_sensor.front_door"
+
+    def test_binary_baseline_has_binary_meta(self, sample_df, tmp_data_dir):
+        """Binary entity baseline must include _binary_meta with avg_duration_on."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        build_entity_baselines(sample_df)
+        with open(tmp_data_dir / "entity_baselines.json") as f:
+            data = json.load(f)
+        assert "binary_sensor.front_door" in data
+        entity = data["binary_sensor.front_door"]
+        assert "_binary_meta" in entity
+        assert "avg_duration_on" in entity["_binary_meta"]
+        assert entity["_binary_meta"]["avg_duration_on"] > 0
+
+    def test_non_binary_entity_has_mean_not_on_fraction(self, sample_df, tmp_data_dir):
+        """Non-binary entities should still have mean/std, not on_fraction."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        build_entity_baselines(sample_df)
+        with open(tmp_data_dir / "entity_baselines.json") as f:
+            data = json.load(f)
+        eid = "sensor.bathroom_lights_electric_consumed_w"
+        assert eid in data
+        for key, slot in data[eid].items():
+            if key.startswith("_") or not isinstance(slot, dict):
+                continue
+            assert slot.get("baseline_type") == "absolute"
+            assert "mean" in slot
+            assert "on_fraction" not in slot
+
+
+class TestBinaryScoring:
+    def _write_binary_baselines(
+        self,
+        tmp_data_dir,
+        on_fraction: float,
+        avg_transitions: float = 0.0,
+        avg_duration_on: float = 1.0,
+    ) -> None:
+        import datetime
+        import habitus.habitus.anomaly_breakdown as ab
+
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
+        now = datetime.datetime.now()
+        h, d = now.hour, now.weekday()
+        bern_std = float(np.sqrt(max(on_fraction * (1.0 - on_fraction), 1e-4)))
+        baselines = {
+            "binary_sensor.test_motion": {
+                f"{h}_{d}": {
+                    "on_fraction": on_fraction,
+                    "std": bern_std,
+                    "avg_transitions": avg_transitions,
+                    "n": 30,
+                    "baseline_type": "binary",
+                },
+                "_binary_meta": {"avg_duration_on": avg_duration_on},
+                "_meta": {"sensor_type": "binary"},
+            }
+        }
+        with open(tmp_data_dir / "entity_baselines.json", "w") as f:
+            json.dump(baselines, f)
+
+    def test_normally_off_sensor_on_is_anomalous(self, tmp_data_dir):
+        """Sensor normally 5% on → being on should score high (> 1.0)."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        self._write_binary_baselines(tmp_data_dir, on_fraction=0.05)
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
+        result = score_entities({"binary_sensor.test_motion": 1.0})
+        assert len(result) > 0
+        assert result[0]["entity_id"] == "binary_sensor.test_motion"
+        assert result[0]["z_score"] > 1.0
+
+    def test_normally_on_sensor_on_is_not_anomalous(self, tmp_data_dir):
+        """Sensor normally 90% on → z_expected < 0.5 → not flagged."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        self._write_binary_baselines(tmp_data_dir, on_fraction=0.9)
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
+        result = score_entities({"binary_sensor.test_motion": 1.0})
+        ids = [r["entity_id"] for r in result]
+        assert "binary_sensor.test_motion" not in ids
+
+    def test_binary_sensor_off_never_anomalous(self, tmp_data_dir):
+        """Binary sensor being off (value=0) must never be flagged."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        self._write_binary_baselines(tmp_data_dir, on_fraction=0.05)
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
+        result = score_entities({"binary_sensor.test_motion": 0.0})
+        ids = [r["entity_id"] for r in result]
+        assert "binary_sensor.test_motion" not in ids
+
+    def test_frequency_anomaly_detected(self, tmp_data_dir):
+        """transitions_this_hour > 3 × baseline → frequency anomaly flagged."""
+        import datetime
+
+        import habitus.habitus.anomaly_breakdown as ab
+
+        self._write_binary_baselines(tmp_data_dir, on_fraction=0.5, avg_transitions=1.0)
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
+
+        # Inject binary state: 5 transitions already recorded this hour (sensor currently on)
+        now = datetime.datetime.now()
+        with open(tmp_data_dir / "entity_baselines.json") as f:
+            bl = json.load(f)
+        bl["_binary_state"] = {
+            "binary_sensor.test_motion": {
+                "current_value": 1.0,
+                "hour": now.hour,
+                "transitions_this_hour": 5,
+                "state_start_ts": now.isoformat(),
+            }
+        }
+        with open(tmp_data_dir / "entity_baselines.json", "w") as f:
+            json.dump(bl, f)
+
+        # Transition: sensor goes to 0, making 6 total > 3 × 1.0
+        result = score_entities({"binary_sensor.test_motion": 0.0})
+        ids = [r["entity_id"] for r in result]
+        assert "binary_sensor.test_motion" in ids
+        entry = next(r for r in result if r["entity_id"] == "binary_sensor.test_motion")
+        assert "transitions" in entry["description"]
+
+    def test_duration_anomaly_detected(self, tmp_data_dir):
+        """Sensor on for > 2 × avg_duration_on → duration anomaly flagged."""
+        import datetime
+
+        import habitus.habitus.anomaly_breakdown as ab
+
+        self._write_binary_baselines(
+            tmp_data_dir, on_fraction=0.3, avg_transitions=0.0, avg_duration_on=1.0
+        )
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
+
+        now = datetime.datetime.now()
+        five_hours_ago = (now - datetime.timedelta(hours=5)).isoformat()
+        with open(tmp_data_dir / "entity_baselines.json") as f:
+            bl = json.load(f)
+        bl["_binary_state"] = {
+            "binary_sensor.test_motion": {
+                "current_value": 1.0,
+                "hour": now.hour,
+                "transitions_this_hour": 0,
+                "state_start_ts": five_hours_ago,
+            }
+        }
+        with open(tmp_data_dir / "entity_baselines.json", "w") as f:
+            json.dump(bl, f)
+
+        result = score_entities({"binary_sensor.test_motion": 1.0})
+        ids = [r["entity_id"] for r in result]
+        assert "binary_sensor.test_motion" in ids
+        entry = next(r for r in result if r["entity_id"] == "binary_sensor.test_motion")
+        assert "on for" in entry["description"]
+
+    def test_anomaly_result_fields_present(self, tmp_data_dir):
+        """Binary anomaly result must contain all required fields."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        self._write_binary_baselines(tmp_data_dir, on_fraction=0.02)
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
+        result = score_entities({"binary_sensor.test_motion": 1.0})
+        assert result
+        r = result[0]
+        for field in (
+            "entity_id",
+            "name",
+            "current_value",
+            "baseline_mean",
+            "baseline_std",
+            "z_score",
+            "unit",
+            "description",
+            "direction",
+        ):
+            assert field in r, f"Missing field: {field}"
+        assert r["direction"] == "high"
+
+    def test_binary_state_persisted_to_json(self, tmp_data_dir):
+        """After scoring, _binary_state must be written to entity_baselines.json."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        self._write_binary_baselines(tmp_data_dir, on_fraction=0.5)
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
+        score_entities({"binary_sensor.test_motion": 1.0})
+        with open(tmp_data_dir / "entity_baselines.json") as f:
+            data = json.load(f)
+        assert "_binary_state" in data
+        assert "binary_sensor.test_motion" in data["_binary_state"]
