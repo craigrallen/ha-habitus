@@ -37,6 +37,8 @@ HA_TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
 NOTIFY_SVC = os.environ.get("HABITUS_NOTIFY_SERVICE", "notify.notify")
 NOTIFY_ON = os.environ.get("HABITUS_NOTIFY_ON", "true").lower() == "true"
 THRESHOLD = int(os.environ.get("HABITUS_ANOMALY_THRESHOLD", "70"))
+DAILY_DIGEST = os.environ.get("HABITUS_DAILY_DIGEST", "false").lower() == "true"
+DAILY_DIGEST_HOUR = int(os.environ.get("HABITUS_DAILY_DIGEST_HOUR", "8"))
 # Minimum training days before anomaly scoring is trusted — assume normal until then
 MIN_SCORING_DAYS = int(os.environ.get("HABITUS_MIN_SCORING_DAYS", "7"))
 
@@ -464,6 +466,107 @@ def send_notification(title, message):
         log.warning(f"Notification failed: {e}")
 
 
+def format_digest_message(
+    anomaly_score: int,
+    entity_anomalies: list[dict],
+    suggestions: list[dict],
+    training_days: int,
+    entity_count: int,
+) -> str:
+    """Format a plain-English daily digest message for Habitus.
+
+    Args:
+        anomaly_score: Current 0–100 anomaly score.
+        entity_anomalies: Top anomalous entities with description strings.
+        suggestions: List of suggested automations (each with a ``title`` key).
+        training_days: Days of history the model was trained on.
+        entity_count: Number of behavioral sensors being tracked.
+
+    Returns:
+        Formatted multi-line message string suitable for an HA notification body.
+    """
+    parts = [
+        f"Anomaly score: {anomaly_score}/100 · {entity_count} sensors · {training_days}d history"
+    ]
+    if entity_anomalies:
+        parts.append("\nTop anomalies:")
+        for a in entity_anomalies[:3]:
+            parts.append(f"  • {a.get('description', a.get('entity', ''))}")
+    else:
+        parts.append("\nNo anomalies detected — all systems normal.")
+    if suggestions:
+        n = len(suggestions)
+        parts.append(f"\n{n} automation suggestion{'s' if n != 1 else ''} available in Habitus.")
+    return "\n".join(parts)
+
+
+def should_send_digest(
+    state: dict,
+    now: datetime.datetime | None = None,
+) -> bool:
+    """Return True if the daily digest should be sent now.
+
+    The digest fires once per day at ``DAILY_DIGEST_HOUR`` (UTC) when
+    ``DAILY_DIGEST`` is enabled and has not already fired today.
+
+    Args:
+        state: Current run state dict, may contain ``last_digest_date``.
+        now: Override current time for testing. Defaults to ``datetime.now(UTC)``.
+
+    Returns:
+        True if a digest notification should be sent, False otherwise.
+    """
+    if not DAILY_DIGEST:
+        return False
+    if now is None:
+        now = datetime.datetime.now(datetime.UTC)
+    if now.hour != DAILY_DIGEST_HOUR:
+        return False
+    today = now.strftime("%Y-%m-%d")
+    return state.get("last_digest_date") != today
+
+
+def send_daily_digest(
+    state: dict,
+    anomaly_score: int,
+    entity_anomalies: list[dict],
+    suggestions: list[dict],
+    training_days: int,
+    entity_count: int,
+    now: datetime.datetime | None = None,
+) -> dict:
+    """Send a daily summary digest notification and return an updated state dict.
+
+    No-ops when ``DAILY_DIGEST`` is disabled, the digest hour has not arrived,
+    or a digest has already been sent today.  The caller's ``state`` dict is
+    never mutated; a shallow copy is returned when an update is required.
+
+    Args:
+        state: Current run state dict (will not be mutated).
+        anomaly_score: Current 0–100 anomaly score.
+        entity_anomalies: Top anomalous entities with description strings.
+        suggestions: Suggested automation list (each with a ``title`` key).
+        training_days: Days of history used for training.
+        entity_count: Number of behavioral sensors tracked.
+        now: Override current time for testing.
+
+    Returns:
+        Updated state dict with ``last_digest_date`` set when digest was sent,
+        or the original ``state`` dict unchanged when no digest fired.
+    """
+    if now is None:
+        now = datetime.datetime.now(datetime.UTC)
+    if not should_send_digest(state, now):
+        return state
+    msg = format_digest_message(
+        anomaly_score, entity_anomalies, suggestions, training_days, entity_count
+    )
+    send_notification("🧠 Habitus — Daily Digest", msg)
+    updated = dict(state)
+    updated["last_digest_date"] = now.strftime("%Y-%m-%d")
+    return updated
+
+
 # ── Publish ───────────────────────────────────────────────────────────────────
 def publish(entity_id, state, attributes=None):
     headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
@@ -730,6 +833,10 @@ async def run(days_history: int, mode: str = "full") -> None:
                 if top_anomaly:
                     msg_parts.append(top_anomaly)
                 send_notification("🧠 Habitus — Unusual Activity", "\n".join(msg_parts))
+            state = send_daily_digest(
+                state, anomaly_score, entity_anomalies, [], training_days, entity_count
+            )
+            save_state(state)
             _publish_sensors(anomaly_score, is_anomalous, training_days, entity_count)
             await _register_lovelace_card()
             return
@@ -1048,6 +1155,10 @@ async def run(days_history: int, mode: str = "full") -> None:
     except Exception:
         suggestions = []
     publish_dashboard_entities(anomaly_score, entity_anomalies, suggestions)
+    state = send_daily_digest(
+        state, anomaly_score, entity_anomalies, suggestions, training_days, entity_count
+    )
+    save_state(state)
 
     log.info("Done.")
 
