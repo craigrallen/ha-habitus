@@ -409,7 +409,7 @@ def _fetch_activity_states() -> dict[str, float]:
         Dict mapping entity_id to a numeric value (ON=1, OFF=0 for binary,
         float for numeric, home=1 for person entities).
     """
-    import requests as req
+    import requests as req  # type: ignore[import-untyped]
 
     ha_url = os.environ.get("HA_URL", "http://supervisor/core")
     token = os.environ.get("SUPERVISOR_TOKEN", "")

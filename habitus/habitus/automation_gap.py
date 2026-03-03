@@ -18,7 +18,10 @@ _INTENT_PATTERNS = [
     {
         "intent": "lights_off_empty_room",
         "keywords": [
-            (["turn off", "lights off", "switch off"], ["no motion", "empty", "nobody", "unoccupied", "when away"]),
+            (
+                ["turn off", "lights off", "switch off"],
+                ["no motion", "empty", "nobody", "unoccupied", "when away"],
+            ),
         ],
         "trigger_type": "no_motion",
         "action_type": "turn_off",
@@ -27,7 +30,10 @@ _INTENT_PATTERNS = [
     {
         "intent": "reduce_standby",
         "keywords": [
-            (["turn off", "standby", "phantom", "reduce", "cut"], ["standby", "phantom", "idle", "not in use"]),
+            (
+                ["turn off", "standby", "phantom", "reduce", "cut"],
+                ["standby", "phantom", "idle", "not in use"],
+            ),
         ],
         "trigger_type": "idle",
         "action_type": "turn_off",
@@ -138,10 +144,10 @@ def _parse_suggestion(suggestion, known_entity_ids):
 
 def _fetch_automations(ha_url, ha_token):
     """Fetch automation details from HA. Falls back to /api/states if config API 404s."""
-    import urllib.request
     import urllib.error
+    import urllib.request
 
-    headers = {"Authorization": "Bearer {}".format(ha_token), "Content-Type": "application/json"}
+    headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
 
     def _get(url):
         req = urllib.request.Request(url, headers=headers)
@@ -149,39 +155,43 @@ def _fetch_automations(ha_url, ha_token):
             return json.loads(resp.read().decode())
 
     try:
-        data = _get("{}/api/config/automation/config".format(ha_url))
+        data = _get(f"{ha_url}/api/config/automation/config")
         if isinstance(data, list):
             log.info("automation_gap: fetched %d automations from config API", len(data))
             result = []
             for a in data:
                 alias = a.get("alias", "") or a.get("id", "")
-                result.append({
-                    "entity_id": "automation.{}".format(alias.lower().replace(" ", "_")),
-                    "alias": alias,
-                    "trigger": a.get("trigger", []),
-                    "action": a.get("action", []),
-                    "state": "off" if a.get("mode") == "disabled" else "on",
-                    "last_triggered": None,
-                })
+                result.append(
+                    {
+                        "entity_id": "automation.{}".format(alias.lower().replace(" ", "_")),
+                        "alias": alias,
+                        "trigger": a.get("trigger", []),
+                        "action": a.get("action", []),
+                        "state": "off" if a.get("mode") == "disabled" else "on",
+                        "last_triggered": None,
+                    }
+                )
             return result
     except Exception as e:
         log.debug("automation_gap: config API failed (%s), falling back to states", e)
 
     try:
-        states = _get("{}/api/states".format(ha_url))
+        states = _get(f"{ha_url}/api/states")
         automations = [s for s in states if s["entity_id"].startswith("automation.")]
         log.info("automation_gap: fetched %d automations from states API", len(automations))
         result = []
         for a in automations:
             attrs = a.get("attributes", {})
-            result.append({
-                "entity_id": a["entity_id"],
-                "alias": attrs.get("friendly_name", a["entity_id"]),
-                "trigger": [],
-                "action": [],
-                "state": a.get("state", "on"),
-                "last_triggered": attrs.get("last_triggered"),
-            })
+            result.append(
+                {
+                    "entity_id": a["entity_id"],
+                    "alias": attrs.get("friendly_name", a["entity_id"]),
+                    "trigger": [],
+                    "action": [],
+                    "state": a.get("state", "on"),
+                    "last_triggered": attrs.get("last_triggered"),
+                }
+            )
         return result
     except Exception as e:
         log.warning("automation_gap: states API failed: %s", e)
@@ -191,10 +201,11 @@ def _fetch_automations(ha_url, ha_token):
 def _fetch_all_states(ha_url, ha_token):
     """Fetch all HA states to get entity IDs."""
     import urllib.request
+
     try:
         req = urllib.request.Request(
-            "{}/api/states".format(ha_url),
-            headers={"Authorization": "Bearer {}".format(ha_token)},
+            f"{ha_url}/api/states",
+            headers={"Authorization": f"Bearer {ha_token}"},
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
             return json.loads(resp.read().decode())
@@ -230,7 +241,7 @@ def _match_automation(parsed_sug, automations):
     """Find the best matching automation. Returns (automation, score 0-100)."""
     best = None
     best_score = 0
-    sug_entities = set(e.lower() for e in parsed_sug["entities"])
+    sug_entities = {e.lower() for e in parsed_sug["entities"]}
 
     for auto in automations:
         score = 0
@@ -273,23 +284,23 @@ def _generate_yaml(parsed_sug):
             light_entity.split(".")[-1] if "." in light_entity else "room"
         )
         return (
-            'alias: "{}"\n'
+            f'alias: "{alias}"\n'
             "trigger:\n"
             "  - platform: state\n"
-            "    entity_id: {}\n"
+            f"    entity_id: {motion_sensor}\n"
             '    to: "off"\n'
             '    for: "00:15:00"\n'
             "condition: []\n"
             "action:\n"
             "  - service: light.turn_off\n"
             "    target:\n"
-            "      entity_id: {}\n"
+            f"      entity_id: {light_entity}\n"
             "mode: single"
-        ).format(alias, motion_sensor, light_entity)
+        )
 
     elif intent == "reduce_standby":
         return (
-            'alias: "{}"\n'
+            f'alias: "{alias}"\n'
             "trigger:\n"
             "  - platform: time\n"
             '    at: "23:00:00"\n'
@@ -297,13 +308,13 @@ def _generate_yaml(parsed_sug):
             "action:\n"
             "  - service: switch.turn_off\n"
             "    target:\n"
-            "      entity_id: {}\n"
+            f"      entity_id: {switch_entity}\n"
             "mode: single"
-        ).format(alias, switch_entity)
+        )
 
     elif intent == "predictive_heating":
         return (
-            'alias: "{}"\n'
+            f'alias: "{alias}"\n'
             "trigger:\n"
             "  - platform: time\n"
             '    at: "06:30:00"\n'
@@ -318,15 +329,15 @@ def _generate_yaml(parsed_sug):
             "action:\n"
             "  - service: climate.set_temperature\n"
             "    target:\n"
-            "      entity_id: {}\n"
+            f"      entity_id: {climate_entity}\n"
             "    data:\n"
             "      temperature: 21\n"
             "mode: single"
-        ).format(alias, climate_entity)
+        )
 
     elif intent == "security_lock":
         return (
-            'alias: "{}"\n'
+            f'alias: "{alias}"\n'
             "trigger:\n"
             "  - platform: state\n"
             "    entity_id: binary_sensor.occupancy\n"
@@ -336,65 +347,65 @@ def _generate_yaml(parsed_sug):
             "action:\n"
             "  - service: lock.lock\n"
             "    target:\n"
-            "      entity_id: {}\n"
+            f"      entity_id: {lock_entity}\n"
             "mode: single"
-        ).format(alias, lock_entity)
+        )
 
     elif intent == "lights_on_motion":
         motion_sensor = "binary_sensor.{}_motion".format(
             light_entity.split(".")[-1] if "." in light_entity else "room"
         )
         return (
-            'alias: "{}"\n'
+            f'alias: "{alias}"\n'
             "trigger:\n"
             "  - platform: state\n"
-            "    entity_id: {}\n"
+            f"    entity_id: {motion_sensor}\n"
             '    to: "on"\n'
             "condition: []\n"
             "action:\n"
             "  - service: light.turn_on\n"
             "    target:\n"
-            "      entity_id: {}\n"
+            f"      entity_id: {light_entity}\n"
             "mode: single"
-        ).format(alias, motion_sensor, light_entity)
+        )
 
     elif intent == "media_off_idle":
         media_entity = entities[0] if entities else "media_player.your_tv"
         return (
-            'alias: "{}"\n'
+            f'alias: "{alias}"\n'
             "trigger:\n"
             "  - platform: state\n"
-            "    entity_id: {}\n"
+            f"    entity_id: {media_entity}\n"
             '    to: "idle"\n'
             '    for: "00:30:00"\n'
             "condition: []\n"
             "action:\n"
             "  - service: media_player.turn_off\n"
             "    target:\n"
-            "      entity_id: {}\n"
+            f"      entity_id: {media_entity}\n"
             "mode: single"
-        ).format(alias, media_entity, media_entity)
+        )
 
     else:
         target = entities[0] if entities else "switch.your_device"
         return (
-            'alias: "{}"\n'
+            f'alias: "{alias}"\n'
             "trigger:\n"
             "  - platform: state\n"
-            "    entity_id: {}\n"
+            f"    entity_id: {target}\n"
             "condition: []\n"
             "action:\n"
             "  - service: homeassistant.toggle\n"
             "    target:\n"
-            "      entity_id: {}\n"
+            f"      entity_id: {target}\n"
             "mode: single"
-        ).format(alias, target, target)
+        )
 
 
 def _improvement_hint(auto, auto_score):
     """Generate a human-readable hint for why an automation is being overridden."""
     override_rate = auto_score.get("override_rate", 0) if auto_score else 0
-    hint_parts = ["Override rate {}% — ".format(override_rate)]
+    hint_parts = [f"Override rate {override_rate}% — "]
 
     trigger_str = json.dumps(auto.get("trigger", [])).lower()
     if "time" in trigger_str or '"at"' in trigger_str:
@@ -497,9 +508,11 @@ async def analyse(ha_url, ha_token, suggestions, auto_scores=None):
 
     summary_parts = []
     if counts["missing"]:
-        summary_parts.append("{} missing automation{}".format(
-            counts["missing"], "s" if counts["missing"] != 1 else ""
-        ))
+        summary_parts.append(
+            "{} missing automation{}".format(
+                counts["missing"], "s" if counts["missing"] != 1 else ""
+            )
+        )
     if counts["exists_poor"]:
         summary_parts.append("{} improvable".format(counts["exists_poor"]))
     if counts["exists_disabled"]:
