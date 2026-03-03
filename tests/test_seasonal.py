@@ -253,9 +253,20 @@ class TestScoreWithBestModel:
 
     @staticmethod
     def _make_feature_vec() -> np.ndarray:
-        """Build a (1, 7) feature array matching FEATURE_COLS order."""
-        # [hour_of_day, day_of_week, is_weekend, month, total_power_w, avg_temp_c, sensor_changes]
-        return np.array([[8, 1, 0, 1, 500.0, 20.0, 3]])
+        """Build a (1, N) feature array matching _get_feature_cols() order."""
+        from habitus.habitus.seasonal import _get_feature_cols
+
+        n = len(_get_feature_cols())
+        # Populate the first 7 core columns; pad remainder with zeros
+        row = [0.0] * n
+        row[0] = 8.0    # hour_of_day
+        row[1] = 1.0    # day_of_week
+        row[2] = 0.0    # is_weekend
+        row[3] = 1.0    # month
+        row[4] = 500.0  # total_power_w
+        row[5] = 20.0   # avg_temp_c
+        row[6] = 3.0    # sensor_changes
+        return np.array([row])
 
     def test_uses_seasonal_model_when_available(self, sample_features, tmp_data_dir):
         from freezegun import freeze_time
@@ -278,7 +289,9 @@ class TestScoreWithBestModel:
 
         s.DATA_DIR = str(tmp_data_dir)
         # Build a main model only — no seasonal models present
-        X = sample_features[s.FEATURE_COLS].values
+        feature_cols = s._get_feature_cols()
+        cols = [c for c in feature_cols if c in sample_features.columns]
+        X = sample_features[cols].values
         scaler = StandardScaler()
         Xs = scaler.fit_transform(X)
         model = IsolationForest(contamination=0.05, random_state=42, n_jobs=-1)

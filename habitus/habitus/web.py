@@ -1382,11 +1382,12 @@ def api_full_train():
     """Trigger a full 365-day training run without progressive steps."""
     import asyncio
     from concurrent.futures import ThreadPoolExecutor
+
     from habitus.main import run
-    
+
     def do_train():
         asyncio.run(run(days_history=365, mode="full"))
-    
+
     with ThreadPoolExecutor() as pool:
         pool.submit(do_train)
     return jsonify({"ok": True, "message": "Full 365d training started"})

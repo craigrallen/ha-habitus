@@ -49,6 +49,7 @@ def _get_feature_cols() -> list[str]:
             "gas_m3_per_h",
         ]
 
+
 # Northern-Hemisphere month groupings
 SEASONS: dict[str, list[int]] = {
     "winter": [12, 1, 2],
@@ -227,7 +228,7 @@ def score_with_best_model(X_raw: Any) -> tuple[int, str]:
             with open(fallback_s, "rb") as f:
                 scaler = pickle.load(f)
             used = "main"
-        Xs = scaler.transform(X_raw[:, :len(scaler.mean_)])
+        Xs = scaler.transform(X_raw[:, : len(scaler.mean_)])
         raw = model.score_samples(Xs)[0]
         score = int(max(0, min(100, (-raw + 0.5) * 100)))
         return score, used
