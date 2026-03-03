@@ -500,8 +500,11 @@ async def run(days_history: int, mode: str = "full") -> None:
             training_days = state.get("training_days", 0)
             entity_count = state.get("entity_count", len(stat_ids))
         else:
-            full_from = state.get("data_from", "2000-01-01T00:00:00+00:00")
-            log.info(f"Retraining full window {full_from} → {now_iso}")
+            cap = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days_history)
+            cap_iso = cap.strftime("%Y-%m-%dT%H:00:00+00:00")
+            saved = state.get("data_from", "2000-01-01T00:00:00+00:00")
+            full_from = saved if saved > cap_iso else cap_iso
+            log.info(f"Retraining {days_history}d window {full_from} → {now_iso}")
             set_progress("fetching", 0, len(stat_ids), 0, 0, 0)
             df_full = await fetch_stats(stat_ids, full_from, now_iso)
             if df_full.empty:
