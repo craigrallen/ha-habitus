@@ -279,12 +279,19 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     hours["day_of_week"] = hours["hour"].dt.dayofweek
     hours["is_weekend"] = (hours["day_of_week"] >= 5).astype(int)
     hours["month"] = hours["hour"].dt.month
-    power = df[
-        df["entity_id"].str.contains("consumed_w|watt|power|inverter|load", case=False, na=False)
-    ].copy()
     _max_w = int(os.environ.get("HABITUS_MAX_POWER_KW", "25")) * 1000
+    _power_entity = os.environ.get("HABITUS_POWER_ENTITY", "").strip()
+    if _power_entity:
+        # User specified a single total-power entity — use it directly
+        power = df[df["entity_id"] == _power_entity].copy()
+    else:
+        power = df[
+            df["entity_id"].str.contains("consumed_w|watt|power|inverter|load", case=False, na=False)
+        ].copy()
     power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(lower=0, upper=_max_w)
-    total_power = power.groupby("hour")["v"].sum().rename("total_power_w")
+    # Use MAX per hour, not sum — avoids double-counting overlapping sensors
+    # (e.g. inverter total + heat pump + underfloor heating all overlap)
+    total_power = power.groupby("hour")["v"].max().rename("total_power_w")
     temp = df[df["entity_id"].str.contains("temperature", case=False, na=False)].copy()
     temp["v"] = pd.to_numeric(temp["mean"], errors="coerce")
     avg_temp = temp.groupby("hour")["v"].mean().rename("avg_temp_c")
