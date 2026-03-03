@@ -16,6 +16,17 @@ DATA_DIR = os.environ.get("DATA_DIR", "/data")
 ENTITY_BASELINES_PATH = os.path.join(DATA_DIR, "entity_baselines.json")
 ENTITY_ANOMALIES_PATH = os.path.join(DATA_DIR, "entity_anomalies.json")
 ENTITY_LIFECYCLE_PATH = os.path.join(DATA_DIR, "entity_lifecycle.json")
+DATA_QUALITY_PATH = os.path.join(DATA_DIR, "data_quality.json")
+
+# Physical sensor sanity bounds — public constants used by tests and downstream callers
+TEMP_MAX_C: float = 85.0  # °C — discard temperature readings above this
+TEMP_MIN_C: float = -60.0  # °C — discard temperature readings below this
+VALUE_JUMP_FACTOR: float = 10.0  # discard gauge point if |Δ| > factor × |prev_val|
+STUCK_HOURS: int = 24  # flag gauge sensor as "stuck" if value unchanged this many hours
+
+_TEMP_MAX_C = TEMP_MAX_C
+_TEMP_MIN_C = TEMP_MIN_C
+_JUMP_FACTOR = VALUE_JUMP_FACTOR
 
 COLD_START_DAYS = 7  # Entities younger than this are exempt from scoring ("learning" phase)
 LOW_SAMPLE_THRESHOLD = 10  # Slots with fewer samples get a widened CI (0.5× z-score weight)
@@ -31,6 +42,209 @@ SENSOR_TYPE_CERTAINTY: dict[str, float] = {
     "setpoint": 0.7,
     "event": 0.7,
 }
+
+
+def _is_power_entity(eid: str) -> bool:
+    """Return True when the entity ID suggests a power/watt sensor."""
+    e = eid.lower()
+    return "_w" in e or "watt" in e or "power" in e
+
+
+def _is_temperature_entity(eid: str) -> bool:
+    """Return True when the entity ID suggests a temperature sensor."""
+    e = eid.lower()
+    return "temperature" in e or "_temp" in e
+
+
+def _is_humidity_entity(eid: str) -> bool:
+    """Return True when the entity ID suggests a humidity sensor."""
+    return "humidity" in eid.lower()
+
+
+def apply_data_quality_filters(df: pd.DataFrame) -> tuple[pd.DataFrame, list[dict]]:
+    """Filter impossible or suspect sensor readings from history before baseline building.
+
+    Applied per-entity on a DataFrame that already has a numeric ``v`` column.
+    Each filter either clamps a value in-place or marks the row for removal.
+    Detected issues are returned for writing to ``data_quality.json``; they are
+    *not* raised as behavioral anomalies.
+
+    Filters applied:
+
+    - **Negative power** (entity ID contains ``_w``, ``watt``, or ``power``):
+      clamp ``v`` to 0, log warning.
+    - **Temperature out of range** (``>85°C`` or ``<-60°C``): discard row.
+    - **Humidity out of range** (``<0%`` or ``>100%``): clamp to ``[0, 100]``.
+    - **Gauge value jump >10×** vs previous hourly reading: discard the outlier row.
+      Only triggered when the previous value is ``>0.5`` (avoids near-zero noise).
+    - **Stuck gauge sensor**: entity whose last ≥24 consecutive readings are all
+      identical → flagged as ``stuck`` (excluded downstream in :func:`score_entities`).
+
+    Args:
+        df: DataFrame with columns ``entity_id``, ``ts``, ``v``.  Must already have
+            ``v`` as a numeric column with NaN rows removed.
+
+    Returns:
+        Tuple of ``(filtered_df, issues)`` where ``issues`` is a list of dicts
+        with keys ``entity_id``, ``issue``, ``since``, ``last_valid``.
+    """
+    if df.empty:
+        return df, []
+
+    df = df.copy()
+    issues: list[dict] = []
+    drop_idx: set[int] = set()
+
+    for eid, grp in df.groupby("entity_id"):
+        eid_str = str(eid)
+        grp_sorted = grp.sort_values("ts")
+        idx: list[int] = grp_sorted.index.tolist()
+        vals: np.ndarray = grp_sorted["v"].values.astype(float)
+        ts_vals = grp_sorted["ts"].values
+
+        is_power = _is_power_entity(eid_str)
+        is_temp = _is_temperature_entity(eid_str)
+        is_hum = _is_humidity_entity(eid_str)
+        # Gauge heuristic: non-binary (>2 unique values) AND non-monotonic (has decreases)
+        n_unique = len(np.unique(vals))
+        is_gauge_like = len(vals) > 2 and n_unique > 2 and bool((np.diff(vals) < 0).any())
+
+        if is_power:
+            neg = vals < 0
+            if neg.any():
+                n_neg = int(neg.sum())
+                log.warning("Clamping %d negative power readings for %s", n_neg, eid_str)
+                neg_positions = np.where(neg)[0]
+                df.loc[[idx[i] for i in neg_positions], "v"] = 0.0
+                vals = np.where(neg, 0.0, vals)
+                valid_positions = np.where(~neg)[0]
+                last_valid = str(ts_vals[valid_positions[-1]]) if valid_positions.size else ""
+                issues.append(
+                    {
+                        "entity_id": eid_str,
+                        "issue": "negative_power",
+                        "since": str(ts_vals[neg_positions[0]]),
+                        "last_valid": last_valid,
+                    }
+                )
+
+        if is_temp:
+            bad = (vals > _TEMP_MAX_C) | (vals < _TEMP_MIN_C)
+            if bad.any():
+                bad_positions = np.where(bad)[0]
+                drop_idx.update(idx[i] for i in bad_positions)
+                log.warning(
+                    "Discarding %d out-of-range temperature readings for %s",
+                    int(bad.sum()),
+                    eid_str,
+                )
+                valid_positions = np.where(~bad)[0]
+                last_valid = str(ts_vals[valid_positions[-1]]) if valid_positions.size else ""
+                issues.append(
+                    {
+                        "entity_id": eid_str,
+                        "issue": "temperature_out_of_range",
+                        "since": str(ts_vals[bad_positions[0]]),
+                        "last_valid": last_valid,
+                    }
+                )
+
+        if is_hum:
+            low = vals < 0
+            high = vals > 100
+            any_clamp = low.any() or high.any()
+            if low.any():
+                df.loc[[idx[i] for i in np.where(low)[0]], "v"] = 0.0
+                vals = np.where(low, 0.0, vals)
+            if high.any():
+                df.loc[[idx[i] for i in np.where(high)[0]], "v"] = 100.0
+                vals = np.where(high, 100.0, vals)
+            if any_clamp:
+                clamp_mask = low | high
+                valid_positions = np.where(~clamp_mask)[0]
+                last_valid = str(ts_vals[valid_positions[-1]]) if valid_positions.size else ""
+                issues.append(
+                    {
+                        "entity_id": eid_str,
+                        "issue": "humidity_clamped",
+                        "since": str(ts_vals[np.where(clamp_mask)[0][0]]),
+                        "last_valid": last_valid,
+                    }
+                )
+
+        # Value jump >10× for gauge-like entities (skip near-zero baselines).
+        # Temperature and humidity use dedicated bounds checks; exclude them here
+        # because near-zero Celsius values produce false-positive 10× ratios.
+        if is_gauge_like and not is_temp and not is_hum and len(vals) > 1:
+            prev = vals[:-1]
+            curr = vals[1:]
+            significant = np.abs(prev) > 0.5
+            jump_mask = significant & (np.abs(curr - prev) > _JUMP_FACTOR * np.abs(prev))
+            if jump_mask.any():
+                # The outlier is the NEW value (curr[i] = vals[i+1])
+                jump_positions = np.where(jump_mask)[0] + 1
+                drop_idx.update(idx[i] for i in jump_positions)
+                log.warning(
+                    "Discarding %d value-jump readings for %s",
+                    int(jump_mask.sum()),
+                    eid_str,
+                )
+                issues.append(
+                    {
+                        "entity_id": eid_str,
+                        "issue": "value_jump",
+                        "since": str(ts_vals[jump_positions[0]]),
+                        "last_valid": str(ts_vals[jump_positions[0] - 1]),
+                    }
+                )
+
+        # Stuck gauge sensor: last ≥24 consecutive readings all identical
+        if is_gauge_like and len(vals) >= 24:
+            last_24 = vals[-24:]
+            if float(np.std(last_24)) < 1e-10:
+                first_stuck_pos = len(vals) - 24
+                last_valid_str = str(ts_vals[first_stuck_pos - 1]) if first_stuck_pos > 0 else ""
+                log.warning("Stuck sensor detected: %s (value unchanged for ≥24h)", eid_str)
+                issues.append(
+                    {
+                        "entity_id": eid_str,
+                        "issue": "stuck",
+                        "since": str(ts_vals[first_stuck_pos]),
+                        "last_valid": last_valid_str,
+                    }
+                )
+
+    if drop_idx:
+        df = df.drop(index=list(drop_idx), errors="ignore").reset_index(drop=True)
+
+    return df, issues
+
+
+def _persist_data_quality(issues: list[dict]) -> None:
+    """Write data quality issues to ``data_quality.json``.
+
+    New issues for an entity ID overwrite any existing entry for that entity so
+    the file always reflects the latest assessment.  Entities with no current
+    issue are not removed, so historical problems remain visible until cleared.
+
+    Args:
+        issues: List of quality issue dicts from :func:`apply_data_quality_filters`.
+    """
+    # Derive the path from ENTITY_BASELINES_PATH so test patches are respected
+    dq_path = os.path.join(os.path.dirname(ENTITY_BASELINES_PATH), "data_quality.json")
+    existing: dict[str, dict] = {}
+    if os.path.exists(dq_path):
+        with contextlib.suppress(json.JSONDecodeError, OSError), open(dq_path) as f:
+            data = json.load(f)
+            if isinstance(data, list):
+                existing = {item["entity_id"]: item for item in data if "entity_id" in item}
+
+    for issue in issues:
+        existing[issue["entity_id"]] = issue
+
+    with open(dq_path, "w") as f:
+        json.dump(list(existing.values()), f, indent=2)
+    log.info("Data quality report updated: %d issue(s)", len(existing))
 
 
 def compute_entity_confidence(days_of_data: float, slot_n: int, sensor_type: str) -> float:
@@ -107,6 +321,11 @@ def build_entity_baselines(df: pd.DataFrame):
     df["hour_of_day"] = df["ts"].dt.hour
     df["day_of_week"] = df["ts"].dt.dayofweek
     df = df.dropna(subset=["v"])
+
+    # Apply data quality filters before building baselines
+    df, quality_issues = apply_data_quality_filters(df)
+    if quality_issues:
+        _persist_data_quality(quality_issues)
 
     # Load existing baselines to (a) preserve first_seen timestamps and
     # (b) carry over all persisted runtime state keys across retraining cycles.
@@ -352,10 +571,25 @@ def score_entities(current_states: dict | None = None) -> list:
     bin_state_updated: dict = dict(bin_state)
     bin_state_changed = False
 
+    # Load stuck entities from data quality report — skip from scoring
+    _dq_path = os.path.join(os.path.dirname(ENTITY_BASELINES_PATH), "data_quality.json")
+    stuck_entities: set[str] = set()
+    if os.path.exists(_dq_path):
+        with contextlib.suppress(json.JSONDecodeError, OSError), open(_dq_path) as _dqf:
+            _dq_data = json.load(_dqf)
+            if isinstance(_dq_data, list):
+                stuck_entities = {
+                    item.get("entity_id", "") for item in _dq_data if item.get("issue") == "stuck"
+                }
+
     anomalies = []
     for eid, bl in baselines.items():
         if eid.startswith("_"):
             continue  # skip metadata keys (_z_score_run, _accumulating_state, …)
+
+        # Skip entities flagged as stuck sensors in data_quality.json
+        if eid in stuck_entities:
+            continue
 
         # Per-entity cold start protection: entities younger than COLD_START_DAYS are
         # in the "learning" phase and exempt from scoring to avoid false positives.
@@ -397,6 +631,27 @@ def score_entities(current_states: dict | None = None) -> list:
             val = float(current)
         except (TypeError, ValueError):
             continue
+
+        # ── Current value data quality validation ──────────────────────────────
+        # Mirror the same filters applied to historical data in apply_data_quality_filters.
+        # Bad current readings must never be surfaced as behavioural anomalies.
+        if _is_temperature_entity(eid) and (val > _TEMP_MAX_C or val < _TEMP_MIN_C):
+            log.warning("Data quality: ignoring out-of-range temperature for %s: %.1f°C", eid, val)
+            _persist_data_quality(
+                [
+                    {
+                        "entity_id": eid,
+                        "issue": "temperature_out_of_range",
+                        "since": now.isoformat(),
+                        "last_valid": now.isoformat(),
+                    }
+                ]
+            )
+            continue
+        if _is_power_entity(eid) and val < 0:
+            val = 0.0  # clamp silently — already logged during baseline build
+        if _is_humidity_entity(eid) and (val < 0 or val > 100):
+            val = max(0.0, min(100.0, val))  # clamp
 
         # ── Binary sensor: timing & frequency scoring ──────────────────────────
         if baseline_type == "binary":
