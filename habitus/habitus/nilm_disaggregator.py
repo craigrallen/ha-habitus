@@ -266,89 +266,139 @@ def _cluster_events(events: list[dict]) -> list[dict]:
 def _learn_signatures_from_known_monitors(exclude_entity: str = "", days: int = 30) -> dict[str, dict[str, Any]]:
     """Learn appliance signatures from known HA power monitors (smart plugs etc).
 
-    This treats device-level power sensors as ground truth fingerprints.
-    Returns a signature map compatible with _match_to_appliances.
+    Primary source: recorder DB
+    Fallback: HA states + history API
     """
     learned: dict[str, dict[str, Any]] = {}
-    if not os.path.exists(HA_DB):
-        return learned
-
     cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)
     cutoff_ts = cutoff.timestamp()
+
+    def _skip_entity(eid: str) -> bool:
+        if eid == exclude_entity:
+            return True
+        low = eid.lower()
+        return any(k in low for k in (
+            'shore_power', 'mastervolt', 'solar_', 'battery_', 'inverter',
+            'charger_input_power', 'wind_turbine', 'combined_wattage'
+        ))
+
+    def _build_sig(eid: str, watts: list[float]):
+        if len(watts) < 20:
+            return
+        arr = np.array(watts)
+        active = arr[arr > 30]
+        if len(active) < 10:
+            return
+        median_w = float(np.median(active))
+        p90_w = float(np.percentile(active, 90))
+        duty = float(len(active) / len(arr))
+        key = eid.replace('sensor.', '').replace('.', '_')
+        low = eid.lower()
+        learned[key] = {
+            'power': round(median_w, 1),
+            'power_p90': round(p90_w, 1),
+            'icon': '🔎',
+            'source': 'ha_monitor',
+            'entity_id': eid,
+            'duty_cycle': round(duty, 3),
+        }
+        if any(k in low for k in ('water_heater', 'waterheater', 'boiler', 'varmvatten', 'heater')):
+            learned[key]['icon'] = '🚿'
+            learned[key]['priority'] = 1
+
+    # 1) DB learning
+    if os.path.exists(HA_DB):
+        try:
+            conn = sqlite3.connect(f"file:{HA_DB}?mode=ro", uri=True)
+            candidates = conn.execute("""
+                SELECT DISTINCT sm.entity_id
+                FROM states_meta sm
+                WHERE sm.entity_id LIKE 'sensor.%'
+                  AND (
+                    sm.entity_id LIKE '%_power%'
+                    OR sm.entity_id LIKE '%_watt%'
+                    OR sm.entity_id LIKE '%_watts%'
+                    OR sm.entity_id LIKE '%energy_watts%'
+                    OR sm.entity_id LIKE '%consumption_w%'
+                  )
+            """).fetchall()
+            for (eid,) in candidates:
+                if _skip_entity(eid):
+                    continue
+                rows = conn.execute("""
+                    SELECT s.state
+                    FROM states s
+                    JOIN states_meta sm ON s.metadata_id = sm.metadata_id
+                    WHERE sm.entity_id = ? AND s.last_changed_ts > ?
+                    ORDER BY s.last_changed_ts
+                """, (eid, cutoff_ts)).fetchall()
+                watts = []
+                for (state_val,) in rows:
+                    try:
+                        w = float(state_val)
+                        if 0 <= w <= 25000:
+                            watts.append(w)
+                    except (ValueError, TypeError):
+                        continue
+                _build_sig(eid, watts)
+            conn.close()
+        except Exception as e:
+            log.warning("nilm: DB monitor-learning failed: %s", e)
+
+    # 2) API fallback if DB yielded nothing
+    if learned:
+        return learned
+
     try:
-        conn = sqlite3.connect(f"file:{HA_DB}?mode=ro", uri=True)
-        candidates = conn.execute("""
-            SELECT DISTINCT sm.entity_id
-            FROM states_meta sm
-            WHERE sm.entity_id LIKE 'sensor.%'
-              AND (
-                sm.entity_id LIKE '%_power%'
-                OR sm.entity_id LIKE '%_watt%'
-                OR sm.entity_id LIKE '%_watts%'
-                OR sm.entity_id LIKE '%energy_watts%'
-                OR sm.entity_id LIKE '%consumption_w%'
-              )
-        """).fetchall()
+        import requests
+        ha_url = os.environ.get("HA_URL", "http://supervisor/core")
+        token = os.environ.get("SUPERVISOR_TOKEN", os.environ.get("HABITUS_HA_TOKEN", ""))
+        if not token:
+            return learned
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
-        for (eid,) in candidates:
-            if eid == exclude_entity:
+        # Candidate list from current states
+        r = requests.get(f"{ha_url}/api/states", headers=headers, timeout=30)
+        if r.status_code != 200:
+            return learned
+        states = r.json()
+        candidates = []
+        for s in states:
+            eid = s.get('entity_id', '')
+            if not eid.startswith('sensor.'):
                 continue
-            # Skip known aggregate/system meters
             low = eid.lower()
-            if any(k in low for k in (
-                'shore_power', 'mastervolt', 'solar_', 'battery_', 'inverter',
-                'charger_input_power', 'wind_turbine', 'combined_wattage'
-            )):
+            if any(k in low for k in ('_power', '_watt', '_watts', 'energy_watts', 'consumption_w')) and not _skip_entity(eid):
+                candidates.append(eid)
+
+        # Limit for performance, prioritize heater-like names first
+        candidates.sort(key=lambda e: 0 if any(k in e.lower() for k in ('water_heater','boiler','varmvatten','heater')) else 1)
+        candidates = candidates[:20]
+
+        for eid in candidates:
+            url = f"{ha_url}/api/history/period/{cutoff.isoformat()}"
+            params = {
+                'filter_entity_id': eid,
+                'minimal_response': '1',
+                'no_attributes': '1',
+                'significant_changes_only': '0',
+            }
+            rr = requests.get(url, headers=headers, params=params, timeout=45)
+            if rr.status_code != 200:
                 continue
-
-            rows = conn.execute("""
-                SELECT s.state
-                FROM states s
-                JOIN states_meta sm ON s.metadata_id = sm.metadata_id
-                WHERE sm.entity_id = ? AND s.last_changed_ts > ?
-                ORDER BY s.last_changed_ts
-            """, (eid, cutoff_ts)).fetchall()
-
+            payload = rr.json()
+            series = payload[0] if payload and isinstance(payload, list) and payload and isinstance(payload[0], list) else []
             watts = []
-            for (state_val,) in rows:
+            for item in series:
                 try:
-                    w = float(state_val)
+                    w = float(item.get('state'))
                     if 0 <= w <= 25000:
                         watts.append(w)
-                except (ValueError, TypeError):
+                except Exception:
                     continue
-
-            if len(watts) < 20:
-                continue
-
-            arr = np.array(watts)
-            active = arr[arr > 30]  # above standby
-            if len(active) < 10:
-                continue
-
-            # Robust fingerprint from active periods
-            median_w = float(np.median(active))
-            p90_w = float(np.percentile(active, 90))
-            duty = float(len(active) / len(arr))
-
-            key = eid.replace('sensor.', '').replace('.', '_')
-            learned[key] = {
-                'power': round(median_w, 1),
-                'power_p90': round(p90_w, 1),
-                'icon': '🔎',
-                'source': 'ha_monitor',
-                'entity_id': eid,
-                'duty_cycle': round(duty, 3),
-            }
-
-            # Promote likely water heater naming so it wins matching
-            if any(k in low for k in ('water_heater', 'waterheater', 'boiler', 'varmvatten', 'heater')):
-                learned[key]['icon'] = '🚿'
-                learned[key]['priority'] = 1
-
-        conn.close()
+            _build_sig(eid, watts)
     except Exception as e:
-        log.warning("nilm: failed learning monitor signatures: %s", e)
+        log.warning("nilm: API monitor-learning failed: %s", e)
 
     return learned
 

@@ -610,3 +610,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improves compatibility across HA recorder schema/history setups
 - Unblocks NILM runs on entities visible in HA but missing from direct DB reads
 
+
+## [3.7.6] - 2026-03-03
+
+### Fixed
+- NILM monitor-signature learning now falls back to HA states/history API when recorder DB yields zero monitor signatures
+- Prioritises heater-like monitor names during API learning pass
+- Enables smart-plug-assisted fingerprinting even when DB access path is limited
+
