@@ -504,6 +504,7 @@ pre.raw {
 <div class="header">
   <div class="header-left">
     <h1>Habitus <span class="version" id="hdr-version">v—</span></h1>
+    <div style="font-size:.78rem;color:var(--text3)">Built in Europe. Your data stays home.</div>
   </div>
   <div class="header-right">
     <button id="theme-toggle" onclick="toggleTheme()" title="Toggle theme" style="background:var(--card2);border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--text);cursor:pointer;font-size:1rem;margin-right:12px">🌙</button>

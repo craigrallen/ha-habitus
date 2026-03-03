@@ -625,3 +625,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full training crash: `_register_lovelace_card` NameError caused by `__main__` block executing before function definition
 - Moved runtime entry block to end of file so helper functions are defined before run
 
+
+## [3.7.8] - 2026-03-03
+
+### Changed
+- README opener rewritten with stronger local-first / privacy-first positioning
+- Added playful docs easter-egg note (70s/80s/90s references side quest)
+- UI header tagline added: "Built in Europe. Your data stays home."
+

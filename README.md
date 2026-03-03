@@ -8,6 +8,8 @@
   <strong>Behavioral intelligence for Home Assistant — 100% local, zero cloud, zero compromise.</strong>
 </p>
 
+Habitus is building a smarter kind of smart home: one that understands behavior, not just triggers. Running fully local in Home Assistant, it learns routines, predicts likely needs, explains energy usage, and adapts automations as life changes — with transparent approvals, user feedback loops, and privacy-by-default architecture. Built in Europe, Habitus treats your data like your home: private property, not ad inventory.
+
 <p align="center">
   <a href="https://github.com/craigrallen/ha-habitus/actions/workflows/ci.yml">
     <img src="https://github.com/craigrallen/ha-habitus/actions/workflows/ci.yml/badge.svg" alt="CI">
@@ -32,6 +34,8 @@ Habitus is built on a single principle: **your home's data belongs to you**.
 Every byte of analysis happens on your Home Assistant device. No data is sent to any server, no API calls leave your network, no account is required. Your behavioural patterns — when you wake up, when you're home, what you watch, how you live — stay exactly where they belong.
 
 This isn't a marketing claim. It's architectural:
+
+> Also, yes — the docs hide subtle 70s/80s/90s references. Consider it a side quest.
 
 - **No outbound network calls** from the add-on (only to your own HA instance)
 - **No telemetry** of any kind
