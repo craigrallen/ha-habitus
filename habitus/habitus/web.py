@@ -662,7 +662,7 @@ function confDots(n) {
   return Array.from({length:5},(_,i)=>`<div class="conf-dot${i < Math.round(n/20)?` filled`:''}"></div>`).join('');
 }
 
-function fmtW(w){if(!isFinite(w)||w<0||w>25000)return'—';if(w>=1000)return(w/1000).toFixed(1)+'kW';return Math.round(w)+'W';}
+function fmtW(w,cap){cap=cap||25000;if(!isFinite(w)||w<0||w>cap)return'—';if(w>=1000)return(w/1000).toFixed(1)+'kW';return Math.round(w)+'W';}
 function renderSuggestions() {
   const list = currentFilter === 'all' ? allSuggestions : allSuggestions.filter(s=>s.category===currentFilter);
   if (!list.length) {

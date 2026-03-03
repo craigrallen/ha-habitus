@@ -27,6 +27,7 @@ RESCAN_FLAG="/data/.rescan_requested"
 STATE_FILE="/data/run_state.json"
 
 export HABITUS_VERSION=$(bashio::addon.version 2>/dev/null || echo "?")
+export HABITUS_MAX_POWER_KW=$(bashio::config "max_power_kw" 2>/dev/null || echo "25")
 bashio::log.info "Habitus v2.27.0 | Schedule: ${SCHEDULE} | Train: ${TRAIN_TIME} | Scan: ${SCAN}h | Days: ${DAYS}"
 
 cd /app && python3 -u -c "

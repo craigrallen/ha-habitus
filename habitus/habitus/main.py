@@ -282,7 +282,8 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     power = df[
         df["entity_id"].str.contains("consumed_w|watt|power|inverter|load", case=False, na=False)
     ].copy()
-    power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(lower=0, upper=25_000)  # cap 25kW max
+    _max_w = int(os.environ.get("HABITUS_MAX_POWER_KW", "25")) * 1000
+    power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(lower=0, upper=_max_w)
     total_power = power.groupby("hour")["v"].sum().rename("total_power_w")
     temp = df[df["entity_id"].str.contains("temperature", case=False, na=False)].copy()
     temp["v"] = pd.to_numeric(temp["mean"], errors="coerce")
@@ -718,6 +719,7 @@ async def run(days_history: int, mode: str = "full") -> None:
         {
             "last_run": now_iso,
             "version": os.environ.get("HABITUS_VERSION", os.environ.get("BUILD_VERSION", "?")),
+            "max_power_kw": int(os.environ.get("HABITUS_MAX_POWER_KW", "25")),
             "data_to": now_iso,
             "training_days": training_days,
             "entity_count": entity_count,

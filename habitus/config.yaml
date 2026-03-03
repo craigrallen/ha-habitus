@@ -1,6 +1,6 @@
 name: "Habitus"
 description: "Behavioral intelligence — learns patterns from HA, detects anomalies, proposes automations."
-version: "2.42.0"
+version: "2.43.0"
 slug: "habitus"
 init: false
 arch:
@@ -23,6 +23,7 @@ options:
   anomaly_threshold: 70
   training_schedule: "overnight"
   overnight_train_time: "02:00"
+  max_power_kw: 25
 schema:
   scan_interval_hours: int
   days_history: int?
@@ -31,3 +32,4 @@ schema:
   anomaly_threshold: int
   training_schedule: "list(continuous|overnight)"
   overnight_train_time: str
+  max_power_kw: int?
