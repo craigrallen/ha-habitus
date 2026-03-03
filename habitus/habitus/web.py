@@ -63,6 +63,23 @@ PAGE = r"""<!DOCTYPE html>
   --radius: 14px;
   --radius-sm: 8px;
 }
+[data-theme="light"] {
+  --bg:     #f8f9fb;
+  --bg2:    #ffffff;
+  --card:   #ffffff;
+  --card2:  #f1f3f7;
+  --border: #e2e5eb;
+  --border2:#d0d4dc;
+  --accent: #0288d1;
+  --accent2:#01579b;
+  --green:  #2e7d32;
+  --amber:  #f57c00;
+  --red:    #d32f2f;
+  --purple: #7b1fa2;
+  --text:   #1a1a1a;
+  --text2:  #555555;
+  --text3:  #888888;
+}
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
