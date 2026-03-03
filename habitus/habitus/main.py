@@ -117,6 +117,7 @@ SUGGESTIONS_PATH = os.path.join(DATA_DIR, "suggestions.json")
 BASELINE_PATH = os.path.join(DATA_DIR, "baseline.json")
 STATE_PATH = os.path.join(DATA_DIR, "run_state.json")
 PROGRESS_PATH = os.path.join(DATA_DIR, "progress.json")
+DATA_QUALITY_PATH = os.path.join(DATA_DIR, "data_quality.json")
 RESCAN_FLAG = os.path.join(DATA_DIR, ".rescan_requested")
 
 FEATURE_COLS = [

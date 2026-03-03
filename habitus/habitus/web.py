@@ -21,6 +21,7 @@ PHANTOM_PATH = os.path.join(DATA_DIR, "phantom_loads.json")
 DRIFT_PATH = os.path.join(DATA_DIR, "drift.json")
 AUTO_SCORES_PATH = os.path.join(DATA_DIR, "automation_scores.json")
 GAP_PATH = os.path.join(DATA_DIR, "automation_gap.json")
+DATA_QUALITY_PATH = os.path.join(DATA_DIR, "data_quality.json")
 
 app = Flask(__name__)
 
@@ -1308,6 +1309,18 @@ def api_anomaly_breakdown():
     """
     data = _read(ANOMALIES_PATH) or {}
     return jsonify(data)
+
+
+@app.route("/api/sensor_health")
+@app.route("/ingress/api/sensor_health")
+def api_sensor_health():
+    """Return sensor data-quality issues from ``data_quality.json``.
+
+    Reports impossible-value detections (negative power, out-of-range temperature,
+    humidity clamps, value jumps, stuck sensors) so they can be surfaced in the
+    UI as a separate Sensor Health section rather than behavioral anomalies.
+    """
+    return jsonify(_read(DATA_QUALITY_PATH) or [])
 
 
 @app.route("/api/rescan", methods=["POST"])
