@@ -294,7 +294,7 @@ def generate_smart_suggestions(
     for scene in scenes:
         trigger_entities = [e for e in scene.get("entities", [])
                           if e.startswith("binary_sensor.") and
-                          any(kw in e.lower() for kw in ("motion", "occupancy", "presence", "pir"))]
+                          any(kw in e.lower() for kw in ("motion", "occupancy", "presence", "pir", "door", "window", "contact", "opening"))]
         action_entities = [e for e in scene.get("entities", [])
                          if not e.startswith(("binary_sensor.", "person.", "device_tracker."))]
         if trigger_entities and action_entities:
@@ -325,6 +325,105 @@ def generate_smart_suggestions(
                     "overlap_automation": overlap,
                     "source": "scene_detector",
                 })
+
+    # ── Door/window-triggered suggestions ──
+    for scene in scenes:
+        door_entities = [e for e in scene.get("entities", [])
+                        if e.startswith("binary_sensor.") and
+                        any(kw in e.lower() for kw in ("door", "window", "contact", "opening"))]
+        action_entities = [e for e in scene.get("entities", [])
+                         if not e.startswith(("binary_sensor.", "person.", "device_tracker."))]
+        if door_entities and action_entities:
+            tp = scene.get("time_pattern", {})
+            for door in door_entities:
+                door_name = door.split(".")[1].replace("_", " ").title()
+                alias = f"Habitus — {door_name} Opens → {scene['name']}"
+                yaml = build_door_automation_yaml(
+                    alias=alias,
+                    description=f"When {door_name} opens, activate {scene['name']}",
+                    door_entity=door,
+                    action_entities=action_entities,
+                    hour_start=tp.get("peak_hour", 18) - 2 if tp.get("peak_hour") else None,
+                    hour_end=tp.get("peak_hour", 22) + 2 if tp.get("peak_hour") else None,
+                )
+                overlap = _entities_overlap(action_entities, ha_automations)
+                suggestions.append({
+                    "id": f"smart_door_{scene['id']}_{door.split('.')[-1]}",
+                    "title": f"When {door_name} opens: activate {scene['name']}",
+                    "description": f"Door/window trigger → lights and devices you typically use after opening",
+                    "confidence": min(scene.get("confidence", 50) + 5, 100),
+                    "category": "door",
+                    "applicable": True,
+                    "entities": action_entities,
+                    "trigger": door,
+                    "time_pattern": tp,
+                    "yaml": yaml,
+                    "overlap_automation": overlap,
+                    "source": "scene_detector",
+                })
+
+    # ── Person home/away suggestions ──
+    # Find person entities that co-occur with many lights being turned off/on
+    person_entities = [e for s in scenes for e in s.get("entities", [])
+                      if e.startswith("person.")]
+    if person_entities:
+        # Collect all action entities across all scenes
+        all_action_entities = list({
+            e for s in scenes for e in s.get("entities", [])
+            if e.startswith(("light.", "switch.", "media_player.", "fan.", "climate."))
+        })
+        if all_action_entities:
+            for person in set(person_entities):
+                person_name = person.split(".")[1].replace("_", " ").title()
+                # "Leaving home" automation
+                leave_yaml = build_presence_automation_yaml(
+                    alias=f"Habitus — {person_name} Leaves → All Off",
+                    description=f"Turn off lights and devices when {person_name} leaves home",
+                    person_entity=person,
+                    action_entities=all_action_entities,
+                    trigger_state="not_home",
+                    action="turn_off",
+                )
+                suggestions.append({
+                    "id": f"smart_presence_leave_{person.split('.')[-1]}",
+                    "title": f"When {person_name} leaves home: turn everything off",
+                    "description": f"Automatically turn off lights and devices when everyone leaves",
+                    "confidence": 70,
+                    "category": "presence",
+                    "applicable": True,
+                    "entities": all_action_entities,
+                    "trigger": person,
+                    "yaml": leave_yaml,
+                    "overlap_automation": _entities_overlap(all_action_entities, ha_automations),
+                    "source": "scene_detector",
+                })
+                # "Arriving home" automation — turn on most-used scene
+                if scenes:
+                    top_scene = scenes[0]
+                    arrive_entities = [e for e in top_scene.get("entities", [])
+                                      if not e.startswith(("binary_sensor.", "person.", "device_tracker."))]
+                    if arrive_entities:
+                        arrive_yaml = build_presence_automation_yaml(
+                            alias=f"Habitus — {person_name} Arrives → Welcome",
+                            description=f"Welcome {person_name} home with their favourite scene",
+                            person_entity=person,
+                            action_entities=arrive_entities,
+                            trigger_state="home",
+                            action="turn_on",
+                        )
+                        suggestions.append({
+                            "id": f"smart_presence_arrive_{person.split('.')[-1]}",
+                            "title": f"When {person_name} arrives home: welcome scene",
+                            "description": f"Turn on {top_scene['name']} when {person_name} comes home",
+                            "confidence": 65,
+                            "category": "presence",
+                            "applicable": True,
+                            "entities": arrive_entities,
+                            "trigger": person,
+                            "yaml": arrive_yaml,
+                            "overlap_automation": _entities_overlap(arrive_entities, ha_automations),
+                            "source": "scene_detector",
+                        })
 
     # ── Pattern-based suggestions (from existing suggestions, re-tagged) ──
     if existing_suggestions:
@@ -367,3 +466,75 @@ def load_smart_suggestions() -> dict[str, Any]:
     except Exception:
         pass
     return {"suggestions": [], "count": 0}
+
+
+def build_presence_automation_yaml(
+    alias: str,
+    description: str,
+    person_entity: str,
+    action_entities: list[str],
+    trigger_state: str = "not_home",
+    action: str = "turn_off",
+) -> str:
+    """Generate person home/away automation YAML.
+
+    E.g. "When Craig leaves home, turn off all lights."
+    """
+    actions = ""
+    for eid in action_entities:
+        domain = eid.split(".")[0]
+        service = f"{domain}.{action}"
+        actions += f"""
+    - service: {service}
+      target:
+        entity_id: {eid}"""
+
+    return f"""automation:
+  alias: "{alias}"
+  description: "{description}"
+  trigger:
+    - platform: state
+      entity_id: {person_entity}
+      to: "{trigger_state}"
+      for: "00:05:00"
+  action:{actions}"""
+
+
+def build_door_automation_yaml(
+    alias: str,
+    description: str,
+    door_entity: str,
+    action_entities: list[str],
+    hour_start: int | None = None,
+    hour_end: int | None = None,
+) -> str:
+    """Generate door/window-triggered automation YAML.
+
+    E.g. "When front door opens after 18:00, turn on hallway lights."
+    """
+    condition = ""
+    if hour_start is not None and hour_end is not None:
+        condition = f"""
+  condition:
+    - condition: time
+      after: "{hour_start:02d}:00:00"
+      before: "{hour_end:02d}:00:00\""""
+
+    actions = ""
+    for eid in action_entities:
+        domain = eid.split(".")[0]
+        service = f"{domain}.turn_on"
+        actions += f"""
+    - service: {service}
+      target:
+        entity_id: {eid}"""
+
+    return f"""automation:
+  alias: "{alias}"
+  description: "{description}"
+  trigger:
+    - platform: state
+      entity_id: {door_entity}
+      to: "on"
+      from: "off"{condition}
+  action:{actions}"""
