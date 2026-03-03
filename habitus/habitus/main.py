@@ -7,6 +7,7 @@ import argparse
 import asyncio
 import datetime
 import json
+import websockets
 import logging
 import os
 import pickle
