@@ -122,53 +122,135 @@ class HabitusCardMinimal extends HTMLElement {
   getCardSize() { return 1; }
 }
 
-/* Card 3: habitus-card-detail - Intelligence Panel */
+/* Card 3: habitus-card-detail - Intelligence Panel
+ * Fetches /api/anomalies and /api/suggestions to display:
+ *   - Animated anomaly score gauge (0-100)
+ *   - Top 3 anomaly reasons (entity + reason string)
+ *   - Latest suggested automation (title + confidence %)
+ *   - Last updated timestamp
+ */
 class HabitusCardDetail extends HTMLElement {
   static getConfigElement() { return document.createElement('div'); }
   static getStubConfig() { return {}; }
-  constructor() { super(); this.attachShadow({ mode: 'open' }); this._config = {}; }
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this._config = {};
+    this._anomalies = null;  // top-3 anomaly reason dicts
+    this._suggestion = null; // top suggestion with confidence
+    this._fetchDone = false;
+    this._fetchErr = false;
+  }
   setConfig(c) { this._config = c; }
-  set hass(h) { this._hass = h; this._render(); }
+  set hass(h) {
+    this._hass = h;
+    if (!this._fetchDone) this._fetchData();
+    this._render();
+  }
+  async _fetchData() {
+    this._fetchDone = true;
+    try {
+      const [ar, sr] = await Promise.all([
+        fetch(HABITUS_INGRESS + '/api/anomalies'),
+        fetch(HABITUS_INGRESS + '/api/suggestions'),
+      ]);
+      if (ar.ok) {
+        const ad = await ar.json();
+        this._anomalies = (ad.anomalies || []).slice(0, 3);
+      }
+      if (sr.ok) {
+        const sd = await sr.json();
+        this._suggestion = Array.isArray(sd) && sd.length ? sd[0] : null;
+      }
+    } catch(e) {
+      this._fetchErr = true;
+    }
+    this._render();
+  }
   _render() {
     const h = this._hass;
     const score = _hes(h, 'sensor.habitus_anomaly_score');
     const s = parseInt(score,10)||0;
     const color = _hsc(score);
     const label = _hsl(score);
-    const top = _hes(h, 'sensor.habitus_top_anomaly');
-    const sug = _hes(h, 'sensor.habitus_suggestion_1');
     const days = _hes(h, 'sensor.habitus_training_days');
     const sens = _hes(h, 'sensor.habitus_entity_count');
     const time = _hlc(h, 'sensor.habitus_anomaly_score');
-    const pct = Math.min(s,100);
+    const pct = Math.min(s, 100);
+
+    // Top-3 anomaly reasons
+    let anomalyRows = '';
+    if (this._anomalies && this._anomalies.length) {
+      anomalyRows = this._anomalies.map((a, i) => {
+        const name = a.name || (a.entity_id || '').split('.').pop().replace(/_/g,' ');
+        const desc = a.description || name;
+        const dir = a.direction === 'high' ? '\u2191' : (a.direction === 'low' ? '\u2193' : '');
+        return `<div class="ar"><span class="an">${i+1}. ${name} ${dir}</span><span class="ad">${desc}</span></div>`;
+      }).join('');
+    } else if (this._fetchDone && !this._fetchErr) {
+      const fallback = _hes(h, 'sensor.habitus_top_anomaly');
+      anomalyRows = fallback !== '\u2014' && fallback !== 'unavailable'
+        ? `<div class="ar"><span class="ad">${fallback}</span></div>`
+        : `<div class="ar nm">No anomalies detected</div>`;
+    } else {
+      anomalyRows = `<div class="ar nm">\u2014</div>`;
+    }
+
+    // Latest suggestion with confidence
+    let sugRow = '';
+    if (this._suggestion) {
+      const title = this._suggestion.title || '';
+      const conf = this._suggestion.confidence != null ? `${this._suggestion.confidence}%` : '';
+      sugRow = `<div class="sg"><span class="st">${title}</span>${conf ? `<span class="sc2">${conf}</span>` : ''}</div>`;
+    } else {
+      const fallback = _hes(h, 'sensor.habitus_suggestion_1');
+      sugRow = fallback !== '\u2014' && fallback !== 'unavailable'
+        ? `<div class="sg"><span class="st">${fallback}</span></div>`
+        : `<div class="sg nm">No suggestions yet</div>`;
+    }
+
     this.shadowRoot.innerHTML = `<style>
       :host{display:block}*{box-sizing:border-box}
       .p{background:${HABITUS_COLORS.card};border:1px solid ${HABITUS_COLORS.border};border-radius:16px;padding:20px;font-family:${_HF};color:${HABITUS_COLORS.text}}
-      .hd{display:flex;align-items:center;gap:14px;margin-bottom:18px}
-      .ga{width:44px;height:44px;border-radius:50%;background:conic-gradient(${color} ${pct*3.6}deg,${HABITUS_COLORS.border} ${pct*3.6}deg);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+      .hd{display:flex;align-items:center;gap:14px;margin-bottom:16px}
+      .ga{width:44px;height:44px;border-radius:50%;background:conic-gradient(${color} ${pct*3.6}deg,${HABITUS_COLORS.border} ${pct*3.6}deg);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .6s}
       .gi{width:34px;height:34px;border-radius:50%;background:${HABITUS_COLORS.card};display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:${color}}
-      .ti{flex:1;font-size:16px;font-weight:600}.tm{font-size:11px;color:${HABITUS_COLORS.text3}}
-      .co{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px}
-      .cl{background:${HABITUS_COLORS.card2};border-radius:12px;padding:14px 12px}
-      .clb{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:${HABITUS_COLORS.text3};margin-bottom:6px}
-      .cv{font-size:13px;color:${HABITUS_COLORS.text2};line-height:1.4}
-      .sb{font-size:22px;font-weight:700;color:${color}}
-      .stb{display:inline-block;font-size:10px;font-weight:600;background:${color}22;color:${color};padding:2px 8px;border-radius:8px;margin-top:4px}
-      .ab{display:inline-block;background:${HABITUS_COLORS.accent}22;color:${HABITUS_COLORS.accent};border:none;border-radius:6px;padding:4px 10px;margin-top:6px;font-size:11px;font-weight:600;cursor:pointer;font-family:${_HF}}
+      .ti{flex:1;font-size:16px;font-weight:600}.stb2{display:inline-block;font-size:10px;font-weight:600;background:${color}22;color:${color};padding:2px 8px;border-radius:8px;margin-left:6px}
+      .tm{font-size:11px;color:${HABITUS_COLORS.text3};margin-left:auto}
+      .sh{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:${HABITUS_COLORS.text3};margin:14px 0 6px;font-weight:600}
+      .ar{margin-bottom:8px;line-height:1.5}
+      .an{display:block;font-size:12px;font-weight:600;color:${HABITUS_COLORS.text2};margin-bottom:1px}
+      .ad{font-size:12px;color:${HABITUS_COLORS.text3}}
+      .nm{font-size:12px;color:${HABITUS_COLORS.text3}}
+      .sg{display:flex;align-items:center;gap:8px;margin-top:4px}
+      .st{font-size:13px;color:${HABITUS_COLORS.text2};flex:1}
+      .sc2{font-size:11px;font-weight:600;background:${HABITUS_COLORS.green}22;color:${HABITUS_COLORS.green};padding:2px 8px;border-radius:8px;flex-shrink:0}
+      .ft{display:flex;justify-content:center;gap:20px;font-size:11px;color:${HABITUS_COLORS.text3};padding-top:12px;margin-top:12px;border-top:1px solid ${HABITUS_COLORS.border}}
+      .ab{display:inline-block;background:${HABITUS_COLORS.accent}22;color:${HABITUS_COLORS.accent};border:none;border-radius:6px;padding:5px 12px;margin-top:12px;font-size:12px;font-weight:600;cursor:pointer;font-family:${_HF};width:100%;text-align:center}
       .ab:hover{background:${HABITUS_COLORS.accent}44}
-      .ft{display:flex;justify-content:center;gap:20px;font-size:11px;color:${HABITUS_COLORS.text3};padding-top:12px;border-top:1px solid ${HABITUS_COLORS.border}}
-      @media(max-width:500px){.co{grid-template-columns:1fr}}
     </style>
-    <div class="p"><div class="hd"><div class="ga"><div class="gi">${s}</div></div><div class="ti">Home Intelligence</div><div class="tm">${time||'\u2014'}</div></div>
-    <div class="co">
-      <div class="cl"><div class="clb">Score</div><div class="cv sb">${isNaN(parseInt(score,10))?'\u2014':s}</div><div class="stb">${label}</div></div>
-      <div class="cl"><div class="clb">Top Anomaly</div><div class="cv">${top!=='\u2014'&&top!=='unavailable'?top:'None detected'}</div></div>
-      <div class="cl"><div class="clb">Suggestion</div><div class="cv">${sug!=='\u2014'&&sug!=='unavailable'?sug:'No suggestions'}</div><button class="ab" id="ab">+ Open Habitus</button></div>
-    </div>
-    <div class="ft"><span>\uD83D\uDCC5 ${days!=='\u2014'?days+' days trained':'\u2014'}</span><span>\uD83D\uDCE1 ${sens!=='\u2014'?sens+' sensors':'\u2014'}</span></div></div>`;
-    this.shadowRoot.getElementById('ab').onclick=(e)=>{e.stopPropagation();window.open(HABITUS_INGRESS,'_blank');};
+    <div class="p">
+      <div class="hd">
+        <div class="ga"><div class="gi">${s}</div></div>
+        <div class="ti">Home Intelligence<span class="stb2">${label}</span></div>
+        <div class="tm">${time ? 'Updated ' + time : ''}</div>
+      </div>
+      <div class="sh">\u26a1 Top Anomaly Reasons</div>
+      ${anomalyRows}
+      <div class="sh">\uD83D\uDCA1 Latest Suggestion</div>
+      ${sugRow}
+      <button class="ab" id="ab">Open Habitus Dashboard</button>
+      <div class="ft">
+        <span>\uD83D\uDCC5 ${days!=='\u2014'?days+' days trained':'\u2014'}</span>
+        <span>\uD83D\uDCE1 ${sens!=='\u2014'?sens+' sensors':'\u2014'}</span>
+      </div>
+    </div>`;
+    this.shadowRoot.getElementById('ab').onclick = (e) => {
+      e.stopPropagation();
+      window.open(HABITUS_INGRESS, '_blank');
+    };
   }
-  getCardSize() { return 4; }
+  getCardSize() { return 5; }
 }
 
 /* Card 4: habitus-card-graph - Timeline */
@@ -254,6 +336,6 @@ window.customCards = window.customCards || [];
 window.customCards.push(
   { type: 'habitus-card', name: 'Habitus Pulse', description: 'Animated anomaly score with glassmorphism design' },
   { type: 'habitus-card-minimal', name: 'Habitus Chip', description: 'Compact pill-style status indicator' },
-  { type: 'habitus-card-detail', name: 'Habitus Intelligence Panel', description: 'Full-width detailed anomaly dashboard' },
+  { type: 'habitus-card-detail', name: 'Habitus Intelligence Panel', description: 'Full-width panel: top-3 anomaly reasons, latest suggestion with confidence' },
   { type: 'habitus-card-graph', name: 'Habitus Timeline', description: '24-hour activity heatmap' },
 );
