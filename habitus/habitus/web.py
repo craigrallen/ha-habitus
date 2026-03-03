@@ -464,7 +464,7 @@ pre.raw {
 
 <div class="header">
   <div class="header-left">
-    <h1>Habitus <span class="version">v2.20.0</span></h1>
+    <h1>Habitus <span class="version" id="hdr-version">v—</span></h1>
   </div>
   <div class="header-right">
     <div class="status-dot" id="hdr-dot"></div>
@@ -771,7 +771,8 @@ async function load() {
     });
     document.getElementById('hdr-dot').className = 'status-dot warn';
     const winLabel = progress.progressive_window ? ` (${progress.progressive_window}d window)` : '';
-    document.getElementById('hdr-label').textContent = `Training ${progress.pct||0}%${winLabel}`;
+    if(document.getElementById('hdr-version'))document.getElementById('hdr-version').textContent='v'+(progress.version||state.version||'—');
+  document.getElementById('hdr-label').textContent = `Training ${progress.pct||0}%${winLabel}`;
     if (!hasData) return;  // only block if no data yet
   }
   document.getElementById('prog-overlay').style.display = 'none';
@@ -839,7 +840,7 @@ async function load() {
     const mean=Math.round(b.sum/b.n),std=Math.round(b.std),pct=Math.round(mean/mxP*100);
     const pd=h<6?'Night':h<12?'Morning':h<18?'Afternoon':'Evening';
     const cur=h===nowH?` style="background:rgba(79,195,247,.04)"`:''
-    return`<tr${cur}><td><span style="font-weight:${h===nowH?700:400}">${String(h).padStart(2,'0')}:00</span> <span style="color:var(--text3);font-size:.7rem">${pd}</span>${h===nowH?' <span class="badge b-info" style="padding:1px 6px;font-size:.66rem">now</span>':''}</td><td>${mean}W</td><td style="color:var(--text3)">±${std}W</td><td><div class="bar-wrap"><div class="bar" style="width:${pct}%"></div></div></td></tr>`;
+    return`<tr${cur}><td><span style="font-weight:${h===nowH?700:400}">${String(h).padStart(2,'0')}:00</span> <span style="color:var(--text3);font-size:.7rem">${pd}</span>${h===nowH?' <span class="badge b-info" style="padding:1px 6px;font-size:.66rem">now</span>':''}</td><td>${fmtW(mean)}</td><td style="color:var(--text3)">±${fmtW(std)}</td><td><div class="bar-wrap"><div class="bar" style="width:${pct}%"></div></div></td></tr>`;
   }).join('');
 
   // Anomaly breakdown
