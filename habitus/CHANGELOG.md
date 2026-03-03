@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Explicit error logging in progressive training thread
 - `CLAUDE.md`, `PRD.md`, `AGENTS.md` for autonomous coding infrastructure
 
+### Changed
+- Minimum z-score threshold raised to 3.0σ — deviations below this are normal operating variance
+- Exclude non-behavioral sensors from anomaly scoring: crypto prices (xbt/xrp/eth), reactive power (kvar/kvarh), network device memory/CPU utilization
+
 ### Fixed
 - JSON serialization crashes from numpy `bool_`/`int64` types — added `default=str` to all `json.dump()` calls
 - Broken `default=str` insertions in `len()`, `round()`, `.isoformat()`, `.values()` calls — caused `TypeError` crashes during training

@@ -582,10 +582,31 @@ def score_entities(current_states: dict | None = None) -> list:
                     item.get("entity_id", "") for item in _dq_data if item.get("issue") == "stuck"
                 }
 
+    # ── Exclusion patterns ──────────────────────────────────────────────────
+    # Sensors that should never contribute to anomaly scoring because they
+    # represent external data (markets), reactive power noise, or network
+    # metadata rather than actual home behaviour.
+    EXCLUDE_PATTERNS = [
+        "xbt_",          # Bitcoin / crypto price feeds
+        "xrp_",
+        "eth_",
+        "_kvar",         # Reactive power (kvar/kvarh) — noise, not load
+        "_memory_utilization",  # Switch/router memory — infra noise
+        "_cpu_utilization",     # Network device CPU — infra noise
+    ]
+    # Minimum z-score to be included in the anomaly list.  Below this,
+    # the deviation is within normal operating variance and should be ignored.
+    MIN_Z_SCORE = 3.0
+
     anomalies = []
     for eid, bl in baselines.items():
         if eid.startswith("_"):
             continue  # skip metadata keys (_z_score_run, _accumulating_state, …)
+
+        # Skip entities matching exclusion patterns
+        eid_lower = eid.lower()
+        if any(pat in eid_lower for pat in EXCLUDE_PATTERNS):
+            continue
 
         # Skip entities flagged as stuck sensors in data_quality.json
         if eid in stuck_entities:
@@ -737,6 +758,10 @@ def score_entities(current_states: dict | None = None) -> list:
 
             slot_n = b.get("n", 0)
             sensor_type_str = meta.get("sensor_type", "binary")
+            # Skip low z-scores — within normal operating variance
+            if z < MIN_Z_SCORE:
+                continue
+
             confidence = compute_entity_confidence(days_of_data, slot_n, sensor_type_str)
             pct_conf = round(confidence * 100)
             days_int = int(days_of_data)
@@ -822,6 +847,10 @@ def score_entities(current_states: dict | None = None) -> list:
 
         slot_n = b.get("n", 0)
         sensor_type_str = meta.get("sensor_type", "gauge")
+        # Skip low z-scores — within normal operating variance
+        if z < MIN_Z_SCORE:
+            continue
+
         confidence = compute_entity_confidence(days_of_data, slot_n, sensor_type_str)
         pct_conf = round(confidence * 100)
         days_int = int(days_of_data)
