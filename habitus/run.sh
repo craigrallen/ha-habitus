@@ -2,7 +2,7 @@
 
 SCAN=$(bashio::config 'scan_interval_hours')
 DAYS=$(bashio::config 'days_history')
-DAYS=$(( DAYS > 365 ? 365 : DAYS ))  # safety cap — prevent OOM on devices with <4GB RAM
+DAYS=$(( DAYS > 365 ? 365 : DAYS ))
 PORT=$(bashio::addon.ingress_port)
 NOTIFY=$(bashio::config 'notify_service')
 NOTIFY_ON=$(bashio::config 'notify_on_anomaly')
@@ -21,13 +21,13 @@ export HABITUS_NOTIFY_ON="${NOTIFY_ON}"
 export HABITUS_ANOMALY_THRESHOLD="${THRESHOLD}"
 export HABITUS_SCHEDULE="${SCHEDULE}"
 export HABITUS_TRAIN_TIME="${TRAIN_TIME}"
+export HABITUS_DAYS="${DAYS}"
 
 RESCAN_FLAG="/data/.rescan_requested"
 STATE_FILE="/data/run_state.json"
 
-bashio::log.info "Habitus v2.26.0 | Schedule: ${SCHEDULE} | Train: ${TRAIN_TIME} | Scan: ${SCAN}h"
+bashio::log.info "Habitus v2.27.0 | Schedule: ${SCHEDULE} | Train: ${TRAIN_TIME} | Scan: ${SCAN}h | Days: ${DAYS}"
 
-# Start web server inline — PYTHONPATH=/app so 'import habitus.web' resolves
 cd /app && python3 -u -c "
 import sys, os, traceback
 sys.path.insert(0, '/app')
@@ -78,4 +78,28 @@ start_web(int(os.environ.get('INGRESS_PORT','8099')))
 
     if [ "$FIRST_RUN" = "true" ]; then
         FIRST_RUN=false
-        done
+        bashio::log.info "Full training run (${DAYS} days)"
+        python3 -u -m habitus.main --days "$DAYS" --mode full \
+            || bashio::log.warning "Full training failed"
+
+    elif [ "$SCHEDULE" = "overnight" ]; then
+        if is_train_time; then
+            bashio::log.info "Overnight training window"
+            python3 -u -m habitus.main --days "$DAYS" --mode full \
+                || bashio::log.warning "Overnight training failed"
+        else
+            bashio::log.info "Score-only (daytime)"
+            python3 -u -m habitus.main --days "$DAYS" --mode score \
+                || bashio::log.warning "Score run failed"
+        fi
+    else
+        python3 -u -m habitus.main --days "$DAYS" --mode full \
+            || bashio::log.warning "Continuous run failed"
+    fi
+
+    bashio::log.info "Next check in ${SCAN}h"
+    for i in $(seq 1 $(( SCAN * 12 ))); do
+        sleep 300
+        [ -f "$RESCAN_FLAG" ] && break
+    done
+done
