@@ -1511,5 +1511,14 @@ def api_automation_gap():
     return jsonify(_read(GAP_PATH) or {})
 
 
+@app.route("/api/insights")
+@app.route("/ingress/api/insights")
+def api_insights():
+    """Return energy insights: peak hours, top consumers, waste, solar ratio."""
+    from habitus import insights as _ins  # noqa: PLC0415
+
+    return jsonify(_ins.compute_insights())
+
+
 def start_web(port=8099):
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
