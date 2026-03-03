@@ -1034,6 +1034,34 @@ async function load() {
     </div>`;
   }
 
+  // Day-normalized comparison
+  const cmp = pd.same_days_comparison || {};
+  const avgDaily = pd.this_month_avg_daily;
+  const lastAvgDaily = pd.last_month_avg_daily;
+  if (cmp.days) {
+    const arrow = cmp.delta_pct > 0
+      ? `<span style="color:var(--red)">↑ ${cmp.delta_pct}%</span>`
+      : cmp.delta_pct < 0
+      ? `<span style="color:var(--green)">↓ ${Math.abs(cmp.delta_pct)}%</span>`
+      : '';
+    phantomHtml += `<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:14px">
+      <div style="font-size:.78rem;color:var(--text3);margin-bottom:8px">SAME-PERIOD COMPARISON (first ${cmp.days} days)</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <div style="font-size:.72rem;color:var(--text3)">This month</div>
+          <div style="font-size:1.2rem;font-weight:700;color:var(--text)">${cmp.this_month_first_n} kWh</div>
+          <div style="font-size:.72rem;color:var(--text3)">${avgDaily} kWh/day avg</div>
+        </div>
+        <div>
+          <div style="font-size:.72rem;color:var(--text3)">Last month (first ${cmp.days} days)</div>
+          <div style="font-size:1.2rem;font-weight:700;color:var(--text)">${cmp.last_month_first_n} kWh</div>
+          <div style="font-size:.72rem;color:var(--text3)">${lastAvgDaily} kWh/day avg</div>
+        </div>
+      </div>
+      <div style="margin-top:8px;font-size:.82rem">${arrow} ${cmp.delta_kwh > 0 ? '+' : ''}${cmp.delta_kwh} kWh</div>
+    </div>`;
+  }
+
   // Monthly breakdown table
   if (months.length) {
     const maxMonth = Math.max(...months.map(m=>m.kwh), 1);

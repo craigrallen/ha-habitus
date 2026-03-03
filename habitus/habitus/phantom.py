@@ -135,13 +135,31 @@ async def _run_async() -> dict:
     
     total_12mo = sum(m.get("change", 0) for m in monthly)
     
-    # Period comparisons
+    # Period comparisons — day-normalized to avoid partial-period skew
     now = datetime.datetime.now(datetime.timezone.utc)
     current_month = now.strftime("%Y-%m")
-    last_month = (now.replace(day=1) - datetime.timedelta(days=1)).strftime("%Y-%m")
+    last_month_str = (now.replace(day=1) - datetime.timedelta(days=1)).strftime("%Y-%m")
     
     this_month_kwh = next((m["kwh"] for m in months_data if m["month"] == current_month), 0)
-    last_month_kwh = next((m["kwh"] for m in months_data if m["month"] == last_month), 0)
+    last_month_kwh = next((m["kwh"] for m in months_data if m["month"] == last_month_str), 0)
+    
+    # Day-of-month for normalization
+    days_into_month = now.day
+    last_month_days = (now.replace(day=1) - datetime.timedelta(days=1)).day  # total days in last month
+    
+    # Compare same number of days: first N days of this month vs first N days of last month
+    # Use daily stats for accurate day-level comparison
+    daily_stats = await _fetch_statistics(grid_entity, "day", 2)
+    this_month_daily = [d for d in daily_stats if datetime.datetime.fromtimestamp(d["start"]/1000, datetime.timezone.utc).strftime("%Y-%m") == current_month]
+    last_month_daily = [d for d in daily_stats if datetime.datetime.fromtimestamp(d["start"]/1000, datetime.timezone.utc).strftime("%Y-%m") == last_month_str]
+    
+    # First N days of each month (N = days into current month)
+    this_month_first_n = sum(d.get("change", 0) for d in this_month_daily[:days_into_month])
+    last_month_first_n = sum(d.get("change", 0) for d in last_month_daily[:days_into_month])
+    
+    # Daily average for meaningful comparison
+    this_month_avg_daily = round(this_month_kwh / max(days_into_month, 1), 1)
+    last_month_avg_daily = round(last_month_kwh / max(last_month_days, 1), 1)
     
     # Get hourly data for overnight baseline (last 30 days only — recent behavior)
     hourly = await _fetch_hourly_statistics(grid_entity, 30)
@@ -169,10 +187,18 @@ async def _run_async() -> dict:
         "grid_entity": grid_entity,
         "total_12mo_kwh": round(total_12mo, 1),
         "months": months_data,
-        "this_month_kwh": this_month_kwh,
-        "last_month_kwh": last_month_kwh,
-        "mom_delta_kwh": round(this_month_kwh - last_month_kwh, 1) if last_month_kwh else None,
-        "mom_pct": round(100 * (this_month_kwh - last_month_kwh) / last_month_kwh, 1) if last_month_kwh else None,
+        "this_month_kwh": round(this_month_kwh, 1),
+        "last_month_kwh": round(last_month_kwh, 1),
+        "days_into_month": days_into_month,
+        "this_month_avg_daily": this_month_avg_daily,
+        "last_month_avg_daily": last_month_avg_daily,
+        "same_days_comparison": {
+            "days": days_into_month,
+            "this_month_first_n": round(this_month_first_n, 1),
+            "last_month_first_n": round(last_month_first_n, 1),
+            "delta_kwh": round(this_month_first_n - last_month_first_n, 1),
+            "delta_pct": round(100 * (this_month_first_n - last_month_first_n) / last_month_first_n, 1) if last_month_first_n else None,
+        },
         "overnight_baseline": phantom_info,
         "idle_hours": sorted(IDLE_HOURS),
         "analysed_at": now.isoformat(),
