@@ -519,7 +519,31 @@ def detect_scenes(days: int = 30) -> list[dict[str, Any]]:
             if time_info["count"] > 0
             else 0
         )
-        confidence = int(min(95, (freq_score * 0.5 + time_consistency * 0.5)))
+        # Domain diversity bonus — scenes with multiple signal types are more convincing
+        # e.g. light + media_player + climate = strong scene; light + light = weaker
+        domains_in_scene = {e.split(".")[0] for e in entities}
+        # Categorise into signal types
+        signal_types = set()
+        for d in domains_in_scene:
+            if d in ("light",):
+                signal_types.add("lighting")
+            elif d in ("switch", "input_boolean"):
+                signal_types.add("switching")
+            elif d in ("media_player",):
+                signal_types.add("media")
+            elif d in ("climate", "fan"):
+                signal_types.add("comfort")
+            elif d in ("cover",):
+                signal_types.add("covers")
+            elif d in ("binary_sensor",):
+                signal_types.add("presence")
+            elif d in ("person", "device_tracker"):
+                signal_types.add("location")
+
+        # 1 type = baseline, 2 types = +10, 3+ types = +20
+        diversity_bonus = min(20, (len(signal_types) - 1) * 10) if len(signal_types) > 1 else 0
+
+        confidence = int(min(95, (freq_score * 0.4 + time_consistency * 0.4 + diversity_bonus * 0.2) + diversity_bonus))
 
         if confidence < MIN_CONFIDENCE:
             continue
