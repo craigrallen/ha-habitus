@@ -29,6 +29,8 @@ MIN_CO_OCCURRENCES = 5
 MIN_CONFIDENCE = 40
 # Domains we care about for scene detection
 SCENE_DOMAINS = ("light", "switch", "media_player", "fan", "cover", "climate", "input_boolean")
+# Trigger domains — entities that indicate user presence/activity (used as automation triggers)
+TRIGGER_DOMAINS = ("binary_sensor", "person", "device_tracker")
 
 
 def _get_state_changes(days: int = 30) -> list[dict[str, Any]]:
@@ -83,6 +85,9 @@ def _get_state_changes(days: int = 30) -> list[dict[str, Any]]:
                     OR sm.entity_id LIKE 'cover.%'
                     OR sm.entity_id LIKE 'climate.%'
                     OR sm.entity_id LIKE 'input_boolean.%'
+                    OR sm.entity_id LIKE 'binary_sensor.%'
+                    OR sm.entity_id LIKE 'person.%'
+                    OR sm.entity_id LIKE 'device_tracker.%'
                 )
                 ORDER BY s.last_changed_ts
             """
@@ -99,6 +104,9 @@ def _get_state_changes(days: int = 30) -> list[dict[str, Any]]:
                     OR entity_id LIKE 'cover.%'
                     OR entity_id LIKE 'climate.%'
                     OR entity_id LIKE 'input_boolean.%'
+                    OR entity_id LIKE 'binary_sensor.%'
+                    OR entity_id LIKE 'person.%'
+                    OR entity_id LIKE 'device_tracker.%'
                 )
                 ORDER BY last_changed_ts
             """

@@ -48,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `CLAUDE.md`, `PRD.md`, `AGENTS.md` for autonomous coding infrastructure
 
 ### Changed
+- Scene detector now mines motion sensors, presence detection, person entities, and device trackers alongside lights/switches/media
+- Motion/presence-triggered automations generated when binary_sensor co-occurs with lights in a scene
 - Minimum z-score threshold raised to 3.0σ — deviations below this are normal operating variance
 - Exclude non-behavioral sensors from anomaly scoring: crypto prices (xbt/xrp/eth), reactive power (kvar/kvarh), network device memory/CPU utilization
 

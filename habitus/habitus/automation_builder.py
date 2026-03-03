@@ -203,6 +203,46 @@ def build_time_automation_yaml(
   action:{actions}"""
 
 
+def build_motion_automation_yaml(
+    alias: str,
+    description: str,
+    trigger_entity: str,
+    action_entities: list[str],
+    hour_start: int | None = None,
+    hour_end: int | None = None,
+) -> str:
+    """Generate motion/presence-triggered automation YAML.
+
+    Creates automations like: "When motion detected in living room after 18:00,
+    turn on living room lights and TV."
+    """
+    condition = ""
+    if hour_start is not None and hour_end is not None:
+        condition = f"""
+  condition:
+    - condition: time
+      after: "{hour_start:02d}:00:00"
+      before: "{hour_end:02d}:00:00\""""
+
+    actions = ""
+    for eid in action_entities:
+        domain = eid.split(".")[0]
+        service = f"{domain}.turn_on"
+        actions += f"""
+    - service: {service}
+      target:
+        entity_id: {eid}"""
+
+    return f"""automation:
+  alias: "{alias}"
+  description: "{description}"
+  trigger:
+    - platform: state
+      entity_id: {trigger_entity}
+      to: "on"{condition}
+  action:{actions}"""
+
+
 def generate_smart_suggestions(
     scenes: list[dict[str, Any]],
     patterns: dict[str, Any] | None = None,
@@ -247,6 +287,44 @@ def generate_smart_suggestions(
             "source": "scene_detector",
         }
         suggestions.append(suggestion)
+
+    # ── Motion/presence-triggered suggestions ──
+    # If a scene contains binary_sensor (motion/presence) co-occurring with
+    # lights/switches/media, generate a motion-triggered automation
+    for scene in scenes:
+        trigger_entities = [e for e in scene.get("entities", [])
+                          if e.startswith("binary_sensor.") and
+                          any(kw in e.lower() for kw in ("motion", "occupancy", "presence", "pir"))]
+        action_entities = [e for e in scene.get("entities", [])
+                         if not e.startswith(("binary_sensor.", "person.", "device_tracker."))]
+        if trigger_entities and action_entities:
+            tp = scene.get("time_pattern", {})
+            for trigger in trigger_entities:
+                trigger_name = trigger.split(".")[1].replace("_", " ").title()
+                alias = f"Habitus — {trigger_name} → {scene['name']}"
+                yaml = build_motion_automation_yaml(
+                    alias=alias,
+                    description=f"When {trigger_name} detects activity, activate {scene['name']}",
+                    trigger_entity=trigger,
+                    action_entities=action_entities,
+                    hour_start=tp.get("peak_hour", 18) - 2 if tp.get("peak_hour") else None,
+                    hour_end=tp.get("peak_hour", 22) + 2 if tp.get("peak_hour") else None,
+                )
+                overlap = _entities_overlap(action_entities, ha_automations)
+                suggestions.append({
+                    "id": f"smart_motion_{scene['id']}_{trigger.split('.')[-1]}",
+                    "title": f"When {trigger_name}: activate {scene['name']}",
+                    "description": f"Motion/presence trigger → lights and devices you typically use together",
+                    "confidence": min(scene.get("confidence", 50) + 10, 100),
+                    "category": "motion",
+                    "applicable": True,
+                    "entities": action_entities,
+                    "trigger": trigger,
+                    "time_pattern": tp,
+                    "yaml": yaml,
+                    "overlap_automation": overlap,
+                    "source": "scene_detector",
+                })
 
     # ── Pattern-based suggestions (from existing suggestions, re-tagged) ──
     if existing_suggestions:
