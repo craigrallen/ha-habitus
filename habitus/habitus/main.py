@@ -506,15 +506,15 @@ async def run(days_history: int, mode: str = "full") -> None:
             full_from = saved if saved > cap_iso else cap_iso
             log.info(f"Retraining {days_history}d window {full_from} → {now_iso}")
             set_progress("fetching", 0, len(stat_ids), 0, 0, 0)
-            df_full = await fetch_stats(stat_ids, full_from, now_iso)
-            if df_full.empty:
+            df = await fetch_stats(stat_ids, full_from, now_iso)
+            if df.empty:
                 log.warning("No data")
                 return
-            set_progress("building_baselines", len(stat_ids), len(stat_ids), len(df_full), 0, 0)
+            set_progress("building_baselines", len(stat_ids), len(stat_ids), len(df), 0, 0)
             log.info("Building entity baselines...")
-            anomaly_breakdown.build_entity_baselines(df_full)
-            features = build_features(df_full)
-            del df_full
+            anomaly_breakdown.build_entity_baselines(df)
+            features = build_features(df)
+            del df
             set_progress("training", len(stat_ids), len(stat_ids), len(features), 0, 0)
             log.info(f"Training IsolationForest on {len(features):,} rows...")
             model, scaler = train_model(features)
