@@ -4,11 +4,14 @@ import datetime
 import logging
 import os
 import pickle
+from typing import Any
 
 import pandas as pd
 
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
+HEMISPHERE = os.environ.get("HEMISPHERE", "north")
+
 FEATURE_COLS = [
     "hour_of_day",
     "day_of_week",
@@ -19,27 +22,66 @@ FEATURE_COLS = [
     "sensor_changes",
 ]
 
-SEASONS = {
+# Northern-Hemisphere month groupings
+SEASONS: dict[str, list[int]] = {
     "winter": [12, 1, 2],
     "spring": [3, 4, 5],
     "summer": [6, 7, 8],
     "autumn": [9, 10, 11],
 }
 
+# Southern Hemisphere flips summer/winter and spring/autumn
+SOUTHERN_SEASON_MAP: dict[str, str] = {
+    "winter": "summer",
+    "summer": "winter",
+    "spring": "autumn",
+    "autumn": "spring",
+}
 
-def current_season():
+
+def current_season(hemisphere: str | None = None) -> str:
+    """Return the current meteorological season, hemisphere-aware.
+
+    Args:
+        hemisphere: ``"north"`` or ``"south"``. Defaults to the
+            ``HEMISPHERE`` environment variable (default ``"north"``).
+
+    Returns:
+        One of ``"winter"``, ``"spring"``, ``"summer"``, ``"autumn"``.
+    """
+    hemi = hemisphere or HEMISPHERE
     m = datetime.datetime.now().month
+    north_season = "winter"
     for s, months in SEASONS.items():
         if m in months:
-            return s
-    return "winter"
+            north_season = s
+            break
+    if hemi == "south":
+        return SOUTHERN_SEASON_MAP[north_season]
+    return north_season
 
 
-def train_seasonal_models(features: pd.DataFrame):
+def train_seasonal_models(features: pd.DataFrame) -> list[str]:
+    """Train one IsolationForest per season and persist to ``DATA_DIR``.
+
+    Saves individual season pickles (``model_{season}.pkl``,
+    ``scaler_{season}.pkl``) **and** a combined ``seasonal_models.pkl``
+    bundle for all successfully trained seasons.
+
+    Args:
+        features: Feature ``DataFrame`` containing a ``"month"`` column
+            and all columns listed in ``FEATURE_COLS``.
+
+    Returns:
+        List of season names for which a model was successfully trained.
+    """
     from sklearn.ensemble import IsolationForest
     from sklearn.preprocessing import StandardScaler
 
-    saved = []
+    saved: list[str] = []
+    bundle_models: dict[str, Any] = {}
+    bundle_scalers: dict[str, Any] = {}
+
     for season, months in SEASONS.items():
         subset = features[features["month"].isin(months)]
         if len(subset) < 72:
@@ -56,13 +98,63 @@ def train_seasonal_models(features: pd.DataFrame):
             pickle.dump(model, f)
         with open(spath, "wb") as f:
             pickle.dump(scaler, f)
+        bundle_models[season] = model
+        bundle_scalers[season] = scaler
         saved.append(season)
-        log.info(f"Season {season}: trained on {len(subset)}h ({len(subset)//24}d)")
+        log.info(f"Season {season}: trained on {len(subset)}h ({len(subset) // 24}d)")
+
+    if saved:
+        _save_seasonal_bundle(bundle_models, bundle_scalers)
+
     return saved
 
 
-def score_with_best_model(X_raw):
-    """Score using seasonal model if available, else fall back to main model."""
+def _save_seasonal_bundle(models: dict[str, Any], scalers: dict[str, Any]) -> None:
+    """Persist all seasonal models and scalers as a single bundle file.
+
+    Writes ``seasonal_models.pkl`` to ``DATA_DIR`` containing a dict with
+    ``"models"`` and ``"scalers"`` keys.
+
+    Args:
+        models: Mapping of season name to fitted ``IsolationForest``.
+        scalers: Mapping of season name to fitted ``StandardScaler``.
+    """
+    bundle: dict[str, Any] = {"models": models, "scalers": scalers}
+    path = os.path.join(DATA_DIR, "seasonal_models.pkl")
+    with open(path, "wb") as f:
+        pickle.dump(bundle, f)
+    log.info(f"Seasonal bundle saved ({len(models)} seasons) → {path}")
+
+
+def load_seasonal_bundle() -> tuple[dict[str, Any], dict[str, Any]]:
+    """Load the combined ``seasonal_models.pkl`` bundle from ``DATA_DIR``.
+
+    Returns:
+        Tuple of ``(models, scalers)`` where each is a dict keyed by
+        season name. Returns ``({}, {})`` if the bundle does not exist.
+    """
+    path = os.path.join(DATA_DIR, "seasonal_models.pkl")
+    if not os.path.exists(path):
+        return {}, {}
+    with open(path, "rb") as f:
+        bundle: dict[str, Any] = pickle.load(f)
+    return bundle.get("models", {}), bundle.get("scalers", {})
+
+
+def score_with_best_model(X_raw: Any) -> tuple[int, str]:
+    """Score using the current-season model, falling back to the main model.
+
+    Selects the model for the hemisphere-aware current season; if that model
+    has not been trained yet, falls back to ``model.pkl`` / ``scaler.pkl``.
+
+    Args:
+        X_raw: Raw feature array of shape ``(1, n_features)``.
+
+    Returns:
+        Tuple of ``(anomaly_score, model_identifier)`` where
+        ``anomaly_score`` is 0–100 and ``model_identifier`` is the season
+        name, ``"main"``, or ``"error"``.
+    """
     season = current_season()
     spath = os.path.join(DATA_DIR, f"scaler_{season}.pkl")
     mpath = os.path.join(DATA_DIR, f"model_{season}.pkl")
@@ -90,8 +182,14 @@ def score_with_best_model(X_raw):
         return 0, "error"
 
 
-def seasonal_status():
-    status = {}
+def seasonal_status() -> dict[str, bool]:
+    """Return presence status of each seasonal model file.
+
+    Returns:
+        Dict mapping each season name to ``True`` if its ``model_{season}.pkl``
+        exists in ``DATA_DIR``, ``False`` otherwise.
+    """
+    status: dict[str, bool] = {}
     for season in SEASONS:
         mpath = os.path.join(DATA_DIR, f"model_{season}.pkl")
         status[season] = os.path.exists(mpath)
