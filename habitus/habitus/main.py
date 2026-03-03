@@ -66,9 +66,9 @@ FEATURE_COLS = [
     "grid_kwh_w",
     # Water — usage proxy + leak detection
     "water_l_per_h",  # pump watts running = water flowing
-    "water_leak",        # binary leak sensor
+    "water_leak",  # binary leak sensor
     # Gas — smart meter m³/h
-    "gas_m3_per_h",eak sensor active
+    "gas_m3_per_h",
 ]
 
 # Domains that produce useful behavioral time-series data
