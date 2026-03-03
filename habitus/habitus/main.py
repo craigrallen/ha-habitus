@@ -281,17 +281,36 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     hours["month"] = hours["hour"].dt.month
     _max_w = int(os.environ.get("HABITUS_MAX_POWER_KW", "25")) * 1000
     _power_entity = os.environ.get("HABITUS_POWER_ENTITY", "").strip()
+    _energy_grid = os.environ.get("HABITUS_ENERGY_GRID", "").strip()
+    _energy_rates = [e for e in os.environ.get("HABITUS_ENERGY_RATES", "").split(",") if e]
+
     if _power_entity:
-        # User specified a single total-power entity — use it directly
+        # Explicit override — use as-is (watts)
         power = df[df["entity_id"] == _power_entity].copy()
+        power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(lower=0, upper=_max_w)
+        total_power = power.groupby("hour")["v"].max().rename("total_power_w")
+    elif _energy_grid:
+        # Grid kWh entity from HA Energy Dashboard — convert hourly delta to W
+        grid = df[df["entity_id"] == _energy_grid].copy()
+        grid["v"] = pd.to_numeric(grid["mean"], errors="coerce").clip(lower=0)
+        grid = grid.set_index("hour").sort_index()
+        # kWh delta per hour × 1000 = average watts for that hour
+        kwh_per_hour = grid["v"].diff().clip(lower=0, upper=_max_w / 1000)
+        total_power = (kwh_per_hour * 1000).rename("total_power_w")
+    elif _energy_rates:
+        # Per-device watt sensors from Energy Dashboard — sum these (no overlap)
+        power = df[df["entity_id"].isin(_energy_rates)].copy()
+        power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(lower=0, upper=_max_w)
+        total_power = power.groupby("hour")["v"].sum().rename("total_power_w")
     else:
+        # Fallback: max of any power-like sensor (avoids double-counting)
         power = df[
-            df["entity_id"].str.contains("consumed_w|watt|power|inverter|load", case=False, na=False)
+            df["entity_id"].str.contains(
+                "consumed_w|watt|power|inverter|load", case=False, na=False
+            )
         ].copy()
-    power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(lower=0, upper=_max_w)
-    # Use MAX per hour, not sum — avoids double-counting overlapping sensors
-    # (e.g. inverter total + heat pump + underfloor heating all overlap)
-    total_power = power.groupby("hour")["v"].max().rename("total_power_w")
+        power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(lower=0, upper=_max_w)
+        total_power = power.groupby("hour")["v"].max().rename("total_power_w")
     temp = df[df["entity_id"].str.contains("temperature", case=False, na=False)].copy()
     temp["v"] = pd.to_numeric(temp["mean"], errors="coerce")
     avg_temp = temp.groupby("hour")["v"].mean().rename("avg_temp_c")
@@ -405,6 +424,48 @@ def publish(entity_id, state, attributes=None):
             log.error(f"Publish {entity_id}: {r.status_code}")
     except Exception as e:
         log.error(f"Publish {entity_id}: {e}")
+
+
+async def get_energy_entities() -> dict:
+    """Query HA Energy Dashboard config and return best power entities.
+
+    Returns:
+        dict with keys:
+          - grid_kwh: grid consumption entity (kWh, cumulative)
+          - grid_rate: grid consumption rate entity (W, instantaneous) if available
+          - device_rates: list of per-device watt sensors from energy dashboard
+    """
+    try:
+        async with websockets.connect(HA_WS_URL) as ws:
+            await ws.recv()
+            await ws.send(json.dumps({"type": "auth", "access_token": HA_TOKEN}))
+            r = json.loads(await ws.recv())
+            if r["type"] != "auth_ok":
+                return {}
+            await ws.send(json.dumps({"id": 1, "type": "energy/get_prefs"}))
+            r = json.loads(await ws.recv())
+            prefs = r.get("result", {})
+
+        result = {}
+        for src in prefs.get("energy_sources", []):
+            if src.get("type") == "grid":
+                flows = src.get("flow_from", [])
+                if flows:
+                    result["grid_kwh"] = flows[0].get("stat_energy_from")
+
+        # Per-device watt-rate sensors (instantaneous W)
+        result["device_rates"] = [
+            d["stat_rate"] for d in prefs.get("device_consumption", []) if d.get("stat_rate")
+        ]
+        log.info(
+            "Energy config: grid=%s, %d device rate sensors",
+            result.get("grid_kwh"),
+            len(result.get("device_rates", [])),
+        )
+        return result
+    except Exception as e:
+        log.warning("Could not fetch energy prefs: %s", e)
+        return {}
 
 
 def persistent_notification(notif_id: str, title: str, message: str) -> None:
@@ -588,6 +649,15 @@ async def run(days_history: int, mode: str = "full") -> None:
                 send_notification("🧠 Habitus — Unusual Activity", "\n".join(msg_parts))
             _publish_sensors(anomaly_score, is_anomalous, training_days, entity_count)
             return
+
+    # Auto-detect energy entities from HA Energy Dashboard
+    if not os.environ.get("HABITUS_POWER_ENTITY") and not os.environ.get("HABITUS_ENERGY_GRID"):
+        energy = await get_energy_entities()
+        if energy.get("grid_kwh"):
+            os.environ["HABITUS_ENERGY_GRID"] = energy["grid_kwh"]
+            log.info("Using Energy Dashboard grid entity: %s", energy["grid_kwh"])
+        if energy.get("device_rates"):
+            os.environ["HABITUS_ENERGY_RATES"] = ",".join(energy["device_rates"])
 
     stat_ids = await get_stat_ids()
     if not stat_ids:
