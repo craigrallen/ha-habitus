@@ -727,6 +727,20 @@ async def run(days_history: int, mode: str = "full") -> None:
         if energy.get("grid_kwh"):
             os.environ["HABITUS_ENERGY_GRID"] = energy["grid_kwh"]
             log.info("Using Energy Dashboard grid entity: %s", energy["grid_kwh"])
+            # Prefer a real-time watt sensor over kWh delta — look for _w companion
+            # e.g. sensor.foo_electric_consumption_kwh → sensor.foo_electric_consumption_w
+            kwh_id = energy["grid_kwh"]
+            watt_candidate = kwh_id.replace("_kwh", "_w").replace("_energy", "_power")
+            try:
+                headers = {"Authorization": f"Bearer {HA_TOKEN}"}
+                r = requests.get(f"{HA_URL}/api/states/{watt_candidate}", headers=headers, timeout=5)
+                if r.status_code == 200:
+                    uom = r.json().get("attributes", {}).get("unit_of_measurement", "")
+                    if uom == "W":
+                        os.environ["HABITUS_POWER_ENTITY"] = watt_candidate
+                        log.info("Auto-detected watt sensor companion: %s (preferred over kWh delta)", watt_candidate)
+            except Exception as e:
+                log.debug("Watt companion probe failed: %s", e)
         if energy.get("device_rates"):
             os.environ["HABITUS_ENERGY_RATES"] = ",".join(energy["device_rates"])
         if energy.get("gas"):
