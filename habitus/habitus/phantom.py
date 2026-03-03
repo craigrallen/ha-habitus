@@ -95,7 +95,19 @@ async def _fetch_hourly_statistics(entity_id: str, days: int = 60) -> list[dict]
 
 def run() -> dict:
     """Main entry point — fetch stats from Energy Dashboard, compute phantom baseline."""
-    return asyncio.get_event_loop().run_until_complete(_run_async())
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    
+    if loop and loop.is_running():
+        # Already in an async context (Flask) — create a new thread with its own loop
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            future = pool.submit(asyncio.run, _run_async())
+            return future.result(timeout=60)
+    else:
+        return asyncio.run(_run_async())
 
 
 async def _run_async() -> dict:
