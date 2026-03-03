@@ -1027,9 +1027,14 @@ def api_rescan():
         for p in [MODEL_PATH, STATE_PATH, BASELINE_PATH, PATTERNS_PATH, SUGGESTIONS_PATH]:
             if os.path.exists(p):
                 os.remove(p)
-        days = int(os.environ.get("HABITUS_DAYS", "3650"))
-        started = _trainer.start(days=days, mode="full")
-        return jsonify({"ok": True, "started": started, "already_running": not started})
+        days = int(os.environ.get("HABITUS_DAYS", "365"))
+        # Use progressive training: 30d → 60d → 90d → 180d → max
+        from habitus import progressive as _prog  # noqa: PLC0415
+
+        if _prog.is_expanding():
+            return jsonify({"ok": False, "error": "Progressive training already running"}), 409
+        _prog.start_progressive(max_days=days)
+        return jsonify({"ok": True, "started": True, "progressive": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
