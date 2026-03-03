@@ -847,9 +847,14 @@ async def run(days_history: int, mode: str = "full") -> None:
             )
             save_state(state)
             log.info(f"Model ready — preliminary score {_partial_score}/100")
-            set_progress("seasonal_training", len(stat_ids), len(stat_ids), len(features), 0, 0)
-            log.info("Training seasonal models...")
-            seasonal.train_seasonal_models(features)
+            # Only train seasonal models with enough data (need ≥180d for all seasons)
+            _days_of_data = (features["hour"].max() - features["hour"].min()).days if not features.empty else 0
+            if _days_of_data >= 180:
+                set_progress("seasonal_training", len(stat_ids), len(stat_ids), len(features), 0, 0)
+                log.info("Training seasonal models (%d days of data)...", _days_of_data)
+                seasonal.train_seasonal_models(features)
+            else:
+                log.info("Skipping seasonal models — only %d days of data (need ≥180)", _days_of_data)
             set_progress("pattern_analysis", len(stat_ids), len(stat_ids), len(features), 0, 0)
             log.info("Discovering patterns...")
             pattern_engine.run(features, stat_ids)
@@ -918,9 +923,14 @@ async def run(days_history: int, mode: str = "full") -> None:
         )
         save_state(state)
         log.info(f"Model ready — preliminary score {_partial_score}/100")
-        set_progress("seasonal_training", len(stat_ids), len(stat_ids), len(features), 0, 0)
-        log.info("Training seasonal models...")
-        seasonal.train_seasonal_models(features)
+        # Only train seasonal models with enough data (need ≥180d for all seasons)
+        _days_of_data = (features["hour"].max() - features["hour"].min()).days if not features.empty else 0
+        if _days_of_data >= 180:
+            set_progress("seasonal_training", len(stat_ids), len(stat_ids), len(features), 0, 0)
+            log.info("Training seasonal models (%d days of data)...", _days_of_data)
+            seasonal.train_seasonal_models(features)
+        else:
+            log.info("Skipping seasonal models — only %d days of data (need ≥180)", _days_of_data)
         set_progress("pattern_analysis", len(stat_ids), len(stat_ids), len(features), 0, 0)
         log.info("Discovering patterns...")
         pattern_engine.run(features, stat_ids)
