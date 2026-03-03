@@ -602,3 +602,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Web startup crash due to duplicate Flask endpoint name `api_training_status`
 - Device training status endpoint renamed to `/api/device_training/status`
 
+
+## [3.7.5] - 2026-03-03
+
+### Fixed
+- NILM aggregate reading now falls back to Home Assistant History API when recorder DB query returns no rows
+- Improves compatibility across HA recorder schema/history setups
+- Unblocks NILM runs on entities visible in HA but missing from direct DB reads
+

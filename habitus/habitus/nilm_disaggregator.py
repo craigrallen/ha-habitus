@@ -61,34 +61,85 @@ GENERIC_APPLIANCES = {
 
 
 def _get_aggregate_power(entity_id: str, days: int = 7) -> list[tuple[float, float]]:
-    """Get aggregate power readings as (timestamp, watts) pairs."""
-    if not os.path.exists(HA_DB):
-        return []
+    """Get aggregate power readings as (timestamp, watts) pairs.
 
+    Primary: SQLite recorder DB
+    Fallback: HA history API (for setups where recorder schema/history access differs)
+    """
     cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)
     cutoff_ts = cutoff.timestamp()
 
-    try:
-        conn = sqlite3.connect(f"file:{HA_DB}?mode=ro", uri=True)
-        rows = conn.execute("""
-            SELECT s.state, s.last_changed_ts FROM states s
-            JOIN states_meta sm ON s.metadata_id = sm.metadata_id
-            WHERE sm.entity_id = ? AND s.last_changed_ts > ?
-            ORDER BY s.last_changed_ts
-        """, (entity_id, cutoff_ts)).fetchall()
-        conn.close()
+    # 1) DB path
+    if os.path.exists(HA_DB):
+        try:
+            conn = sqlite3.connect(f"file:{HA_DB}?mode=ro", uri=True)
+            rows = conn.execute("""
+                SELECT s.state, s.last_changed_ts FROM states s
+                JOIN states_meta sm ON s.metadata_id = sm.metadata_id
+                WHERE sm.entity_id = ? AND s.last_changed_ts > ?
+                ORDER BY s.last_changed_ts
+            """, (entity_id, cutoff_ts)).fetchall()
+            conn.close()
 
+            result = []
+            for state_val, ts in rows:
+                try:
+                    w = float(state_val)
+                    if 0 <= w <= 25000:
+                        result.append((ts, w))
+                except (ValueError, TypeError):
+                    continue
+            if result:
+                return result
+        except Exception as e:
+            log.warning("nilm: DB read failed: %s", e)
+
+    # 2) HA API fallback
+    try:
+        import requests
+        ha_url = os.environ.get("HA_URL", "http://supervisor/core")
+        token = os.environ.get("SUPERVISOR_TOKEN", os.environ.get("HABITUS_HA_TOKEN", ""))
+        if not token:
+            return []
+
+        start_iso = cutoff.isoformat()
+        url = f"{ha_url}/api/history/period/{start_iso}"
+        params = {
+            "filter_entity_id": entity_id,
+            "minimal_response": "1",
+            "no_attributes": "1",
+            "significant_changes_only": "0",
+        }
+        headers = {"Authorization": f"Bearer {token}"}
+        r = requests.get(url, headers=headers, params=params, timeout=60)
+        if r.status_code != 200:
+            return []
+
+        payload = r.json()
+        if not payload or not isinstance(payload, list):
+            return []
+
+        # Home Assistant returns list-of-lists
+        series = payload[0] if payload and isinstance(payload[0], list) else []
         result = []
-        for state_val, ts in rows:
+        for item in series:
             try:
+                state_val = item.get("state")
+                ts_raw = item.get("last_changed") or item.get("last_updated")
+                if state_val is None or ts_raw is None:
+                    continue
                 w = float(state_val)
-                if 0 <= w <= 25000:
-                    result.append((ts, w))
-            except (ValueError, TypeError):
+                if not (0 <= w <= 25000):
+                    continue
+                dt = datetime.datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+                result.append((dt.timestamp(), w))
+            except Exception:
                 continue
+        if result:
+            log.info("nilm: loaded %d readings from HA history API for %s", len(result), entity_id)
         return result
     except Exception as e:
-        log.warning("nilm: DB read failed: %s", e)
+        log.warning("nilm: API fallback failed: %s", e)
         return []
 
 
