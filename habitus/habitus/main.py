@@ -1550,31 +1550,6 @@ def _publish_sensors(
     )
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Habitus ML engine — trains behavioral model and scores current state."
-    )
-    parser.add_argument(
-        "--days",
-        type=int,
-        default=365,
-        help="Maximum history window in days (HA limits to what it has)",
-    )
-    parser.add_argument(
-        "--mode",
-        choices=["full", "score"],
-        default="full",
-        help=(
-            "full: fetch new data, retrain model, score, publish. "
-            "score: skip training, only score current state and publish. "
-            "In overnight schedule, daytime runs use 'score' to avoid "
-            "resource-intensive training during active hours."
-        ),
-    )
-    args = parser.parse_args()
-    asyncio.run(run(days_history=args.days, mode=args.mode))
-
-
 async def _register_lovelace_card():
     """Register Habitus Lovelace card resource and inject into default dashboard."""
     import json
@@ -1646,3 +1621,28 @@ async def _register_lovelace_card():
         import logging
 
         logging.getLogger("habitus").warning("Lovelace card registration failed: %s", exc)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Habitus ML engine — trains behavioral model and scores current state."
+    )
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=365,
+        help="Maximum history window in days (HA limits to what it has)",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["full", "score"],
+        default="full",
+        help=(
+            "full: fetch new data, retrain model, score, publish. "
+            "score: skip training, only score current state and publish. "
+            "In overnight schedule, daytime runs use 'score' to avoid "
+            "resource-intensive training during active hours."
+        ),
+    )
+    args = parser.parse_args()
+    asyncio.run(run(days_history=args.days, mode=args.mode))

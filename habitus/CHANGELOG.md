@@ -618,3 +618,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prioritises heater-like monitor names during API learning pass
 - Enables smart-plug-assisted fingerprinting even when DB access path is limited
 
+
+## [3.7.7] - 2026-03-03
+
+### Fixed
+- Full training crash: `_register_lovelace_card` NameError caused by `__main__` block executing before function definition
+- Moved runtime entry block to end of file so helper functions are defined before run
+
