@@ -7,7 +7,6 @@ import argparse
 import asyncio
 import datetime
 import json
-import websockets
 import logging
 import os
 import pickle
@@ -15,6 +14,7 @@ import pickle
 import numpy as np
 import pandas as pd
 import requests
+import websockets
 
 from . import activity as activity_engine
 from . import anomaly_breakdown, seasonal
@@ -56,6 +56,8 @@ FEATURE_COLS = [
     "door_events",
     "outdoor_temp_c",
     "activity_diversity",
+    # Grid energy delta — kWh proxy, cross-validates watt sensors
+    "grid_kwh_w",
 ]
 
 # Domains that produce useful behavioral time-series data
@@ -317,7 +319,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     avg_temp = temp.groupby("hour")["v"].mean().rename("avg_temp_c")
     activity = df.groupby("hour").size().rename("sensor_changes")
     features = hours.set_index("hour")
-    for s in [total_power, avg_temp, activity]:
+    for s in [total_power, avg_temp, activity, grid_kwh_w]:
         features = features.join(s, how="left")
     # Merge activity features from activity engine
     try:
