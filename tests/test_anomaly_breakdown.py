@@ -13,12 +13,16 @@ import responses
 from habitus.habitus.anomaly_breakdown import (
     build_entity_baselines,
     compute_breakdown,
+    compute_entity_confidence,
+    compute_weighted_score,
     score_entities,
     _guess_unit,
     _fmt,
     _day,
     COLD_START_DAYS,
     LOW_SAMPLE_THRESHOLD,
+    MIN_CONFIDENCE,
+    SENSOR_TYPE_CERTAINTY,
     ENTITY_BASELINES_PATH,
     ENTITY_ANOMALIES_PATH,
     ENTITY_LIFECYCLE_PATH,
@@ -938,3 +942,266 @@ class TestColdStartProtection:
             data2 = json.load(f)
         assert "_binary_state" in data2
         assert "_z_score_run" in data2
+
+
+class TestConfidenceWeighting:
+    """Tests for TASK-019: Confidence-Weighted Anomaly Score Aggregation."""
+
+    # ── compute_entity_confidence ───────────────────────────────────────────
+
+    def test_full_confidence_at_30_days_20_samples_gauge(self):
+        """30 days + 20 slot samples + gauge type → confidence = 1.0."""
+        conf = compute_entity_confidence(30.0, 20, "gauge")
+        assert conf == pytest.approx(1.0)
+
+    def test_age_factor_caps_at_1(self):
+        """More than 30 days of data still caps age factor at 1.0."""
+        conf_30 = compute_entity_confidence(30.0, 20, "gauge")
+        conf_90 = compute_entity_confidence(90.0, 20, "gauge")
+        assert conf_30 == pytest.approx(conf_90)
+
+    def test_sample_factor_caps_at_1(self):
+        """More than 20 slot samples still caps sample factor at 1.0."""
+        conf_20 = compute_entity_confidence(30.0, 20, "gauge")
+        conf_100 = compute_entity_confidence(30.0, 100, "gauge")
+        assert conf_20 == pytest.approx(conf_100)
+
+    def test_low_days_reduces_confidence(self):
+        """7 days of data (age_factor=7/30) reduces confidence proportionally."""
+        conf = compute_entity_confidence(7.0, 20, "gauge")
+        assert conf == pytest.approx(7.0 / 30.0 * 1.0 * 1.0, rel=1e-4)
+
+    def test_low_samples_reduces_confidence(self):
+        """5 slot samples (sample_factor=5/20) reduces confidence proportionally."""
+        conf = compute_entity_confidence(30.0, 5, "gauge")
+        assert conf == pytest.approx(1.0 * (5.0 / 20.0) * 1.0, rel=1e-4)
+
+    def test_sensor_type_certainty_applied(self):
+        """Binary sensor certainty (0.8) is applied to the confidence formula."""
+        conf_gauge = compute_entity_confidence(30.0, 20, "gauge")
+        conf_binary = compute_entity_confidence(30.0, 20, "binary")
+        assert conf_gauge == pytest.approx(1.0)
+        assert conf_binary == pytest.approx(0.8)
+
+    def test_unknown_sensor_type_defaults_to_0_7(self):
+        """Unknown sensor type defaults to 0.7 certainty."""
+        conf = compute_entity_confidence(30.0, 20, "unknown_type")
+        assert conf == pytest.approx(0.7)
+
+    def test_zero_days_gives_zero_confidence(self):
+        """Zero days of data → zero confidence regardless of other factors."""
+        conf = compute_entity_confidence(0.0, 20, "gauge")
+        assert conf == pytest.approx(0.0)
+
+    def test_zero_samples_gives_zero_confidence(self):
+        """Zero slot samples → zero confidence."""
+        conf = compute_entity_confidence(30.0, 0, "gauge")
+        assert conf == pytest.approx(0.0)
+
+    def test_all_sensor_types_in_certainty_map(self):
+        """All five sensor types must have a certainty entry."""
+        for stype in ("gauge", "accumulating", "binary", "setpoint", "event"):
+            assert stype in SENSOR_TYPE_CERTAINTY
+            assert 0.0 < SENSOR_TYPE_CERTAINTY[stype] <= 1.0
+
+    # ── compute_weighted_score ──────────────────────────────────────────────
+
+    def test_empty_list_returns_zero(self):
+        """compute_weighted_score on empty list must return 0.0."""
+        assert compute_weighted_score([]) == pytest.approx(0.0)
+
+    def test_all_below_min_confidence_returns_zero(self):
+        """All entities below MIN_CONFIDENCE threshold → weighted score = 0.0."""
+        anomalies = [
+            {"z_score": 5.0, "confidence": 0.05},
+            {"z_score": 3.0, "confidence": 0.0},
+        ]
+        assert compute_weighted_score(anomalies) == pytest.approx(0.0)
+
+    def test_weighted_average_math(self):
+        """Verify: Σ(z×conf) / Σ(conf) for two entities above threshold."""
+        anomalies = [
+            {"z_score": 4.0, "confidence": 0.5},
+            {"z_score": 2.0, "confidence": 1.0},
+        ]
+        # Expected: (4.0*0.5 + 2.0*1.0) / (0.5 + 1.0) = (2.0+2.0)/1.5 = 2.667
+        expected = (4.0 * 0.5 + 2.0 * 1.0) / (0.5 + 1.0)
+        assert compute_weighted_score(anomalies) == pytest.approx(expected, rel=1e-3)
+
+    def test_low_confidence_entity_excluded_from_numerator(self):
+        """Entity below MIN_CONFIDENCE must not contribute to weighted average."""
+        # One high-confidence entity at z=1.0, one below-threshold at z=99.0
+        anomalies = [
+            {"z_score": 1.0, "confidence": 1.0},
+            {"z_score": 99.0, "confidence": MIN_CONFIDENCE / 2},
+        ]
+        result = compute_weighted_score(anomalies)
+        # Only the high-confidence entity contributes → weighted score = 1.0
+        assert result == pytest.approx(1.0, rel=1e-3)
+
+    def test_single_entity_returns_its_zscore(self):
+        """Single eligible entity → weighted score equals its z_score."""
+        anomalies = [{"z_score": 3.5, "confidence": 0.9}]
+        assert compute_weighted_score(anomalies) == pytest.approx(3.5, rel=1e-3)
+
+    def test_higher_confidence_entity_dominates(self):
+        """Higher-confidence entity should pull weighted score toward its z_score."""
+        # High-conf (0.9) at z=2.0 vs low-conf (0.2) at z=8.0
+        anomalies = [
+            {"z_score": 2.0, "confidence": 0.9},
+            {"z_score": 8.0, "confidence": 0.2},
+        ]
+        result = compute_weighted_score(anomalies)
+        # Weighted avg: (2.0*0.9 + 8.0*0.2) / (0.9+0.2) = (1.8+1.6)/1.1 ≈ 3.09
+        expected = (2.0 * 0.9 + 8.0 * 0.2) / (0.9 + 0.2)
+        assert result == pytest.approx(expected, rel=1e-3)
+        # Must be closer to 2.0 than to 8.0
+        assert abs(result - 2.0) < abs(result - 8.0)
+
+    # ── Integration: confidence in score_entities() output ─────────────────
+
+    def _write_scored_baselines(
+        self,
+        tmp_data_dir,
+        days_old: float = 30.0,
+        slot_n: int = 20,
+        sensor_type: str = "gauge",
+    ) -> None:
+        """Write a minimal baselines file with a known entity old enough to score."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
+        ab.ENTITY_LIFECYCLE_PATH = str(tmp_data_dir / "entity_lifecycle.json")
+
+        now = datetime.datetime.now()
+        h, d = now.hour, now.weekday()
+        first_seen = (now - datetime.timedelta(days=days_old)).isoformat()
+        baselines = {
+            "sensor.conf_test": {
+                f"{h}_{d}": {
+                    "mean": 100.0,
+                    "std": 10.0,
+                    "n": slot_n,
+                    "baseline_type": "absolute",
+                },
+                "_meta": {
+                    "sensor_type": sensor_type,
+                    "first_seen": first_seen,
+                    "n_samples": slot_n * 7,
+                },
+            }
+        }
+        with open(tmp_data_dir / "entity_baselines.json", "w") as f:
+            json.dump(baselines, f)
+
+    def test_anomaly_result_has_confidence_field(self, tmp_data_dir):
+        """score_entities() must add 'confidence' to each anomaly dict."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        self._write_scored_baselines(tmp_data_dir)
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
+        ab.ENTITY_LIFECYCLE_PATH = str(tmp_data_dir / "entity_lifecycle.json")
+        result = score_entities({"sensor.conf_test": 999999.0})
+        assert result, "Expected an anomaly for extreme value"
+        assert "confidence" in result[0], "Missing 'confidence' field in anomaly"
+        assert 0.0 <= result[0]["confidence"] <= 1.0
+
+    def test_anomaly_result_has_confidence_label(self, tmp_data_dir):
+        """score_entities() must add 'confidence_label' to each anomaly dict."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        self._write_scored_baselines(tmp_data_dir)
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
+        ab.ENTITY_LIFECYCLE_PATH = str(tmp_data_dir / "entity_lifecycle.json")
+        result = score_entities({"sensor.conf_test": 999999.0})
+        assert result
+        label = result[0].get("confidence_label", "")
+        assert "confident" in label
+        assert "day" in label
+
+    def test_confidence_label_contains_day_count(self, tmp_data_dir):
+        """confidence_label must mention the number of days of data."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        self._write_scored_baselines(tmp_data_dir, days_old=15.0)
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
+        ab.ENTITY_LIFECYCLE_PATH = str(tmp_data_dir / "entity_lifecycle.json")
+        result = score_entities({"sensor.conf_test": 999999.0})
+        assert result
+        label = result[0]["confidence_label"]
+        # 15 days → label should start with "50% confident — 15 days of data"
+        assert "15" in label
+
+    def test_entity_anomalies_json_has_weighted_score(self, tmp_data_dir):
+        """score_entities() must write 'weighted_score' to entity_anomalies.json."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        self._write_scored_baselines(tmp_data_dir)
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
+        ab.ENTITY_LIFECYCLE_PATH = str(tmp_data_dir / "entity_lifecycle.json")
+        score_entities({"sensor.conf_test": 999999.0})
+        with open(tmp_data_dir / "entity_anomalies.json") as f:
+            data = json.load(f)
+        assert "weighted_score" in data
+        assert isinstance(data["weighted_score"], float)
+
+    def test_low_confidence_entity_excluded_from_weighted_score(self, tmp_data_dir):
+        """Entity with confidence < MIN_CONFIDENCE must not affect weighted_score."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        # Very few samples → confidence near zero
+        self._write_scored_baselines(tmp_data_dir, days_old=30.0, slot_n=1)
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
+        ab.ENTITY_LIFECYCLE_PATH = str(tmp_data_dir / "entity_lifecycle.json")
+        result = score_entities({"sensor.conf_test": 999999.0})
+        if result:
+            conf = result[0]["confidence"]
+            if conf < MIN_CONFIDENCE:
+                with open(tmp_data_dir / "entity_anomalies.json") as f:
+                    data = json.load(f)
+                # Weighted score should be 0 since sole entity is below threshold
+                assert data["weighted_score"] == pytest.approx(0.0)
+
+    def test_higher_confidence_entity_has_more_weight(self, tmp_data_dir):
+        """Entity with 30 days of data should have higher confidence than 7 days."""
+        conf_30 = compute_entity_confidence(30.0, 20, "gauge")
+        conf_7 = compute_entity_confidence(7.0, 20, "gauge")
+        assert conf_30 > conf_7
+
+    def test_binary_sensor_has_confidence_field(self, tmp_data_dir):
+        """Binary sensor anomalies must also carry 'confidence' and 'confidence_label'."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        now = datetime.datetime.now()
+        h, d = now.hour, now.weekday()
+        first_seen = (now - datetime.timedelta(days=30)).isoformat()
+        bern_std = float(np.sqrt(0.05 * 0.95))
+        baselines = {
+            "binary_sensor.conf_test": {
+                f"{h}_{d}": {
+                    "on_fraction": 0.05,
+                    "std": bern_std,
+                    "avg_transitions": 0.0,
+                    "n": 20,
+                    "baseline_type": "binary",
+                },
+                "_binary_meta": {"avg_duration_on": 1.0},
+                "_meta": {"sensor_type": "binary", "first_seen": first_seen, "n_samples": 140},
+            }
+        }
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
+        ab.ENTITY_LIFECYCLE_PATH = str(tmp_data_dir / "entity_lifecycle.json")
+        with open(tmp_data_dir / "entity_baselines.json", "w") as f:
+            json.dump(baselines, f)
+        result = score_entities({"binary_sensor.conf_test": 1.0})
+        assert result, "Expected binary anomaly for normally-off sensor being on"
+        assert "confidence" in result[0]
+        assert "confidence_label" in result[0]
+        assert "confident" in result[0]["confidence_label"]

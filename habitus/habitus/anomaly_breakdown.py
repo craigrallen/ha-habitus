@@ -20,6 +20,63 @@ ENTITY_LIFECYCLE_PATH = os.path.join(DATA_DIR, "entity_lifecycle.json")
 COLD_START_DAYS = 7  # Entities younger than this are exempt from scoring ("learning" phase)
 LOW_SAMPLE_THRESHOLD = 10  # Slots with fewer samples get a widened CI (0.5× z-score weight)
 
+# Minimum confidence for an entity to contribute to the global weighted score
+MIN_CONFIDENCE = 0.1
+
+# Certainty factors by sensor type — reflects how reliably each type can be baselined
+SENSOR_TYPE_CERTAINTY: dict[str, float] = {
+    "gauge": 1.0,
+    "accumulating": 0.9,
+    "binary": 0.8,
+    "setpoint": 0.7,
+    "event": 0.7,
+}
+
+
+def compute_entity_confidence(days_of_data: float, slot_n: int, sensor_type: str) -> float:
+    """Compute per-entity confidence weight for anomaly score aggregation.
+
+    Formula: ``min(1.0, days_of_data / 30) × min(1.0, slot_n / 20) × sensor_type_certainty``
+
+    Args:
+        days_of_data: Number of days of history available for this entity.
+        slot_n: Number of samples in the current baseline slot (hour/day slot).
+        sensor_type: Sensor type string (gauge, binary, accumulating, etc.).
+
+    Returns:
+        Confidence weight in range [0.0, 1.0].
+    """
+    age_factor = min(1.0, days_of_data / 30.0)
+    sample_factor = min(1.0, slot_n / 20.0)
+    type_certainty = SENSOR_TYPE_CERTAINTY.get(sensor_type, 0.7)
+    return age_factor * sample_factor * type_certainty
+
+
+def compute_weighted_score(anomalies: list[dict]) -> float:
+    """Compute confidence-weighted global anomaly score from entity breakdown.
+
+    Global score = ``Σ(z_score × confidence) / Σ(confidence)``, where only entities
+    with ``confidence ≥ MIN_CONFIDENCE`` contribute to the weighted average.
+
+    Args:
+        anomalies: List of anomaly dicts from :func:`score_entities`, each expected
+            to have ``z_score`` and ``confidence`` fields.
+
+    Returns:
+        Weighted average z-score rounded to 3 decimal places, or ``0.0`` when no
+        eligible entities exist.
+    """
+    total_weight = 0.0
+    weighted_sum = 0.0
+    for a in anomalies:
+        conf = a.get("confidence", 0.0)
+        if conf < MIN_CONFIDENCE:
+            continue
+        z = a.get("z_score", 0.0)
+        weighted_sum += z * conf
+        total_weight += conf
+    return round(weighted_sum / total_weight, 3) if total_weight > 0 else 0.0
+
 
 def build_entity_baselines(df: pd.DataFrame):
     """Build per-entity baselines by hour-of-day × day-of-week. Saves to entity_baselines.json.
@@ -304,12 +361,15 @@ def score_entities(current_states: dict | None = None) -> list:
         # in the "learning" phase and exempt from scoring to avoid false positives.
         meta = bl.get("_meta", {})
         first_seen_str = meta.get("first_seen", "")
+        # Default: assume at least COLD_START_DAYS of history for confidence calculation
+        days_of_data: float = float(COLD_START_DAYS)
         if first_seen_str:
             with contextlib.suppress(ValueError):
                 first_seen_dt = datetime.datetime.fromisoformat(first_seen_str)
                 if first_seen_dt.tzinfo is not None:
                     first_seen_dt = first_seen_dt.replace(tzinfo=None)
                 days_old = (now - first_seen_dt).total_seconds() / 86400.0
+                days_of_data = days_old  # capture for confidence computation
                 if days_old < COLD_START_DAYS:
                     learning_entities.append(
                         {
@@ -420,6 +480,14 @@ def score_entities(current_states: dict | None = None) -> list:
                     f"on-rate is {on_frac * 100:.0f}%"
                 )
 
+            slot_n = b.get("n", 0)
+            sensor_type_str = meta.get("sensor_type", "binary")
+            confidence = compute_entity_confidence(days_of_data, slot_n, sensor_type_str)
+            pct_conf = round(confidence * 100)
+            days_int = int(days_of_data)
+            confidence_label = (
+                f"{pct_conf}% confident — {days_int} day{'s' if days_int != 1 else ''} of data"
+            )
             anomalies.append(
                 {
                     "entity_id": eid,
@@ -431,6 +499,8 @@ def score_entities(current_states: dict | None = None) -> list:
                     "unit": "",
                     "description": description,
                     "direction": "high",
+                    "confidence": round(confidence, 3),
+                    "confidence_label": confidence_label,
                 }
             )
             continue  # binary handled; skip gauge/rate logic below
@@ -495,6 +565,14 @@ def score_entities(current_states: dict | None = None) -> list:
                 f"baseline {_day(d)} {h:02d}:00 is {_fmt(b['mean'], unit)} ±{_fmt(b['std'], unit)}"
             )
 
+        slot_n = b.get("n", 0)
+        sensor_type_str = meta.get("sensor_type", "gauge")
+        confidence = compute_entity_confidence(days_of_data, slot_n, sensor_type_str)
+        pct_conf = round(confidence * 100)
+        days_int = int(days_of_data)
+        confidence_label = (
+            f"{pct_conf}% confident — {days_int} day{'s' if days_int != 1 else ''} of data"
+        )
         anomalies.append(
             {
                 "entity_id": eid,
@@ -506,6 +584,8 @@ def score_entities(current_states: dict | None = None) -> list:
                 "unit": unit,
                 "description": description,
                 "direction": "high" if score_val > b["mean"] else "low",
+                "confidence": round(confidence, 3),
+                "confidence_label": confidence_label,
             }
         )
 
@@ -523,8 +603,13 @@ def score_entities(current_states: dict | None = None) -> list:
     anomalies.sort(key=lambda x: x["z_score"], reverse=True)
     top = anomalies[:20]
 
+    weighted_score = compute_weighted_score(top)
     with open(ENTITY_ANOMALIES_PATH, "w") as f:
-        json.dump({"timestamp": now.isoformat(), "anomalies": top}, f, indent=2)
+        json.dump(
+            {"timestamp": now.isoformat(), "weighted_score": weighted_score, "anomalies": top},
+            f,
+            indent=2,
+        )
     return top
 
 

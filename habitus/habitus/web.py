@@ -545,8 +545,8 @@ pre.raw {
       <span class="sec-sub" id="bd-ts"></span>
     </div>
     <table>
-      <thead><tr><th>Sensor</th><th>Current</th><th>Baseline</th><th>Deviation</th><th style="width:90px"></th></tr></thead>
-      <tbody id="bd-table"><tr><td colspan="5" style="color:var(--text3);padding:16px">No entity data yet.</td></tr></tbody>
+      <thead><tr><th>Sensor</th><th>Current</th><th>Baseline</th><th>Deviation</th><th>Confidence</th><th style="width:90px"></th></tr></thead>
+      <tbody id="bd-table"><tr><td colspan="6" style="color:var(--text3);padding:16px">No entity data yet.</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -949,14 +949,16 @@ async function load() {
         const z=e.z_score,pct=Math.min(100,Math.round(z/5*100));
         const col=z>=3?'var(--red)':z>=1.5?'var(--amber)':'var(--green)';
         const bc=z>=3?'b-alert':z>=1.5?'b-warn':'b-ok';
+        const confLabel=e.confidence_label||'';
         return`<tr>
           <td><div style="font-weight:500">${e.name}</div><div style="font-size:.7rem;color:var(--text3)">${e.entity_id}</div></td>
           <td style="font-weight:600">${e.current_value}${e.unit}</td>
           <td style="color:var(--text3)">${e.baseline_mean}${e.unit} <span style="color:var(--text3);font-size:.7rem">±${e.baseline_std}${e.unit}</span></td>
           <td><span class="badge ${bc}">${z}σ</span></td>
+          <td style="font-size:.75rem;color:var(--text3)">${confLabel}</td>
           <td><div class="bar-wrap"><div class="bar" style="width:${pct}%;background:${col}"></div></div></td>
         </tr>`;}).join('')
-    : '<tr><td colspan="5" style="color:var(--text3);padding:16px">No entity anomalies detected.</td></tr>';
+    : '<tr><td colspan="6" style="color:var(--text3);padding:16px">No entity anomalies detected.</td></tr>';
 
   // Suggestions
   allSuggestions = suggestions;
@@ -1293,6 +1295,19 @@ def api_suggestions():
 @app.route("/ingress/api/anomalies")
 def api_anomalies():
     return jsonify(_read(ANOMALIES_PATH) or {})
+
+
+@app.route("/api/anomaly_breakdown")
+@app.route("/ingress/api/anomaly_breakdown")
+def api_anomaly_breakdown():
+    """Return per-entity anomaly breakdown with confidence weights.
+
+    Reads ``entity_anomalies.json`` and returns the full breakdown including
+    the confidence-weighted global score and per-entity ``confidence`` /
+    ``confidence_label`` fields for UI display.
+    """
+    data = _read(ANOMALIES_PATH) or {}
+    return jsonify(data)
 
 
 @app.route("/api/rescan", methods=["POST"])
