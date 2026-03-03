@@ -70,3 +70,10 @@ Persistent learned patterns stored in `patterns.json`:
 - Occupancy inference (are people home?)
 - Weather-aware SOC targeting
 - Per-room energy attribution
+
+## Next: Custom Lovelace Card (v3.0.0)
+- Serve `/www/habitus-card.js` from add-on (maps to `/local/habitus-card.js` in HA)
+- Register as Lovelace resource via WebSocket API on first run (no HACS needed)
+- Auto-inject card into default dashboard on first install
+- Card shows: score gauge, anomaly list, top suggestions, last updated — all inline
+- Replaces the manual "add this YAML" step entirely
