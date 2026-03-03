@@ -587,3 +587,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Water-heater-like monitor names (water_heater/boiler/varmvatten/heater) are prioritised in matching
 - NILM output includes learned monitor signature count + source entities for auditability
 
+
+## [3.7.3] - 2026-03-03
+
+### Fixed
+- Full training crash: `UnboundLocalError: training_days` in main training pipeline
+- Warmup state now consistently uses computed `_train_days`
+- Unblocks downstream modules (including NILM + monitor-correlated fingerprints)
+

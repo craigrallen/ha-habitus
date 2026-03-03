@@ -1082,6 +1082,7 @@ async def run(days_history: int, mode: str = "full") -> None:
             save_artifacts(model, scaler, features)
             # Partial score after training — baseline + initial anomaly data visible
             _partial_score = score_current(features)
+            training_days = _train_days
             _warming_up = training_days < MIN_SCORING_DAYS
             state.update(
                 {
