@@ -1053,7 +1053,15 @@ async def run(days_history: int, mode: str = "full") -> None:
             set_progress("building_baselines", len(stat_ids), len(stat_ids), len(df), 0, 0)
             log.info("Building entity baselines...")
             anomaly_breakdown.build_entity_baselines(df)
-            features = build_features(df)
+            try:
+                log.info("Building feature matrix...")
+                features = build_features(df)
+                log.info("Feature matrix built: %d rows", len(features))
+            except Exception as e:
+                import traceback, sys
+                log.error("CRASH in build_features: %s", e)
+                traceback.print_exc()
+                raise
             del df
             set_progress("training", len(stat_ids), len(stat_ids), len(features), 0, 0)
             log.info(f"Training IsolationForest on {len(features):,} rows...")
