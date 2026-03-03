@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - JSON serialization crashes from numpy `bool_`/`int64` types — added `default=str` to all `json.dump()` calls
+- Broken `default=str` insertions in `len()`, `round()`, `.isoformat()`, `.values()` calls — caused `TypeError` crashes during training
+- Syntax errors in `anomaly_breakdown.py` from malformed regex replacements
 - Syntax errors in `anomaly_breakdown.py` from malformed replacements
 - Silent training failures — progressive thread now logs full tracebacks
 - Training completing entity baselines but crashing before model fit (root cause of persistent score=100)
