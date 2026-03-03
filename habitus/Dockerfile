@@ -14,6 +14,7 @@ COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 COPY habitus/ ./habitus/
+COPY www/ /config/www/habitus/
 COPY run.sh .
 RUN chmod +x run.sh
 

@@ -1,6 +1,6 @@
 name: "Habitus"
 description: "Behavioral intelligence — learns patterns from HA, detects anomalies, proposes automations."
-version: "2.51.0"
+version: "2.52.0"
 slug: "habitus"
 init: false
 arch:
@@ -15,6 +15,8 @@ panel_title: Habitus
 map:
   - homeassistant_config:ro
   - data:rw
+  - config:rw
+  - share:rw
 options:
   scan_interval_hours: 6
   days_history: 365

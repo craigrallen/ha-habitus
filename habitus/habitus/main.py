@@ -717,6 +717,7 @@ async def run(days_history: int, mode: str = "full") -> None:
                     msg_parts.append(top_anomaly)
                 send_notification("🧠 Habitus — Unusual Activity", "\n".join(msg_parts))
             _publish_sensors(anomaly_score, is_anomalous, training_days, entity_count)
+            await _register_lovelace_card()
             return
 
     # Auto-detect energy entities from HA Energy Dashboard
@@ -899,6 +900,7 @@ async def run(days_history: int, mode: str = "full") -> None:
         send_notification("🧠 Habitus — Unusual Activity", "\n".join(msg_parts))
 
     _publish_sensors(anomaly_score, is_anomalous, training_days, entity_count)
+    await _register_lovelace_card()
 
     # Surface anomalies and suggestions on the HA dashboard automatically
     try:
@@ -986,3 +988,66 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     asyncio.run(run(days_history=args.days, mode=args.mode))
+
+
+async def _register_lovelace_card():
+    """Register Habitus Lovelace card resource and inject into default dashboard."""
+    import websockets
+    import json
+
+    resource_url = "/local/habitus/habitus-card.js"
+
+    try:
+        ws = await websockets.connect(HA_WS, max_size=50 * 1024 * 1024)
+        # Auth
+        await ws.recv()
+        await ws.send(json.dumps({"type": "auth", "access_token": HA_TOKEN}))
+        auth_resp = json.loads(await ws.recv())
+        if auth_resp.get("type") != "auth_ok":
+            return
+
+        msg_id = 100
+
+        # Check existing resources
+        msg_id += 1
+        await ws.send(json.dumps({"id": msg_id, "type": "lovelace/resources"}))
+        res_resp = json.loads(await ws.recv())
+        resources = res_resp.get("result", []) if res_resp.get("success") else []
+
+        already_registered = any(r.get("url", "").startswith(resource_url) for r in resources)
+
+        if not already_registered:
+            msg_id += 1
+            await ws.send(json.dumps({
+                "id": msg_id,
+                "type": "lovelace/resources/create",
+                "res_type": "module",
+                "url": resource_url + "?v=2.52.0",
+            }))
+            await ws.recv()
+
+        # Try to inject card into default dashboard view 0
+        msg_id += 1
+        await ws.send(json.dumps({"id": msg_id, "type": "lovelace/config"}))
+        dash_resp = json.loads(await ws.recv())
+        dash = dash_resp.get("result", {}) if dash_resp.get("success") else {}
+
+        if dash and "views" in dash and len(dash["views"]) > 0:
+            view = dash["views"][0]
+            cards = view.get("cards", [])
+            has_habitus = any("habitus-card" in (c.get("type", "") or "") for c in cards)
+            if not has_habitus:
+                cards.insert(0, {"type": "custom:habitus-card"})
+                view["cards"] = cards
+                msg_id += 1
+                await ws.send(json.dumps({
+                    "id": msg_id,
+                    "type": "lovelace/config/save",
+                    "config": dash,
+                }))
+                await ws.recv()
+
+        await ws.close()
+    except Exception as exc:
+        import logging
+        logging.getLogger("habitus").warning("Lovelace card registration failed: %s", exc)
