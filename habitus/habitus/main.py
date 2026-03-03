@@ -596,8 +596,9 @@ def publish_dashboard_entities(
         active_leaks = [
             s["entity_id"].replace("binary_sensor.", "").replace("_", " ")
             for s in leak_states
-            if "leak" in s["entity_id"].lower()
-            and str(s.get("state", "")).lower() in ("on", "wet", "detected")
+            if s["entity_id"].startswith("binary_sensor.")
+            and any(k in s["entity_id"].lower() for k in ("leak_detected", "water_leak", "flood", "moisture"))
+            and str(s.get("state", "")).lower() in ("on", "wet", "detected", "true")
         ]
         if active_leaks:
             persistent_notification(
