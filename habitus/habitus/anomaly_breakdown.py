@@ -110,6 +110,49 @@ def score_entities(current_states: dict | None = None) -> list:
     return top
 
 
+def compute_breakdown(anomaly_score: float, current_states: dict | None = None) -> list:
+    """Compute per-entity z-score breakdown for anomaly UI display.
+
+    When anomaly_score > 40, identifies the top-5 most anomalous entities and
+    persists a ``_z_score_run`` record to ``entity_baselines.json`` so the
+    Lovelace card can display plain-English reasons without a second API call.
+
+    Args:
+        anomaly_score: Combined IsolationForest anomaly score (0–100).
+        current_states: Optional ``{entity_id: current_value}`` mapping.
+            When ``None``, values are fetched from the HA REST API.
+
+    Returns:
+        List of up to 5 anomaly dicts with keys: ``entity_id``, ``name``,
+        ``current_value``, ``baseline_mean``, ``baseline_std``, ``z_score``,
+        ``unit``, ``description``, ``direction``.  Returns ``[]`` when
+        ``anomaly_score <= 40`` or no baselines are available.
+    """
+    if anomaly_score <= 40:
+        return []
+
+    all_anomalies = score_entities(current_states)
+    top5 = all_anomalies[:5]
+
+    # Persist z-score run into entity_baselines.json only if the file exists
+    if not os.path.exists(ENTITY_BASELINES_PATH):
+        return top5
+
+    with open(ENTITY_BASELINES_PATH) as f:
+        baselines = json.load(f)
+
+    baselines["_z_score_run"] = {
+        "timestamp": datetime.datetime.now().isoformat(),
+        "anomaly_score": anomaly_score,
+        "top5": top5,
+    }
+    with open(ENTITY_BASELINES_PATH, "w") as f:
+        json.dump(baselines, f, indent=2)
+
+    log.info(f"Anomaly breakdown computed: score={anomaly_score}, top5={len(top5)} entities")
+    return top5
+
+
 def _fetch_current_states(entity_ids: list) -> dict:
     import requests  # type: ignore[import-untyped]
 
