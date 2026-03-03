@@ -744,7 +744,9 @@ async function load() {
     const rows=(progress.rows||0).toLocaleString();
     const d=progress.done||0, t=progress.total||'?';
     const desc = {
-      fetching:           `${d} of ${t} sensors · ${rows} data points loaded`,
+      fetching: progress.progressive_window
+        ? `${d} of ${t} sensors · ${rows} rows · window: last ${progress.progressive_window} days`
+        : `${d} of ${t} sensors · ${rows} data points loaded`,
       building_baselines: `Computing per-entity baselines from ${rows} rows`,
       training:           `Fitting anomaly model on ${rows} snapshots`,
       seasonal_training:  `Training seasonal models (winter/spring/summer/autumn)`,
@@ -768,7 +770,8 @@ async function load() {
       el.className = 'prog-step' + (i < phaseIdx ? ' done' : i===phaseIdx ? ' active' : '');
     });
     document.getElementById('hdr-dot').className = 'status-dot warn';
-    document.getElementById('hdr-label').textContent = `Training ${progress.pct||0}%`;
+    const winLabel = progress.progressive_window ? ` (${progress.progressive_window}d window)` : '';
+    document.getElementById('hdr-label').textContent = `Training ${progress.pct||0}%${winLabel}`;
     if (!hasData) return;  // only block if no data yet
   }
   document.getElementById('prog-overlay').style.display = 'none';

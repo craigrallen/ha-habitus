@@ -24,7 +24,7 @@ export HABITUS_TRAIN_TIME="${TRAIN_TIME}"
 RESCAN_FLAG="/data/.rescan_requested"
 STATE_FILE="/data/run_state.json"
 
-bashio::log.info "Habitus v2.7.0 | Schedule: ${SCHEDULE} | Train: ${TRAIN_TIME} | Scan: ${SCAN}h"
+bashio::log.info "Habitus v2.26.0 | Schedule: ${SCHEDULE} | Train: ${TRAIN_TIME} | Scan: ${SCAN}h"
 
 # Start web server inline — PYTHONPATH=/app so 'import habitus.web' resolves
 cd /app && python3 -u -c "
@@ -77,9 +77,17 @@ start_web(int(os.environ.get('INGRESS_PORT','8099')))
 
     if [ "$FIRST_RUN" = "true" ]; then
         FIRST_RUN=false
-        bashio::log.info "Full training run"
-        python3 -u -m habitus.main --days "$DAYS" --mode full \
-            || bashio::log.warning "Full training failed"
+        bashio::log.info "Progressive training: 30d → 60d → 90d → 180d → ${DAYS}d"
+        python3 -u -c "
+import sys; sys.path.insert(0,'/app')
+from habitus.progressive import start_progressive
+import time
+start_progressive(max_days=int('${DAYS}'))
+# Wait for progressive thread to finish
+from habitus import progressive as p
+while p.is_expanding():
+    time.sleep(5)
+" || bashio::log.warning "Progressive training failed"
     elif [ "$SCHEDULE" = "overnight" ]; then
         if is_train_time; then
             bashio::log.info "Overnight training window"
