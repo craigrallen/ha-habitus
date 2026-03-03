@@ -651,6 +651,10 @@ pre.raw {
     <div id="appliance-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
   </div>
   <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>🕐 Predicted Routines</h2><span class="sec-sub">Recurring activities detected from sensor patterns</span></div>
+    <div id="routines-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+  </div>
+  <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>📊 Phantom Loads</h2><span class="sec-sub">Devices drawing power 24/7</span></div>
     <div id="phantom-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
   </div>
@@ -1289,6 +1293,30 @@ async function load() {
     el.innerHTML = html;
   });
 
+  // ── Predicted Routines ──
+  fetch('api/routines').then(r=>r.json()).catch(()=>({routines:[]})).then(rd => {
+    const el = document.getElementById('routines-list');
+    if (!rd.routines || rd.routines.length === 0) {
+      el.innerHTML = '<div style="color:var(--text3);padding:12px">No recurring routines detected yet. Needs humidity/temperature sensor data.</div>';
+      return;
+    }
+    el.innerHTML = rd.routines.map(r => `
+      <div class="card" style="padding:12px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div><span style="font-size:1.3rem">${r.icon}</span> <b>${r.activity.replace(/_/g,' ')} — ${r.room.replace(/_/g,' ')}</b></div>
+          <span style="font-size:.75rem;color:var(--accent)">${r.confidence}% confident</span>
+        </div>
+        <div style="font-size:.85rem;margin-top:6px">
+          ⏰ Usually at <b>${r.typical_time}</b> (${r.day_pattern}) · ${r.events_per_day}/day · ~${r.avg_duration_min} min each
+        </div>
+        <div style="font-size:.85rem;margin-top:4px;color:var(--accent)">
+          💡 Suggestion: ${r.suggestion}
+        </div>
+        ${r.yaml ? `<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--accent);font-size:.8rem">Pre-heat automation YAML</summary><pre style="font-size:.72rem;margin-top:4px">${r.yaml}</pre></details>` : ''}
+      </div>
+    `).join('');
+  });
+
   // Insights — Routine Drift
   if (driftData && driftData.drifts && driftData.drifts.length) {
     const sig = driftData.drifts.filter(d=>d.significant);
@@ -1782,6 +1810,14 @@ def api_ha_automations():
 def api_smart_suggestions():
     """Return merged smart suggestions with confidence, YAML, and overlap info."""
     return jsonify(_read(SMART_SUGGESTIONS_PATH) or {"suggestions": [], "count": 0})
+
+
+@app.route("/api/routines")
+@app.route("/ingress/api/routines")
+def api_routines():
+    """Return detected routines (shower times, cooking patterns, etc)."""
+    r_path = os.path.join(DATA_DIR, "routines.json")
+    return jsonify(_read(r_path) or {"routines": [], "total_events": 0})
 
 
 @app.route("/api/conflicts")

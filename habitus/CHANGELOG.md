@@ -50,6 +50,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Scene detector now mines motion sensors, presence detection, person entities, and device trackers alongside lights/switches/media
 - Motion/presence-triggered automations generated when binary_sensor co-occurs with lights in a scene
+- Routine predictor — detects recurring activities from humidity/temperature spikes
+- Shower/bath detection from bathroom humidity spikes (>10% above rolling average, 5-45 min duration)
+- Cooking detection from kitchen humidity/temperature rises
+- Learns typical event times and day patterns (weekday/weekend/daily)
+- Pre-heat automation YAML: suggests turning on water heater 1 hour before usual shower time
+- Predicted Routines section in Smart Home tab with confidence scores
 - Cross-domain conflict detector — catches wasteful/contradictory states in real-time
 - 7 conflict rules: window+heating, window+AC, heating+cooling, nobody-home+lights, warm-outside+heating, cold+windows-open, door-open-long+climate
 - Estimated wattage waste per conflict

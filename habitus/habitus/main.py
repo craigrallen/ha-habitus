@@ -19,7 +19,7 @@ import websockets
 
 from . import activity as activity_engine
 from . import anomaly_breakdown, automation_gap, automation_score, drift, phantom, seasonal
-from . import appliance_fingerprint, automation_builder, conflict_detector, scene_detector
+from . import appliance_fingerprint, automation_builder, conflict_detector, routine_predictor, scene_detector
 from . import patterns as pattern_engine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -1143,6 +1143,12 @@ async def run(days_history: int, mode: str = "full") -> None:
                 scene_detector.save(scenes)
                 log.info("Detected %d implicit scenes", len(scenes))
 
+                                log.info("Running routine prediction...")
+                try:
+                    routine_predictor.run_routine_prediction(days=min(days_history, 30))
+                except Exception as e:
+                    log.warning("Routine prediction failed: %s", e)
+
                 log.info("Running appliance fingerprinting...")
                 try:
                     appliance_fingerprint.run_fingerprinting(days=min(days_history, 30))
@@ -1256,6 +1262,12 @@ async def run(days_history: int, mode: str = "full") -> None:
             scenes = scene_detector.detect_scenes(days=min(days_history, 30))
             scene_detector.save(scenes)
             log.info("Detected %d implicit scenes", len(scenes))
+
+                        log.info("Running routine prediction...")
+            try:
+                routine_predictor.run_routine_prediction(days=min(days_history, 30))
+            except Exception as e:
+                log.warning("Routine prediction failed: %s", e)
 
             log.info("Running appliance fingerprinting...")
             try:
