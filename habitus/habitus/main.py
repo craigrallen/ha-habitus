@@ -591,10 +591,10 @@ async def run(days_history: int, mode: str = "full") -> None:
         entity_count = len(stat_ids)
         state["data_from"] = full_from
         # Record actual first data point date (not the query start)
-        if not df.empty and "hour" in df.columns:
-            actual_start = df["hour"].min().strftime("%Y-%m-%dT%H:%M:%S+00:00")
-            state["data_from"] = actual_start
-        log.info(f"Discovery: {state.get('data_from', full_from)} → {now_iso} ({training_days}d)")
+        # actual_start logic moved earlier (before del df)
+        # if not df.empty and "hour" in df.columns:
+        #     actual_start = df["hour"].min().strftime("%Y-%m-%dT%H:%M:%S+00:00")
+        #     state["data_from"] = actual_start
 
     # Per-entity and activity scoring
     entity_anomalies = anomaly_breakdown.score_entities()
