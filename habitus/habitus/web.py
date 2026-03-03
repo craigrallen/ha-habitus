@@ -488,6 +488,7 @@ pre.raw {
     <h1>Habitus <span class="version" id="hdr-version">v—</span></h1>
   </div>
   <div class="header-right">
+    <button id="theme-toggle" onclick="toggleTheme()" title="Toggle theme" style="background:var(--card2);border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--text);cursor:pointer;font-size:1rem;margin-right:12px">🌙</button>
     <div class="status-dot" id="hdr-dot"></div>
     <span class="status-label" id="hdr-label">Loading</span>
     <span class="last-run" id="hdr-lr"></span>
