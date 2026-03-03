@@ -65,6 +65,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Heater/thermostat state changes as implicit presence signal — "someone adjusted the bedroom heater → they are in the bedroom"
 - Climate-triggered automations: "when heater turns on, activate room scene"
 - Presence-inferring keywords: heater, radiator, thermostat, heating, climate, hvac
+- Deep correlation engine — mines all sensor data for statistically significant patterns
+- Temporal correlations: A happens → B follows within 10 minutes (lift-based filtering)
+- Cross-room pattern detection (e.g., arriving home → kitchen lights)
+- Climate-response correlations (temp change → heating activation)
+- Pairwise analysis of up to 200 most active entities
+- Actionable suggestions with approve/dismiss HA notifications
+- Correlation categories: trigger_action, room_routine, cross_room, presence_driven, climate_response
+- UI: Discovered Correlations section with lift scores and colour-coded significance
 - Room-aware predictive automation — predicts what user wants when entering a room
 - Conditional probability model: P(action | room, time_slot, day_type) from motion history
 - 2-hour time windows × weekday/weekend for granular predictions

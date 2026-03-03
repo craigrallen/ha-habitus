@@ -595,6 +595,13 @@ pre.raw {
     <div id="conflicts-list"></div>
   </div>
 
+  <!-- Deep Correlations -->
+  <div class="sec" id="correlations-section" style="display:none">
+    <div class="sec-header"><h2>🔗 Discovered Correlations</h2><span class="sec-sub">Patterns mined from all sensor data</span></div>
+    <div id="corr-stats" style="font-size:.8rem;color:var(--text3);margin-bottom:8px"></div>
+    <div id="correlations-list"></div>
+  </div>
+
   <!-- Room Predictions -->
   <div class="sec" id="predictions-section" style="display:none">
     <div class="sec-header"><h2>🧠 Room Predictions</h2><span class="sec-sub">What you'll probably want when you enter a room</span></div>
@@ -1073,6 +1080,33 @@ async function load() {
     ? smartSuggestions.suggestions : suggestions;
   allSuggestions = smartSugList;
   renderSuggestions();
+
+  // ── Deep Correlations ──
+  fetch('api/correlations').then(r=>r.json()).catch(()=>({suggestions:[]})).then(cd => {
+    const el = document.getElementById('correlations-list');
+    const sec = document.getElementById('correlations-section');
+    const stats = document.getElementById('corr-stats');
+    if (!cd.suggestions || cd.suggestions.length === 0) { sec.style.display='none'; return; }
+    sec.style.display='';
+    const s = cd.stats || {};
+    stats.textContent = `${cd.total_correlations} correlations found · ${cd.actionable_suggestions} actionable · ${s.entities_analysed || '?'} entities · ${s.total_events || '?'} events analysed`;
+    const catIcons = {trigger_action:'⚡',room_routine:'🏠',cross_room_routine:'🚪→🚪',presence_driven:'👤',climate_response:'🌡️',general:'🔗'};
+    el.innerHTML = cd.suggestions.slice(0,20).map(s => {
+      const c = s.correlation || {};
+      const icon = catIcons[s.category] || '🔗';
+      const rooms = [c.room_a, c.room_b].filter(Boolean);
+      const roomTag = rooms.length ? `<span style="font-size:.72rem;background:var(--card2);padding:1px 6px;border-radius:3px;margin-left:6px">${rooms.join(' → ')}</span>` : '';
+      return `<div class="card" style="padding:12px;margin-bottom:8px;border-left:3px solid ${s.lift>5?'var(--red)':s.lift>3?'var(--accent)':'var(--text3)'}">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>${icon} <b>${c.name_a}</b> → <b>${c.name_b}</b>${roomTag}</div>
+          <span style="font-size:.75rem;color:var(--accent)">${s.confidence}% · ${s.lift}× lift</span>
+        </div>
+        <div style="font-size:.82rem;color:var(--text3);margin-top:4px">${s.description}</div>
+        <div style="font-size:.72rem;color:var(--text3);margin-top:2px">${c.cooccurrences} co-occurrences out of ${c.total_a} events</div>
+        ${s.yaml ? `<details style="margin-top:6px"><summary style="cursor:pointer;color:var(--accent);font-size:.8rem">Automation YAML</summary><pre style="font-size:.72rem;margin-top:4px">${s.yaml}</pre></details>` : ''}
+      </div>`;
+    }).join('');
+  });
 
   // ── Room Predictions ──
   fetch('api/room_predictions').then(r=>r.json()).catch(()=>({automations:[]})).then(rp => {
@@ -1837,6 +1871,14 @@ def api_ha_automations():
 def api_smart_suggestions():
     """Return merged smart suggestions with confidence, YAML, and overlap info."""
     return jsonify(_read(SMART_SUGGESTIONS_PATH) or {"suggestions": [], "count": 0})
+
+
+@app.route("/api/correlations")
+@app.route("/ingress/api/correlations")
+def api_correlations():
+    """Return deep correlation analysis results."""
+    corr_path = os.path.join(DATA_DIR, "correlations.json")
+    return jsonify(_read(corr_path) or {"correlations": [], "suggestions": [], "total_correlations": 0})
 
 
 @app.route("/api/room_predictions")

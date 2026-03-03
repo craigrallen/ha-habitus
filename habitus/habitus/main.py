@@ -19,7 +19,7 @@ import websockets
 
 from . import activity as activity_engine
 from . import anomaly_breakdown, automation_gap, automation_score, drift, phantom, seasonal
-from . import appliance_fingerprint, automation_builder, conflict_detector, ha_areas, room_predictor, routine_predictor, scene_detector
+from . import appliance_fingerprint, automation_builder, conflict_detector, correlation_engine, ha_areas, room_predictor, routine_predictor, scene_detector
 from . import patterns as pattern_engine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -1162,6 +1162,14 @@ async def run(days_history: int, mode: str = "full") -> None:
                 except Exception as e:
                     log.warning("Routine prediction failed: %s", e)
 
+                log.info("Running deep correlation analysis...")
+                try:
+                    area_data2 = ha_areas._load_cache()
+                    e2a2 = area_data2.get("entity_to_area", {})
+                    correlation_engine.run_correlation_analysis(e2a2, days=min(days_history, 30))
+                except Exception as e:
+                    log.warning("Correlation analysis failed: %s", e)
+
                 log.info("Running appliance fingerprinting...")
                 try:
                     appliance_fingerprint.run_fingerprinting(days=min(days_history, 30))
@@ -1294,6 +1302,14 @@ async def run(days_history: int, mode: str = "full") -> None:
                 routine_predictor.run_routine_prediction(days=min(days_history, 30))
             except Exception as e:
                 log.warning("Routine prediction failed: %s", e)
+
+            log.info("Running deep correlation analysis...")
+            try:
+                area_data2 = ha_areas._load_cache()
+                e2a2 = area_data2.get("entity_to_area", {})
+                correlation_engine.run_correlation_analysis(e2a2, days=min(days_history, 30))
+            except Exception as e:
+                log.warning("Correlation analysis failed: %s", e)
 
             log.info("Running appliance fingerprinting...")
             try:
