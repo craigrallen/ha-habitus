@@ -20,6 +20,7 @@ RESCAN_FLAG = os.path.join(DATA_DIR, ".rescan_requested")
 PHANTOM_PATH = os.path.join(DATA_DIR, "phantom_loads.json")
 DRIFT_PATH = os.path.join(DATA_DIR, "drift.json")
 AUTO_SCORES_PATH = os.path.join(DATA_DIR, "automation_scores.json")
+GAP_PATH = os.path.join(DATA_DIR, "automation_gap.json")
 
 app = Flask(__name__)
 
@@ -601,6 +602,10 @@ pre.raw {
     <div class="sec-header"><h2>Automation Health</h2><span class="sec-sub">How well your automations work</span></div>
     <div id="auto-scores"><div style="color:var(--text3);padding:12px">Loading...</div></div>
   </div>
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>Automation Gaps</h2><span class="sec-sub">Suggestions vs existing automations</span></div>
+    <div id="auto-gap"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+  </div>
 </div>
 
 <!-- SETTINGS -->
@@ -744,7 +749,7 @@ function setGauge(score) {
 }
 
 async function load() {
-  const [state, baseline, progress, patterns, suggestions, anomalies, phantomData, driftData, autoScores] = await Promise.all([
+  const [state, baseline, progress, patterns, suggestions, anomalies, phantomData, driftData, autoScores, gapData] = await Promise.all([
     fetch('api/state').then(r=>r.json()).catch(()=>({})),
     fetch('api/baseline').then(r=>r.json()).catch(()=>({})),
     fetch('api/progress').then(r=>r.json()).catch(()=>({})),
@@ -754,6 +759,7 @@ async function load() {
     fetch('api/phantom').then(r=>r.json()).catch(()=>([])),
     fetch('api/drift').then(r=>r.json()).catch(()=>({})),
     fetch('api/automation_scores').then(r=>r.json()).catch(()=>([])),
+    fetch('api/automation_gap').then(r=>r.json()).catch(()=>({})),
   ]);
 
   // Progress overlay — only block UI if no data at all yet
@@ -980,6 +986,57 @@ async function load() {
   } else {
     document.getElementById('auto-scores').innerHTML = '<div style="color:var(--text3);padding:12px">No automations scored yet.</div>';
   }
+  // Insights — Automation Gaps
+  const gaps = (gapData && gapData.gaps) ? gapData.gaps : [];
+  if (gaps.length) {
+    const missing = gaps.filter(g=>g.status==='missing');
+    const poor = gaps.filter(g=>g.status==='exists_poor');
+    const disabled = gaps.filter(g=>g.status==='exists_disabled');
+    const working = gaps.filter(g=>g.status==='exists_working');
+    let html = '';
+    if (gapData.summary) html += `<div style="margin-bottom:14px;font-size:.82rem;color:var(--text2)">${gapData.summary}</div>`;
+    if (missing.length) {
+      html += `<div style="font-weight:600;margin-bottom:8px;color:var(--accent)">Missing automations (${missing.length})</div>`;
+      missing.forEach((g,i)=>{
+        const yid = 'gap-yaml-'+i;
+        html += `<div class="sug" style="margin-bottom:10px">
+          <div class="sug-head"><h3>${g.suggestion}</h3><span class="badge b-alert">missing</span></div>
+          ${g.ha_automation_yaml ? `<pre id="${yid}" style="font-size:.72rem">${g.ha_automation_yaml}</pre><button class="btn btn-accent" onclick="navigator.clipboard.writeText(document.getElementById('${yid}').textContent).then(()=>toast('Copied ✓'))">📋 Copy YAML</button>` : ''}
+        </div>`;
+      });
+    }
+    if (poor.length) {
+      html += `<div style="font-weight:600;margin:14px 0 8px;color:var(--amber)">Improvable automations (${poor.length})</div>`;
+      poor.forEach(g=>{
+        html += `<div class="sug" style="margin-bottom:10px;border-left:3px solid var(--amber)">
+          <div class="sug-head"><h3>${g.suggestion}</h3><span class="badge b-warn">exists — poor</span></div>
+          <div class="desc" style="color:var(--amber)">${g.improvement||''}</div>
+        </div>`;
+      });
+    }
+    if (disabled.length) {
+      html += `<div style="font-weight:600;margin:14px 0 8px;color:var(--text2)">Disabled automations (${disabled.length})</div>`;
+      disabled.forEach(g=>{
+        html += `<div class="sug" style="margin-bottom:10px">
+          <div class="sug-head"><h3>${g.suggestion}</h3><span class="badge b-muted">disabled</span></div>
+          <div class="desc">${g.improvement||''}</div>
+        </div>`;
+      });
+    }
+    if (working.length) {
+      html += `<details style="margin-top:14px"><summary style="cursor:pointer;color:var(--text3);font-size:.82rem">Working automations (${working.length}) — collapsed</summary><div style="margin-top:8px">`;
+      working.forEach(g=>{
+        html += `<div class="sug" style="margin-bottom:6px;opacity:.7">
+          <div class="sug-head"><h3>${g.suggestion}</h3><span class="badge b-ok">working</span></div>
+        </div>`;
+      });
+      html += '</div></details>';
+    }
+    document.getElementById('auto-gap').innerHTML = html;
+  } else {
+    document.getElementById('auto-gap').innerHTML = '<div style="color:var(--text3);padding:12px">No gap analysis yet — run Habitus first.</div>';
+  }
+
 
   // Settings
   document.getElementById('raw-state').textContent = JSON.stringify(state,null,2);
@@ -1189,6 +1246,12 @@ def api_drift():
 def api_automation_scores():
     return jsonify(_read(AUTO_SCORES_PATH) or [])
 
+
+
+@app.route("/api/automation_gap")
+@app.route("/ingress/api/automation_gap")
+def api_automation_gap():
+    return jsonify(_read(GAP_PATH) or {})
 
 def start_web(port=8099):
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)

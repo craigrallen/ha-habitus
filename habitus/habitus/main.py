@@ -19,7 +19,7 @@ import websockets
 from . import activity as activity_engine
 from . import anomaly_breakdown, seasonal
 from . import patterns as pattern_engine
-from . import phantom, drift, automation_score
+from . import phantom, drift, automation_score, automation_gap
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("habitus")
@@ -841,6 +841,15 @@ async def run(days_history: int, mode: str = "full") -> None:
             try:
                 auto_scores = await automation_score.score_all(HA_URL, HA_TOKEN)
                 automation_score.save(auto_scores)
+
+        try:
+            suggestions_for_gap = (
+                json.loads(open(SUGGESTIONS_PATH).read()) if os.path.exists(SUGGESTIONS_PATH) else []
+            )
+            gaps = await automation_gap.analyse(HA_URL, HA_TOKEN, suggestions_for_gap, auto_scores)
+            automation_gap.save(gaps)
+        except Exception as e:
+            log.warning("Automation gap analysis failed: %s", e)
             except Exception as e:
                 log.warning("Automation scoring failed: %s", e)
 
@@ -935,6 +944,15 @@ async def run(days_history: int, mode: str = "full") -> None:
         try:
             auto_scores = await automation_score.score_all(HA_URL, HA_TOKEN)
             automation_score.save(auto_scores)
+
+        try:
+            suggestions_for_gap = (
+                json.loads(open(SUGGESTIONS_PATH).read()) if os.path.exists(SUGGESTIONS_PATH) else []
+            )
+            gaps = await automation_gap.analyse(HA_URL, HA_TOKEN, suggestions_for_gap, auto_scores)
+            automation_gap.save(gaps)
+        except Exception as e:
+            log.warning("Automation gap analysis failed: %s", e)
             poor = [a for a in auto_scores if a["score"] < 40]
             if poor and os.path.exists(SUGGESTIONS_PATH):
                 try:
