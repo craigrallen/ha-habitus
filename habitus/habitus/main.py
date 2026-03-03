@@ -27,7 +27,8 @@ DATA_DIR = os.environ.get("DATA_DIR", "/data")
 HA_WS_URL = (
     os.environ.get("HABITUS_HA_URL", "http://supervisor/core")
     .replace("http://", "ws://")
-    .replace("https://", "wss://") + "/api/websocket"
+    .replace("https://", "wss://")
+    + "/api/websocket"
 )
 HA_URL = os.environ.get("HA_URL", "http://supervisor/core")
 HA_WS = os.environ.get("HA_WS", "ws://supervisor/core/api/websocket")
@@ -63,6 +64,9 @@ FEATURE_COLS = [
     "activity_diversity",
     # Grid energy delta — kWh proxy, cross-validates watt sensors
     "grid_kwh_w",
+    # Water — usage proxy + leak detection
+    "water_pump_w",  # pump watts running = water flowing
+    "water_leak",  # binary leak sensor active
 ]
 
 # Domains that produce useful behavioral time-series data
@@ -335,6 +339,30 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
             features = features.join(act_features, how="left")
     except Exception as e:
         log.warning("Activity feature extraction failed: %s", e)
+    # Water pump wattage — proxy for water usage (pump running = tap/appliance running)
+    water_pump = df[
+        df["entity_id"].str.contains(
+            "waterpump.*_w$|water.*pump.*power|water.*consumption.*_w", case=False, na=False
+        )
+    ].copy()
+    if not water_pump.empty:
+        water_pump["v"] = pd.to_numeric(water_pump["mean"], errors="coerce").clip(
+            lower=0, upper=5000
+        )
+        wp_series = water_pump.groupby("hour")["v"].max().rename("water_pump_w")
+        features = features.join(wp_series, how="left")
+
+    # Water leak sensors — 1 if any leak detected in that hour
+    leaks = df[
+        df["entity_id"].str.contains("water_leak|bilge.*leak|leak.*detect", case=False, na=False)
+    ].copy()
+    if not leaks.empty:
+        leaks["v"] = leaks["state"].apply(
+            lambda x: 1.0 if str(x).lower() in ("on", "true", "wet", "detected", "1") else 0.0
+        )
+        leak_series = leaks.groupby("hour")["v"].max().rename("water_leak")
+        features = features.join(leak_series, how="left")
+
     # Ensure all FEATURE_COLS exist (pad with zeros if activity extraction failed)
     for col in FEATURE_COLS:
         if col not in features.columns:
@@ -557,6 +585,36 @@ def publish_dashboard_entities(
             )
         except Exception:
             pass
+
+    # 2b. Immediate leak alert — doesn't wait for anomaly score
+    try:
+        headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
+        leak_states = requests.get(f"{HA_URL}/api/states", headers=headers, timeout=5).json()
+        active_leaks = [
+            s["entity_id"].replace("binary_sensor.", "").replace("_", " ")
+            for s in leak_states
+            if "leak" in s["entity_id"].lower()
+            and str(s.get("state", "")).lower() in ("on", "wet", "detected")
+        ]
+        if active_leaks:
+            persistent_notification(
+                "habitus_leak",
+                "🚨 Habitus — Water Leak Detected",
+                "**Active leak sensors:**\n"
+                + "\n".join(f"- {l}" for l in active_leaks)
+                + "\n\nCheck immediately!",
+            )
+            log.warning("LEAK ALERT: %s", active_leaks)
+        else:
+            # Clear old leak notification if all clear
+            requests.post(
+                f"{HA_URL}/api/services/persistent_notification/dismiss",
+                headers=headers,
+                json={"notification_id": "habitus_leak"},
+                timeout=5,
+            )
+    except Exception as e:
+        log.warning("Leak check failed: %s", e)
 
     # 3. Always update suggestions notification so user sees new ideas
     if suggestions:
