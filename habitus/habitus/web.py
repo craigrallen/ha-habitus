@@ -695,6 +695,33 @@ pre.raw {
 
 <!-- ENERGY & PATTERNS -->
 <div id="tab-energy" class="tab">
+  <!-- Energy + Weather History -->
+  <div class="sec" id="energy-weather-section">
+    <div class="sec-header">
+      <h2>📊 Energy vs Weather</h2>
+      <select id="ew-range" onchange="loadEnergyWeather()" style="background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:.8rem">
+        <option value="30">30 days</option>
+        <option value="90" selected>90 days</option>
+        <option value="180">6 months</option>
+        <option value="365">1 year</option>
+      </select>
+    </div>
+    <div id="ew-chart" style="margin-bottom:8px"></div>
+    <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+      <table id="ew-table" style="width:100%;font-size:.75rem;border-collapse:collapse">
+        <thead><tr style="border-bottom:1px solid var(--border)">
+          <th style="text-align:left;padding:4px">Date</th>
+          <th style="text-align:right;padding:4px">kWh</th>
+          <th style="text-align:right;padding:4px">Avg °C</th>
+          <th style="text-align:right;padding:4px">Min °C</th>
+          <th style="text-align:right;padding:4px">Max °C</th>
+          <th style="text-align:left;padding:4px">Bar</th>
+        </tr></thead>
+        <tbody id="ew-body"></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- NILM Disaggregation -->
   <div class="sec" id="nilm-section" style="display:none">
     <div class="sec-header">
@@ -1546,6 +1573,54 @@ async function load() {
     el.innerHTML = html;
   });
 
+  // ── Energy + Weather History ──
+  function loadEnergyWeather(){
+    const days = document.getElementById('ew-range').value;
+    fetch(`api/energy_weather_history?days=${days}`).then(r=>r.json()).catch(()=>({days:[]})).then(ew => {
+      const body = document.getElementById('ew-body');
+      const chart = document.getElementById('ew-chart');
+      if (!ew.days || ew.days.length === 0) { body.innerHTML='<tr><td colspan="6" style="color:var(--text3);padding:8px">No data yet. Needs energy + temperature sensors.</td></tr>'; return; }
+
+      const maxKwh = Math.max(...ew.days.map(d => d.kwh));
+      const maxTemp = Math.max(...ew.days.filter(d=>d.avg_temp!==null).map(d=>d.avg_temp), 1);
+      const minTemp = Math.min(...ew.days.filter(d=>d.avg_temp!==null).map(d=>d.avg_temp), 0);
+
+      // Mini chart — dual bar (energy=blue, temp=amber)
+      const chartW = Math.min(ew.days.length, 90);
+      const recent = ew.days.slice(-chartW);
+      chart.innerHTML = `<div style="display:flex;align-items:flex-end;height:80px;gap:1px;margin-bottom:4px">
+        ${recent.map(d => {
+          const kwPct = maxKwh > 0 ? d.kwh / maxKwh * 100 : 0;
+          const tempPct = d.avg_temp !== null && (maxTemp - minTemp) > 0 ? (d.avg_temp - minTemp) / (maxTemp - minTemp) * 100 : 0;
+          const isWeekend = d.is_weekend;
+          return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;height:100%;justify-content:flex-end" title="${d.date}: ${d.kwh}kWh, ${d.avg_temp!==null?d.avg_temp+'°C':'?'}">
+            <div style="width:100%;background:${isWeekend?'var(--amber)':'var(--accent)'};height:${kwPct}%;min-height:1px;border-radius:1px 1px 0 0;opacity:0.7"></div>
+          </div>`;
+        }).join('')}
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:.65rem;color:var(--text3)">
+        <span>${recent[0]?.date||''}</span>
+        <span style="color:var(--accent)">■ kWh (amber=weekend)</span>
+        <span>${recent[recent.length-1]?.date||''}</span>
+      </div>`;
+
+      // Table
+      body.innerHTML = ew.days.slice().reverse().map(d => {
+        const barW = maxKwh > 0 ? d.kwh / maxKwh * 100 : 0;
+        const tempColor = d.avg_temp !== null ? (d.avg_temp < 5 ? 'var(--blue)' : d.avg_temp > 20 ? 'var(--red)' : 'var(--text3)') : 'var(--text3)';
+        return `<tr style="border-bottom:1px solid var(--border);${d.is_weekend?'background:rgba(255,255,255,0.02)':''}">
+          <td style="padding:3px 4px;white-space:nowrap">${d.day_name} ${d.date}</td>
+          <td style="padding:3px 4px;text-align:right;font-weight:600">${d.kwh}</td>
+          <td style="padding:3px 4px;text-align:right;color:${tempColor}">${d.avg_temp!==null?d.avg_temp:'—'}</td>
+          <td style="padding:3px 4px;text-align:right;color:${tempColor}">${d.min_temp!==null?d.min_temp:'—'}</td>
+          <td style="padding:3px 4px;text-align:right;color:${tempColor}">${d.max_temp!==null?d.max_temp:'—'}</td>
+          <td style="padding:3px 4px;width:120px"><div style="height:10px;border-radius:2px;background:var(--accent);width:${barW}%;opacity:0.6"></div></td>
+        </tr>`;
+      }).join('');
+    });
+  }
+  loadEnergyWeather();
+
   // ── NILM Disaggregation ──
   fetch('api/nilm').then(r=>r.json()).catch(()=>({breakdown:[]})).then(n => {
     const sec = document.getElementById('nilm-section');
@@ -2208,6 +2283,13 @@ def api_smart_suggestions():
     """Return merged smart suggestions with confidence, YAML, and overlap info."""
     return jsonify(_read(SMART_SUGGESTIONS_PATH) or {"suggestions": [], "count": 0})
 
+
+@app.route("/api/energy_weather_history")
+@app.route("/ingress/api/energy_weather_history")
+def api_energy_weather_history():
+    from .energy_forecast import get_energy_weather_history
+    days = request.args.get("days", 90, type=int)
+    return jsonify({"days": get_energy_weather_history(days=days)})
 
 @app.route("/api/nilm")
 @app.route("/ingress/api/nilm")

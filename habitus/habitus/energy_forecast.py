@@ -153,6 +153,19 @@ def _get_daily_energy_and_weather(days: int = 90) -> list[dict]:
     return records
 
 
+def get_energy_weather_history(days: int = 90) -> list[dict]:
+    """Return daily energy + weather data for the history view."""
+    records = _get_daily_energy_and_weather(days=days)
+    # Enrich with day name
+    for r in records:
+        try:
+            dt = datetime.datetime.strptime(r["date"], "%Y-%m-%d")
+            r["day_name"] = dt.strftime("%a")
+        except Exception:
+            r["day_name"] = ""
+    return records
+
+
 def run_energy_forecast(days_history: int = 90) -> dict[str, Any]:
     """Build energy forecast model and predict next 7 days.
 
