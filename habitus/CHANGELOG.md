@@ -50,6 +50,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Scene detector now mines motion sensors, presence detection, person entities, and device trackers alongside lights/switches/media
 - Motion/presence-triggered automations generated when binary_sensor co-occurs with lights in a scene
+- Cross-domain conflict detector — catches wasteful/contradictory states in real-time
+- 7 conflict rules: window+heating, window+AC, heating+cooling, nobody-home+lights, warm-outside+heating, cold+windows-open, door-open-long+climate
+- Estimated wattage waste per conflict
+- Fix-it automation YAML for each conflict
+- Conflicts section at top of Smart Home tab with severity colours
+- Runs on every score cycle (lightweight, real-time)
 - Heater/thermostat state changes as implicit presence signal — "someone adjusted the bedroom heater → they are in the bedroom"
 - Climate-triggered automations: "when heater turns on, activate room scene"
 - Presence-inferring keywords: heater, radiator, thermostat, heating, climate, hvac

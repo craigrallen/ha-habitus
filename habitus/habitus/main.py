@@ -19,7 +19,7 @@ import websockets
 
 from . import activity as activity_engine
 from . import anomaly_breakdown, automation_gap, automation_score, drift, phantom, seasonal
-from . import appliance_fingerprint, automation_builder, scene_detector
+from . import appliance_fingerprint, automation_builder, conflict_detector, scene_detector
 from . import patterns as pattern_engine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -891,6 +891,12 @@ async def run(days_history: int, mode: str = "full") -> None:
             mode = "full"
         else:
             log.info("Score-only mode — using existing model")
+            # Run conflict detection on every score cycle (lightweight, real-time)
+            try:
+                conflicts = conflict_detector.detect_conflicts()
+                conflict_detector.save_conflicts(conflicts)
+            except Exception as e:
+                log.warning("Conflict detection failed: %s", e)
             now = datetime.datetime.now(datetime.UTC).replace(minute=0, second=0, microsecond=0)
             X = np.array(
                 [

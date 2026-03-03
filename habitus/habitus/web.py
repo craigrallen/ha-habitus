@@ -589,6 +589,12 @@ pre.raw {
 <!-- SMART HOME (merged Automations + Insights) -->
 <div id="tab-smarthome" class="tab">
 
+  <!-- Active Conflicts -->
+  <div class="sec" id="conflicts-section" style="display:none">
+    <div class="sec-header"><h2>⚠️ Active Conflicts</h2><span class="sec-sub">Things that don't make sense right now</span></div>
+    <div id="conflicts-list"></div>
+  </div>
+
   <!-- Discovered Scenes -->
   <div class="sec">
     <div class="sec-header"><h2>🎬 Discovered Scenes</h2><span class="sec-sub">Entity groups that activate together</span></div>
@@ -1057,6 +1063,27 @@ async function load() {
     ? smartSuggestions.suggestions : suggestions;
   allSuggestions = smartSugList;
   renderSuggestions();
+
+  // ── Active Conflicts ──
+  fetch('api/conflicts').then(r=>r.json()).catch(()=>({conflicts:[]})).then(cd => {
+    const el = document.getElementById('conflicts-list');
+    const sec = document.getElementById('conflicts-section');
+    if (!cd.conflicts || cd.conflicts.length === 0) { sec.style.display='none'; return; }
+    sec.style.display='';
+    const sevColors = {critical:'#ff4444',high:'#ff8800',medium:'#ffbb33',low:'var(--text3)'};
+    el.innerHTML = cd.conflicts.map(c => `
+      <div class="card" style="padding:12px;margin-bottom:8px;border-left:3px solid ${sevColors[c.severity]||'var(--border)'}">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div><span style="font-size:1.2rem">${c.icon||'⚠️'}</span> <b>${c.title}</b></div>
+          <span style="font-size:.75rem;color:${sevColors[c.severity]};text-transform:uppercase">${c.severity}</span>
+        </div>
+        <div style="font-size:.82rem;color:var(--text3);margin-top:4px">${c.description}</div>
+        <div style="font-size:.82rem;margin-top:6px">💡 ${c.suggestion}</div>
+        ${c.est_waste_w ? `<div style="font-size:.75rem;color:var(--text3);margin-top:4px">~${c.est_waste_w}W estimated waste</div>` : ''}
+        ${c.yaml ? `<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--accent);font-size:.8rem">Fix automation YAML</summary><pre style="font-size:.72rem;margin-top:4px">${c.yaml}</pre></details>` : ''}
+      </div>
+    `).join('');
+  });
 
   // Discovered Scenes
   const scenes = (scenesData && scenesData.scenes) ? scenesData.scenes : [];
@@ -1755,6 +1782,14 @@ def api_ha_automations():
 def api_smart_suggestions():
     """Return merged smart suggestions with confidence, YAML, and overlap info."""
     return jsonify(_read(SMART_SUGGESTIONS_PATH) or {"suggestions": [], "count": 0})
+
+
+@app.route("/api/conflicts")
+@app.route("/ingress/api/conflicts")
+def api_conflicts():
+    """Return detected cross-domain conflicts (window+heating, nobody home, etc)."""
+    c_path = os.path.join(DATA_DIR, "conflicts.json")
+    return jsonify(_read(c_path) or {"conflicts": [], "count": 0, "total_est_waste_w": 0})
 
 
 @app.route("/api/appliance_fingerprints")
