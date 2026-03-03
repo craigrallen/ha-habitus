@@ -9,6 +9,8 @@ import os
 import numpy as np
 import pandas as pd
 
+from .sensor_classifier import classify_sensor
+
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 ENTITY_BASELINES_PATH = os.path.join(DATA_DIR, "entity_baselines.json")
@@ -28,7 +30,7 @@ def build_entity_baselines(df: pd.DataFrame):
 
     baselines = {}
     for eid, group in df.groupby("entity_id"):
-        entity_bl = {}
+        entity_bl: dict = {}
         for (h, d), g in group.groupby(["hour_of_day", "day_of_week"]):
             vals = g["v"].values
             if len(vals) < 3:
@@ -39,6 +41,10 @@ def build_entity_baselines(df: pd.DataFrame):
                 "n": len(vals),
             }
         if entity_bl:
+            # Classify sensor type from full entity history and store in metadata
+            history_vals: list[float] = group["v"].dropna().tolist()
+            sensor_type = classify_sensor(eid, history=history_vals)
+            entity_bl["_meta"] = {"sensor_type": sensor_type}
             baselines[eid] = entity_bl
 
     with open(ENTITY_BASELINES_PATH, "w") as f:
