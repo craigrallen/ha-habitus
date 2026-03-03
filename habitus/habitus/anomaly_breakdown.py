@@ -839,6 +839,7 @@ def score_entities(current_states: dict | None = None) -> list:
                 "unit": unit,
                 "description": description,
                 "direction": "high" if score_val > b["mean"] else "low",
+                "sensor_type": sensor_type_str,
                 "confidence": round(confidence, 3),
                 "confidence_label": confidence_label,
             }
