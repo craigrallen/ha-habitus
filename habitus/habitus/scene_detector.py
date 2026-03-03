@@ -414,13 +414,26 @@ def _extract_room(entity_id: str) -> str | None:
 def _extract_rooms_from_entities(entities: set[str]) -> list[str]:
     """Extract unique room names from a set of entity IDs.
 
-    Uses keyword matching, then falls back to common prefix extraction
-    for entities that don't match any known room.
+    Priority: 1) HA configured areas, 2) keyword matching, 3) common prefix.
     """
     rooms: list[str] = []
     seen: set[str] = set()
 
-    # Pass 1: keyword matching
+    # Pass 0: HA configured areas (authoritative)
+    try:
+        from . import ha_areas
+        ha_rooms = ha_areas.get_entities_rooms(list(entities))
+        for r in ha_rooms:
+            if r.lower() not in seen:
+                seen.add(r.lower())
+                rooms.append(r)
+    except Exception:
+        pass  # ha_areas not available or cache empty — fall through
+
+    if rooms:
+        return rooms[:3]  # HA areas found — use them
+
+    # Pass 1: keyword matching (fallback)
     for eid in sorted(entities):
         room = _extract_room(eid)
         if room and room.lower() not in seen:

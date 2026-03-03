@@ -19,7 +19,7 @@ import websockets
 
 from . import activity as activity_engine
 from . import anomaly_breakdown, automation_gap, automation_score, drift, phantom, seasonal
-from . import appliance_fingerprint, automation_builder, conflict_detector, routine_predictor, scene_detector
+from . import appliance_fingerprint, automation_builder, conflict_detector, ha_areas, routine_predictor, scene_detector
 from . import patterns as pattern_engine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -1138,6 +1138,10 @@ async def run(days_history: int, mode: str = "full") -> None:
 
             # Scene detection and smart automation suggestions
             try:
+                try:
+                    ha_areas.fetch_areas()
+                except Exception as e:
+                    log.warning("HA area fetch failed: %s", e)
                 log.info("Running scene detection...")
                 scenes = scene_detector.detect_scenes(days=min(days_history, 30))
                 scene_detector.save(scenes)
@@ -1258,6 +1262,10 @@ async def run(days_history: int, mode: str = "full") -> None:
 
         # Scene detection and smart automation suggestions
         try:
+            try:
+                ha_areas.fetch_areas()
+            except Exception as e:
+                log.warning("HA area fetch failed: %s", e)
             log.info("Running scene detection...")
             scenes = scene_detector.detect_scenes(days=min(days_history, 30))
             scene_detector.save(scenes)

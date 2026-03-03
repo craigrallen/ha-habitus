@@ -65,6 +65,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Heater/thermostat state changes as implicit presence signal — "someone adjusted the bedroom heater → they are in the bedroom"
 - Climate-triggered automations: "when heater turns on, activate room scene"
 - Presence-inferring keywords: heater, radiator, thermostat, heating, climate, hvac
+- HA area registry integration — uses configured rooms/areas as primary room source
+- Entity→area mapping cached from HA template API (18 areas, 963 entities on Craig's system)
+- Falls back to keyword matching only when HA areas unavailable
 - Room detection from entity names — matches 30+ room keywords (kitchen, bedroom, wheelhouse, salon, etc.)
 - Boat-specific room keywords (wheelhouse, engine room, salon, cabin, cockpit, foredeck)
 - Fallback room detection via common prefix extraction when no keyword matches
