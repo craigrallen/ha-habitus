@@ -810,6 +810,9 @@ async def run(days_history: int, mode: str = "full") -> None:
             )
             anomaly_score, _ = seasonal.score_with_best_model(X)
             entity_anomalies = anomaly_breakdown.score_entities()
+            weighted_entity_score = anomaly_breakdown.compute_weighted_score(entity_anomalies)
+            if weighted_entity_score > 0:
+                log.info("Confidence-weighted entity score: %.3f", weighted_entity_score)
             activity_summary = activity_engine.get_activity_summary()
             training_days = state.get("training_days", 0)
             entity_count = state.get("entity_count", 0)
@@ -1108,6 +1111,9 @@ async def run(days_history: int, mode: str = "full") -> None:
 
     # Per-entity and activity scoring
     entity_anomalies = anomaly_breakdown.score_entities()
+    weighted_entity_score = anomaly_breakdown.compute_weighted_score(entity_anomalies)
+    if weighted_entity_score > 0:
+        log.info("Confidence-weighted entity score: %.3f", weighted_entity_score)
     activity_summary = activity_engine.get_activity_summary()
     top_anomaly = entity_anomalies[0]["description"] if entity_anomalies else None
 
