@@ -4,7 +4,7 @@ build-backend = "setuptools.backends.legacy:build"
 
 [project]
 name = "ha-habitus"
-version = "2.9.0"
+version = "3.1.0"
 description = "Behavioral intelligence add-on for Home Assistant — local-first, privacy-preserving"
 authors = [{ name = "Craig Allen", email = "craigallen12345@gmail.com" }]
 license = { text = "MIT" }
