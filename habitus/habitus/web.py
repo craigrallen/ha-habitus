@@ -22,6 +22,9 @@ DRIFT_PATH = os.path.join(DATA_DIR, "drift.json")
 AUTO_SCORES_PATH = os.path.join(DATA_DIR, "automation_scores.json")
 GAP_PATH = os.path.join(DATA_DIR, "automation_gap.json")
 DATA_QUALITY_PATH = os.path.join(DATA_DIR, "data_quality.json")
+SCENES_PATH = os.path.join(DATA_DIR, "scenes.json")
+SMART_SUGGESTIONS_PATH = os.path.join(DATA_DIR, "smart_suggestions.json")
+HA_AUTOMATIONS_PATH = os.path.join(DATA_DIR, "ha_automations.json")
 
 app = Flask(__name__)
 
@@ -513,9 +516,8 @@ pre.raw {
 <nav>
   <button class="active" onclick="gotoTab('overview',this)">Overview</button>
   <button onclick="gotoTab('breakdown',this)">Anomaly Breakdown</button>
-  <button onclick="gotoTab('automations',this)">Automations</button>
+  <button onclick="gotoTab('smarthome',this)">Smart Home</button>
   <button onclick="gotoTab('energy',this)">Energy & Patterns</button>
-  <button onclick="gotoTab('insights',this)">Insights</button>
   <button onclick="gotoTab('settings',this)">Settings</button>
 </nav>
 
@@ -584,17 +586,77 @@ pre.raw {
   </div>
 </div>
 
-<!-- AUTOMATIONS -->
-<div id="tab-automations" class="tab">
-  <div class="ftabs">
-    <button class="ftab active" onclick="filterSug('all',this)">All</button>
-    <button class="ftab" onclick="filterSug('routine',this)">🔁 Routine</button>
-    <button class="ftab" onclick="filterSug('energy',this)">⚡ Energy</button>
-    <button class="ftab" onclick="filterSug('boat',this)">⛵ Boat</button>
-    <button class="ftab" onclick="filterSug('anomaly',this)">🧠 Anomaly</button>
-    <button class="ftab" onclick="filterSug('lovelace',this)">🃏 Lovelace</button>
+<!-- SMART HOME (merged Automations + Insights) -->
+<div id="tab-smarthome" class="tab">
+
+  <!-- Discovered Scenes -->
+  <div class="sec">
+    <div class="sec-header"><h2>🎬 Discovered Scenes</h2><span class="sec-sub">Entity groups that activate together</span></div>
+    <div id="scenes-list"><div style="color:var(--text3);padding:12px">Loading scenes...</div></div>
   </div>
-  <div id="sug-list"><div style="color:var(--text3);padding:12px">Loading suggestions...</div></div>
+
+  <!-- Suggested Automations -->
+  <div class="sec" style="margin-top:16px">
+    <div class="sec-header"><h2>💡 Suggested Automations</h2><span class="sec-sub">Patterns we detected in your usage</span></div>
+    <div class="ftabs">
+      <button class="ftab active" onclick="filterSug('all',this)">All</button>
+      <button class="ftab" onclick="filterSug('scene',this)">🎬 Scenes</button>
+      <button class="ftab" onclick="filterSug('routine',this)">🔁 Routine</button>
+      <button class="ftab" onclick="filterSug('energy',this)">⚡ Energy</button>
+      <button class="ftab" onclick="filterSug('boat',this)">⛵ Boat</button>
+      <button class="ftab" onclick="filterSug('anomaly',this)">🧠 Anomaly</button>
+      <button class="ftab" onclick="filterSug('lovelace',this)">🃏 Lovelace</button>
+    </div>
+    <div id="sug-list"><div style="color:var(--text3);padding:12px">Loading suggestions...</div></div>
+  </div>
+
+  <!-- Your HA Automations -->
+  <div class="sec" style="margin-top:16px">
+    <div class="sec-header"><h2>🤖 Your Automations</h2><span class="sec-sub">Existing automations from Home Assistant</span></div>
+    <div id="ha-automations-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+  </div>
+
+  <!-- Entity Picker -->
+  <div class="sec" style="margin-top:16px">
+    <div class="sec-header"><h2>🔍 Entity Picker</h2><span class="sec-sub">Find entities for your automations</span></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <input type="text" id="entity-search" placeholder="Search entities (e.g. light, kitchen)..."
+        style="flex:1;min-width:200px;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:.85rem"
+        oninput="filterEntities()">
+      <select id="entity-domain-filter" onchange="filterEntities()"
+        style="background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:.85rem">
+        <option value="">All domains</option>
+        <option value="light">💡 Lights</option>
+        <option value="switch">🔌 Switches</option>
+        <option value="media_player">🔊 Media</option>
+        <option value="climate">🌡️ Climate</option>
+        <option value="cover">🪟 Covers</option>
+        <option value="fan">🌀 Fans</option>
+        <option value="scene">🎬 Scenes</option>
+        <option value="automation">🤖 Automations</option>
+      </select>
+    </div>
+    <div id="entity-results" style="max-height:300px;overflow-y:auto"></div>
+  </div>
+
+  <!-- Insights (moved from old tab) -->
+  <div class="sec" style="margin-top:16px">
+    <div class="sec-header"><h2>📊 Phantom Loads</h2><span class="sec-sub">Devices drawing power 24/7</span></div>
+    <div id="phantom-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+  </div>
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>📈 Routine Drift</h2><span class="sec-sub">Changes in daily patterns</span></div>
+    <div id="drift-info"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+  </div>
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>⚡ Automation Health</h2><span class="sec-sub">How well your automations work</span></div>
+    <div id="auto-scores"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+  </div>
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>🔧 Automation Gaps</h2><span class="sec-sub">Suggestions vs existing automations</span></div>
+    <div id="auto-gap"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+  </div>
+
 </div>
 
 <!-- ENERGY & PATTERNS -->
@@ -621,25 +683,7 @@ pre.raw {
   </div>
 </div>
 
-<!-- INSIGHTS -->
-<div id="tab-insights" class="tab">
-  <div class="sec">
-    <div class="sec-header"><h2>Phantom Loads</h2><span class="sec-sub">Devices drawing power 24/7</span></div>
-    <div id="phantom-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
-  </div>
-  <div class="sec" style="margin-top:12px">
-    <div class="sec-header"><h2>Routine Drift</h2><span class="sec-sub">Changes in daily patterns</span></div>
-    <div id="drift-info"><div style="color:var(--text3);padding:12px">Loading...</div></div>
-  </div>
-  <div class="sec" style="margin-top:12px">
-    <div class="sec-header"><h2>Automation Health</h2><span class="sec-sub">How well your automations work</span></div>
-    <div id="auto-scores"><div style="color:var(--text3);padding:12px">Loading...</div></div>
-  </div>
-  <div class="sec" style="margin-top:12px">
-    <div class="sec-header"><h2>Automation Gaps</h2><span class="sec-sub">Suggestions vs existing automations</span></div>
-    <div id="auto-gap"><div style="color:var(--text3);padding:12px">Loading...</div></div>
-  </div>
-</div>
+
 
 <!-- SETTINGS -->
 <div id="tab-settings" class="tab">
@@ -792,9 +836,12 @@ function renderSuggestions() {
     document.getElementById('sug-list').innerHTML = '<div style="color:var(--text3);padding:16px">No suggestions in this category.</div>';
     return;
   }
-  const catBadge = {routine:['b-info','🔁'],energy:['b-warn','⚡'],boat:['b-boat','⛵'],anomaly:['b-alert','🧠'],lovelace:['b-purple','🃏']};
+  const catBadge = {routine:['b-info','🔁'],energy:['b-warn','⚡'],boat:['b-boat','⛵'],anomaly:['b-alert','🧠'],lovelace:['b-purple','🃏'],scene:['b-purple','🎬']};
   document.getElementById('sug-list').innerHTML = list.map(s => {
     const [bc, ic] = catBadge[s.category] || ['b-muted','•'];
+    const overlapHtml = s.overlap_automation ? `<div style="font-size:.75rem;color:var(--amber);margin:4px 0">⚠ Possible overlap with: ${s.overlap_automation}</div>` : '';
+    const entitiesHtml = (s.entities && s.entities.length) ? `<div style="margin:6px 0;display:flex;flex-wrap:wrap;gap:3px">${s.entities.map(e=>`<span class="badge b-info" style="font-size:.68rem;margin:1px">${e}</span>`).join('')}</div>` : '';
+    const timeHtml = s.time_pattern ? `<div style="font-size:.72rem;color:var(--text3)">⏰ ${(s.time_pattern.peak_hour||'').toString().padStart(2,'0')}:00 · ${s.time_pattern.days||'daily'}</div>` : '';
     return `
     <div class="sug ${s.applicable===false?'na':''}">
       <div class="sug-head">
@@ -806,11 +853,16 @@ function renderSuggestions() {
         ${s.applicable===false?'<span class="badge b-alert">⚠ Entity not in your system</span>':''}
       </div>
       <div class="desc">${s.description}</div>
-      <pre id="yaml-${s.id}">${(s.yaml||'').trim()}</pre>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-accent" onclick="copyYaml('${s.id}')">📋 Copy YAML</button>
-        ${s.category!=='lovelace'?`<button class="btn btn-success" id="add-${s.id}" onclick="addToHA('${s.id}')">+ Add to HA</button>`:''}
-      </div>
+      ${entitiesHtml}
+      ${timeHtml}
+      ${overlapHtml}
+      <details><summary style="cursor:pointer;color:var(--accent);font-size:.82rem;margin:6px 0">Show YAML</summary>
+        <pre id="yaml-${s.id}">${(s.yaml||'').trim()}</pre>
+        <div style="display:flex;gap:8px;margin-top:4px">
+          <button class="btn btn-accent" onclick="copyYaml('${s.id}')">📋 Copy YAML</button>
+          ${s.category!=='lovelace'?`<button class="btn btn-success" id="add-${s.id}" onclick="addToHA('${s.id}')">+ Add to HA</button>`:''}
+        </div>
+      </details>
     </div>`;
   }).join('');
 }
@@ -847,7 +899,7 @@ function setGauge(score) {
 }
 
 async function load() {
-  const [state, baseline, progress, patterns, suggestions, anomalies, phantomData, driftData, autoScores, gapData] = await Promise.all([
+  const [state, baseline, progress, patterns, suggestions, anomalies, phantomData, driftData, autoScores, gapData, scenesData, smartSuggestions, haAutomations] = await Promise.all([
     fetch('api/state').then(r=>r.json()).catch(()=>({})),
     fetch('api/baseline').then(r=>r.json()).catch(()=>({})),
     fetch('api/progress').then(r=>r.json()).catch(()=>({})),
@@ -858,6 +910,9 @@ async function load() {
     fetch('api/drift').then(r=>r.json()).catch(()=>({})),
     fetch('api/automation_scores').then(r=>r.json()).catch(()=>([])),
     fetch('api/automation_gap').then(r=>r.json()).catch(()=>({})),
+    fetch('api/scenes').then(r=>r.json()).catch(()=>({scenes:[]})),
+    fetch('api/smart_suggestions').then(r=>r.json()).catch(()=>({suggestions:[]})),
+    fetch('api/ha_automations').then(r=>r.json()).catch(()=>({automations:[]})),
   ]);
 
   // Progress overlay — only block UI if no data at all yet
@@ -993,9 +1048,65 @@ async function load() {
         </tr>`;}).join('')
     : '<tr><td colspan="6" style="color:var(--text3);padding:16px">No entity anomalies detected.</td></tr>';
 
-  // Suggestions
-  allSuggestions = suggestions;
+  // Smart Suggestions (prefer smart_suggestions which include scenes; fallback to legacy)
+  const smartSugList = (smartSuggestions && smartSuggestions.suggestions && smartSuggestions.suggestions.length)
+    ? smartSuggestions.suggestions : suggestions;
+  allSuggestions = smartSugList;
   renderSuggestions();
+
+  // Discovered Scenes
+  const scenes = (scenesData && scenesData.scenes) ? scenesData.scenes : [];
+  if (scenes.length) {
+    document.getElementById('scenes-list').innerHTML = scenes.map((sc, idx) => {
+      const entList = sc.entities.map(e => `<span class="badge b-info" style="margin:2px;font-size:.72rem">${e}</span>`).join('');
+      const tp = sc.time_pattern || {};
+      return `
+      <div class="sug" style="margin-bottom:12px;border-left:3px solid var(--purple)">
+        <div class="sug-head">
+          <h3>🎬 ${sc.name}</h3>
+          <span class="badge b-purple" style="background:var(--purple);color:#fff">${sc.confidence}% confidence</span>
+        </div>
+        <div class="desc">${sc.description || ''}</div>
+        <div style="margin:8px 0;display:flex;flex-wrap:wrap;gap:4px">${entList}</div>
+        <div style="font-size:.75rem;color:var(--text3);margin-bottom:8px">
+          ⏰ Peak: ${(tp.peak_hour||18).toString().padStart(2,'0')}:00 · ${tp.days||'daily'} · ${sc.occurrences||0} occurrences
+        </div>
+        ${sc.scene_yaml ? `<details><summary style="cursor:pointer;color:var(--accent);font-size:.82rem;margin-bottom:4px">Show Scene YAML</summary><pre id="scene-yaml-${idx}" style="font-size:.72rem">${(sc.scene_yaml||'').trim()}</pre><button class="btn btn-accent" style="margin-top:4px" onclick="navigator.clipboard.writeText(document.getElementById('scene-yaml-${idx}').textContent).then(()=>toast('Copied ✓'))">📋 Copy</button></details>` : ''}
+      </div>`;
+    }).join('');
+  } else {
+    document.getElementById('scenes-list').innerHTML = '<div style="color:var(--text3);padding:12px;font-size:.82rem">No implicit scenes detected yet. Habitus needs a few days of data to find patterns in how you use your home.</div>';
+  }
+
+  // HA Automations
+  const haAutos = (haAutomations && haAutomations.automations) ? haAutomations.automations : [];
+  if (haAutos.length) {
+    const enabled = haAutos.filter(a => a.current_state === 'on');
+    const disabled = haAutos.filter(a => a.current_state !== 'on');
+    let haHtml = `<div style="margin-bottom:10px;font-size:.82rem;color:var(--text2)">${haAutos.length} automations (${enabled.length} enabled, ${disabled.length} disabled)</div>`;
+    haHtml += enabled.slice(0, 20).map(a => {
+      const triggered = a.last_triggered ? new Date(a.last_triggered).toLocaleDateString() : 'never';
+      return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+        <span class="badge b-ok" style="font-size:.68rem">on</span>
+        <div style="flex:1;font-weight:500;font-size:.82rem">${a.alias}</div>
+        <div style="font-size:.72rem;color:var(--text3)">Last: ${triggered}</div>
+      </div>`;
+    }).join('');
+    if (disabled.length) {
+      haHtml += `<details style="margin-top:10px"><summary style="cursor:pointer;color:var(--text3);font-size:.82rem">Disabled automations (${disabled.length})</summary><div style="margin-top:6px">`;
+      haHtml += disabled.map(a => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;opacity:.6">
+        <span class="badge b-muted" style="font-size:.68rem">off</span>
+        <div style="flex:1;font-size:.82rem">${a.alias}</div>
+      </div>`).join('');
+      haHtml += '</div></details>';
+    }
+    if (haAutos.length > 20) {
+      haHtml += `<div style="font-size:.75rem;color:var(--text3);margin-top:8px">Showing first 20 of ${enabled.length} enabled automations</div>`;
+    }
+    document.getElementById('ha-automations-list').innerHTML = haHtml;
+  } else {
+    document.getElementById('ha-automations-list').innerHTML = '<div style="color:var(--text3);padding:12px">No automations loaded from HA. They\'ll appear after the next Habitus run.</div>';
+  }
 
   // Weekly
   const wk=patterns.weekly||{};
@@ -1262,6 +1373,41 @@ async function doRescan(){
   btn.disabled=false; btn.textContent='🔄 Full Rescan';
   btn.onclick=confirmRescan;
 }
+
+// Entity picker
+let allEntities = [];
+async function loadEntities() {
+  try {
+    const r = await fetch('api/entities');
+    allEntities = await r.json();
+    filterEntities();
+  } catch(e) { console.warn('Entity load failed', e); }
+}
+function filterEntities() {
+  const q = (document.getElementById('entity-search').value || '').toLowerCase();
+  const domain = document.getElementById('entity-domain-filter').value;
+  const filtered = allEntities.filter(e => {
+    if (domain && !e.entity_id.startsWith(domain + '.')) return false;
+    if (q && !e.entity_id.includes(q) && !(e.name||'').toLowerCase().includes(q)) return false;
+    return true;
+  }).slice(0, 50);
+  const el = document.getElementById('entity-results');
+  if (!filtered.length) {
+    el.innerHTML = '<div style="color:var(--text3);font-size:.82rem;padding:8px">No entities found.</div>';
+    return;
+  }
+  el.innerHTML = filtered.map(e => `
+    <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:.72rem;color:var(--accent);min-width:50px">${e.entity_id.split('.')[0]}</span>
+      <div style="flex:1">
+        <div style="font-weight:500;font-size:.82rem">${e.name || e.entity_id}</div>
+        <div style="font-size:.7rem;color:var(--text3)">${e.entity_id}</div>
+      </div>
+      <div style="font-size:.78rem;color:var(--text2)">${e.state || ''}</div>
+      <button class="btn btn-accent" style="font-size:.7rem;padding:2px 8px" onclick="navigator.clipboard.writeText('${e.entity_id}').then(()=>toast('Copied: ${e.entity_id}'))">📋</button>
+    </div>`).join('');
+}
+loadEntities();
 
 load();
 // Fast-poll during training, normal refresh otherwise
@@ -1550,6 +1696,57 @@ def api_insights():
     from habitus import insights as _ins  # noqa: PLC0415
 
     return jsonify(_ins.compute_insights())
+
+
+@app.route("/api/scenes")
+@app.route("/ingress/api/scenes")
+def api_scenes():
+    """Return discovered implicit scenes."""
+    return jsonify(_read(SCENES_PATH) or {"scenes": [], "count": 0})
+
+
+@app.route("/api/ha_automations")
+@app.route("/ingress/api/ha_automations")
+def api_ha_automations():
+    """Return cached HA automations."""
+    return jsonify(_read(HA_AUTOMATIONS_PATH) or {"automations": [], "count": 0})
+
+
+@app.route("/api/smart_suggestions")
+@app.route("/ingress/api/smart_suggestions")
+def api_smart_suggestions():
+    """Return merged smart suggestions with confidence, YAML, and overlap info."""
+    return jsonify(_read(SMART_SUGGESTIONS_PATH) or {"suggestions": [], "count": 0})
+
+
+@app.route("/api/entities")
+@app.route("/ingress/api/entities")
+def api_entities():
+    """Return all HA entities for the entity picker widget."""
+    import requests as req  # type: ignore[import-untyped]
+
+    ha_url = os.environ.get("HA_URL", "http://supervisor/core")
+    token = os.environ.get("SUPERVISOR_TOKEN", os.environ.get("HABITUS_HA_TOKEN", ""))
+    try:
+        r = req.get(f"{ha_url}/api/states", headers={"Authorization": f"Bearer {token}"}, timeout=10)
+        if r.status_code != 200:
+            return jsonify([])
+        entities = []
+        for s in r.json():
+            eid = s["entity_id"]
+            domain = eid.split(".")[0]
+            if domain in ("light", "switch", "media_player", "climate", "cover",
+                          "fan", "scene", "automation", "input_boolean", "script"):
+                entities.append({
+                    "entity_id": eid,
+                    "name": s["attributes"].get("friendly_name", eid),
+                    "state": s["state"],
+                    "domain": domain,
+                })
+        entities.sort(key=lambda x: x["entity_id"])
+        return jsonify(entities)
+    except Exception as e:
+        return jsonify([])
 
 
 def start_web(port=8099):

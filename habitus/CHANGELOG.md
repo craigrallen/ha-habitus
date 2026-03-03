@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Scene Detector** (`scene_detector.py`) — mines entity co-occurrence patterns from HA SQLite database to find implicit scenes (groups of entities that activate together within a 5-minute window)
+- **Automation Builder** (`automation_builder.py`) — generates HA automation YAML from discovered patterns and scenes, checks for overlap with existing HA automations
+- **Smart Home tab** — merged Automations and Insights tabs into a single unified view with sub-sections: Discovered Scenes, Suggested Automations, Your Automations, Entity Picker, and all Insights
+- **Discovered Scenes** section — shows implicit scenes with entity badges, time patterns, confidence scores, and expandable Scene YAML
+- **Entity Picker** widget — searchable, filterable entity browser for lights, switches, media players, climate, covers, fans, scenes, and automations with one-click copy
+- **HA Automations** section — displays existing user automations from Home Assistant alongside Habitus suggestions
+- All YAML code blocks now behind `<details><summary>` expand buttons for cleaner UI
+- Smart suggestions show overlap warnings when they match existing HA automations
+- Scene-based suggestions with entity state tracking and time-of-day patterns
+- Direct HA SQLite database access for state history (much faster than REST API)
+- New API endpoints: `GET /api/scenes`, `GET /api/ha_automations`, `GET /api/smart_suggestions`, `GET /api/entities`
+- `mlxtend` added to requirements.txt
+
+### Changed
+- "Automations" and "Insights" tabs merged into single "Smart Home" tab
+- Suggestion cards now show entity badges, time patterns, and overlap info
+- All existing API endpoints remain backward-compatible
+
 ## [3.1.0] - 2026-03-03
 
 ### Added

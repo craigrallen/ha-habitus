@@ -19,6 +19,7 @@ import websockets
 
 from . import activity as activity_engine
 from . import anomaly_breakdown, automation_gap, automation_score, drift, phantom, seasonal
+from . import automation_builder, scene_detector
 from . import patterns as pattern_engine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -1129,6 +1130,30 @@ async def run(days_history: int, mode: str = "full") -> None:
             except Exception as e:
                 log.warning("Automation gap analysis failed: %s", e)
 
+            # Scene detection and smart automation suggestions
+            try:
+                log.info("Running scene detection...")
+                scenes = scene_detector.detect_scenes(days=min(days_history, 30))
+                scene_detector.save(scenes)
+                log.info("Detected %d implicit scenes", len(scenes))
+
+                log.info("Building smart automation suggestions...")
+                if os.path.exists(SUGGESTIONS_PATH):
+                    with open(SUGGESTIONS_PATH) as _f:
+                        existing_sug = json.loads(_f.read())
+                else:
+                    existing_sug = []
+                patterns_data = {}
+                if os.path.exists(os.path.join(DATA_DIR, "patterns.json")):
+                    with open(os.path.join(DATA_DIR, "patterns.json")) as _f:
+                        patterns_data = json.loads(_f.read())
+                smart_sug = automation_builder.generate_smart_suggestions(
+                    scenes, patterns_data, existing_sug
+                )
+                automation_builder.save_smart_suggestions(smart_sug)
+            except Exception as e:
+                log.warning("Scene detection / automation builder failed: %s", e)
+
             anomaly_score = score_current(features)
             training_days = round(
                 (features["hour"].max() - features["hour"].min()).total_seconds() / 86400
@@ -1212,6 +1237,30 @@ async def run(days_history: int, mode: str = "full") -> None:
             automation_gap.save(gaps)
         except Exception as e:
             log.warning("Automation gap analysis failed: %s", e)
+
+        # Scene detection and smart automation suggestions
+        try:
+            log.info("Running scene detection...")
+            scenes = scene_detector.detect_scenes(days=min(days_history, 30))
+            scene_detector.save(scenes)
+            log.info("Detected %d implicit scenes", len(scenes))
+
+            log.info("Building smart automation suggestions...")
+            if os.path.exists(SUGGESTIONS_PATH):
+                with open(SUGGESTIONS_PATH) as _f:
+                    existing_sug = json.loads(_f.read())
+            else:
+                existing_sug = []
+            patterns_data = {}
+            if os.path.exists(os.path.join(DATA_DIR, "patterns.json")):
+                with open(os.path.join(DATA_DIR, "patterns.json")) as _f:
+                    patterns_data = json.loads(_f.read())
+            smart_sug = automation_builder.generate_smart_suggestions(
+                scenes, patterns_data, existing_sug
+            )
+            automation_builder.save_smart_suggestions(smart_sug)
+        except Exception as e:
+            log.warning("Scene detection / automation builder failed: %s", e)
 
         anomaly_score = score_current(features)
         training_days = round(
