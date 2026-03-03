@@ -595,6 +595,12 @@ pre.raw {
     <div id="conflicts-list"></div>
   </div>
 
+  <!-- Room Predictions -->
+  <div class="sec" id="predictions-section" style="display:none">
+    <div class="sec-header"><h2>🧠 Room Predictions</h2><span class="sec-sub">What you'll probably want when you enter a room</span></div>
+    <div id="predictions-list"></div>
+  </div>
+
   <!-- Discovered Scenes -->
   <div class="sec">
     <div class="sec-header"><h2>🎬 Discovered Scenes</h2><span class="sec-sub">Entity groups that activate together</span></div>
@@ -1067,6 +1073,27 @@ async function load() {
     ? smartSuggestions.suggestions : suggestions;
   allSuggestions = smartSugList;
   renderSuggestions();
+
+  // ── Room Predictions ──
+  fetch('api/room_predictions').then(r=>r.json()).catch(()=>({automations:[]})).then(rp => {
+    const el = document.getElementById('predictions-list');
+    const sec = document.getElementById('predictions-section');
+    if (!rp.automations || rp.automations.length === 0) { sec.style.display='none'; return; }
+    sec.style.display='';
+    el.innerHTML = rp.automations.map(p => `
+      <div class="card" style="padding:12px;margin-bottom:8px;border-left:3px solid var(--accent)">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>🧠 <b>${p.room}</b> — ${p.time_window} (${p.day_type})</div>
+          <span style="font-size:.75rem;color:var(--accent)">${p.confidence}% · ${p.entry_count} observations</span>
+        </div>
+        <div style="font-size:.82rem;color:var(--text3);margin-top:4px">${p.description}</div>
+        <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">
+          ${p.actions.map(a => `<span style="background:var(--card2);padding:2px 8px;border-radius:4px;font-size:.78rem">${a.name} → <b>${a.state}</b> (${Math.round(a.probability*100)}%)</span>`).join('')}
+        </div>
+        <details style="margin-top:8px"><summary style="cursor:pointer;color:var(--accent);font-size:.8rem">Notification automation YAML</summary><pre style="font-size:.72rem;margin-top:4px">${p.yaml}</pre></details>
+      </div>
+    `).join('');
+  });
 
   // ── Active Conflicts ──
   fetch('api/conflicts').then(r=>r.json()).catch(()=>({conflicts:[]})).then(cd => {
@@ -1810,6 +1837,14 @@ def api_ha_automations():
 def api_smart_suggestions():
     """Return merged smart suggestions with confidence, YAML, and overlap info."""
     return jsonify(_read(SMART_SUGGESTIONS_PATH) or {"suggestions": [], "count": 0})
+
+
+@app.route("/api/room_predictions")
+@app.route("/ingress/api/room_predictions")
+def api_room_predictions():
+    """Return room-based predictive automations."""
+    rp_path = os.path.join(DATA_DIR, "room_predictions.json")
+    return jsonify(_read(rp_path) or {"automations": [], "prediction_count": 0})
 
 
 @app.route("/api/routines")

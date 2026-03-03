@@ -19,7 +19,7 @@ import websockets
 
 from . import activity as activity_engine
 from . import anomaly_breakdown, automation_gap, automation_score, drift, phantom, seasonal
-from . import appliance_fingerprint, automation_builder, conflict_detector, ha_areas, routine_predictor, scene_detector
+from . import appliance_fingerprint, automation_builder, conflict_detector, ha_areas, room_predictor, routine_predictor, scene_detector
 from . import patterns as pattern_engine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -1147,6 +1147,15 @@ async def run(days_history: int, mode: str = "full") -> None:
                 scene_detector.save(scenes)
                 log.info("Detected %d implicit scenes", len(scenes))
 
+                log.info("Running room prediction...")
+                try:
+                    area_data = ha_areas._load_cache()
+                    e2a = area_data.get("entity_to_area", {})
+                    if e2a:
+                        room_predictor.run_room_prediction(e2a, days=min(days_history, 30))
+                except Exception as e:
+                    log.warning("Room prediction failed: %s", e)
+
                 log.info("Running routine prediction...")
                 try:
                     routine_predictor.run_routine_prediction(days=min(days_history, 30))
@@ -1270,6 +1279,15 @@ async def run(days_history: int, mode: str = "full") -> None:
             scenes = scene_detector.detect_scenes(days=min(days_history, 30))
             scene_detector.save(scenes)
             log.info("Detected %d implicit scenes", len(scenes))
+
+            log.info("Running room prediction...")
+            try:
+                area_data = ha_areas._load_cache()
+                e2a = area_data.get("entity_to_area", {})
+                if e2a:
+                    room_predictor.run_room_prediction(e2a, days=min(days_history, 30))
+            except Exception as e:
+                log.warning("Room prediction failed: %s", e)
 
             log.info("Running routine prediction...")
             try:

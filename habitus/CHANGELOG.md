@@ -65,6 +65,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Heater/thermostat state changes as implicit presence signal — "someone adjusted the bedroom heater → they are in the bedroom"
 - Climate-triggered automations: "when heater turns on, activate room scene"
 - Presence-inferring keywords: heater, radiator, thermostat, heating, climate, hvac
+- Room-aware predictive automation — predicts what user wants when entering a room
+- Conditional probability model: P(action | room, time_slot, day_type) from motion history
+- 2-hour time windows × weekday/weekend for granular predictions
+- Actionable HA notifications with approve/dismiss buttons
+- 60% minimum confidence threshold to avoid noise
+- Predictions shown prominently in Smart Home tab with per-action confidence
 - HA area registry integration — uses configured rooms/areas as primary room source
 - Entity→area mapping cached from HA template API (18 areas, 963 entities on Craig's system)
 - Falls back to keyword matching only when HA areas unavailable
