@@ -254,6 +254,20 @@ td { padding: 9px 10px; border-bottom: 1px solid var(--border); font-size: 0.83r
 tr:last-child td { border-bottom: none; }
 tr:hover td { background: var(--bg2); }
 
+
+/* ── Responsive tables ── */
+.table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-wrap table { min-width: 720px; }
+#tab-breakdown .table-wrap table { min-width: 860px; }
+
+@media (max-width: 700px) {
+  .tab { padding: 0 10px 20px; }
+  .sec { padding: 12px; }
+  .sec-header { margin-bottom: 10px; }
+  th { font-size: 0.66rem; padding: 6px 8px 8px; }
+  td { font-size: 0.78rem; padding: 8px; }
+}
+
 /* ── Bar ── */
 .bar-wrap { background: var(--border); border-radius: 3px; height: 4px; }
 .train-banner { display:none; position:fixed; bottom:0; left:0; right:0; background:var(--card2);
@@ -548,10 +562,10 @@ pre.raw {
 
   <div class="sec">
     <div class="sec-header"><h2>Hourly Power Baseline</h2><span class="sec-sub">Learned normal consumption per hour</span></div>
-    <table>
+    <div class="table-wrap"><table>
       <thead><tr><th>Time</th><th>Expected</th><th>±Variance</th><th style="width:120px"></th></tr></thead>
       <tbody id="bl-table"><tr><td colspan="4" style="color:var(--text3);padding:16px">Loading baselines...</td></tr></tbody>
-    </table>
+    </table></div>
   </div>
 </div>
 
@@ -562,10 +576,10 @@ pre.raw {
       <h2>Per-Entity Anomaly Scores</h2>
       <span class="sec-sub" id="bd-ts"></span>
     </div>
-    <table>
+    <div class="table-wrap"><table>
       <thead><tr><th>Sensor</th><th>Current</th><th>Baseline</th><th>Deviation</th><th style="width:90px"></th></tr></thead>
       <tbody id="bd-table"><tr><td colspan="5" style="color:var(--text3);padding:16px">No entity data yet.</td></tr></tbody>
-    </table>
+    </table></div>
   </div>
 </div>
 
