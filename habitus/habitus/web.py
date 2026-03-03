@@ -17,6 +17,9 @@ ANOMALIES_PATH = os.path.join(DATA_DIR, "entity_anomalies.json")
 PROGRESS_PATH = os.path.join(DATA_DIR, "progress.json")
 MODEL_PATH = os.path.join(DATA_DIR, "model.pkl")
 RESCAN_FLAG = os.path.join(DATA_DIR, ".rescan_requested")
+PHANTOM_PATH = os.path.join(DATA_DIR, "phantom_loads.json")
+DRIFT_PATH = os.path.join(DATA_DIR, "drift.json")
+AUTO_SCORES_PATH = os.path.join(DATA_DIR, "automation_scores.json")
 
 app = Flask(__name__)
 
@@ -478,6 +481,7 @@ pre.raw {
   <button onclick="gotoTab('breakdown',this)">Anomaly Breakdown</button>
   <button onclick="gotoTab('automations',this)">Automations</button>
   <button onclick="gotoTab('energy',this)">Energy & Patterns</button>
+  <button onclick="gotoTab('insights',this)">Insights</button>
   <button onclick="gotoTab('settings',this)">Settings</button>
 </nav>
 
@@ -580,6 +584,22 @@ pre.raw {
       <thead><tr><th>Month</th><th>Avg Power</th><th>Avg Temp</th><th style="width:120px"></th></tr></thead>
       <tbody id="mo-table"></tbody>
     </table>
+  </div>
+</div>
+
+<!-- INSIGHTS -->
+<div id="tab-insights" class="tab">
+  <div class="sec">
+    <div class="sec-header"><h2>Phantom Loads</h2><span class="sec-sub">Devices drawing power 24/7</span></div>
+    <div id="phantom-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+  </div>
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>Routine Drift</h2><span class="sec-sub">Changes in daily patterns</span></div>
+    <div id="drift-info"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+  </div>
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>Automation Health</h2><span class="sec-sub">How well your automations work</span></div>
+    <div id="auto-scores"><div style="color:var(--text3);padding:12px">Loading...</div></div>
   </div>
 </div>
 
@@ -724,13 +744,16 @@ function setGauge(score) {
 }
 
 async function load() {
-  const [state, baseline, progress, patterns, suggestions, anomalies] = await Promise.all([
+  const [state, baseline, progress, patterns, suggestions, anomalies, phantomData, driftData, autoScores] = await Promise.all([
     fetch('api/state').then(r=>r.json()).catch(()=>({})),
     fetch('api/baseline').then(r=>r.json()).catch(()=>({})),
     fetch('api/progress').then(r=>r.json()).catch(()=>({})),
     fetch('api/patterns').then(r=>r.json()).catch(()=>({})),
     fetch('api/suggestions').then(r=>r.json()).catch(()=>([])),
     fetch('api/anomalies').then(r=>r.json()).catch(()=>({})),
+    fetch('api/phantom').then(r=>r.json()).catch(()=>([])),
+    fetch('api/drift').then(r=>r.json()).catch(()=>({})),
+    fetch('api/automation_scores').then(r=>r.json()).catch(()=>([])),
   ]);
 
   // Progress overlay — only block UI if no data at all yet
@@ -894,6 +917,69 @@ async function load() {
       <div class="s-name">${nm}</div>
       ${sm[s]?'<span class="badge b-ok">Trained</span>':'<span class="badge b-muted">No data</span>'}
     </div>`).join('');
+
+  // Insights — Phantom Loads
+  if (phantomData && phantomData.length) {
+    const maxKwh = Math.max(...phantomData.map(p=>p.kwh_year),1);
+    const totalCost = phantomData.reduce((s,p)=>s+p.cost_year_eur,0);
+    document.getElementById('phantom-list').innerHTML = `
+      <div style="margin-bottom:14px;font-size:.82rem;color:var(--text2)">
+        ${phantomData.length} phantom loads detected · <strong style="color:var(--amber)">€${totalCost.toFixed(0)}/year</strong> wasted
+      </div>
+      <table>
+        <thead><tr><th>Device</th><th>Phantom W</th><th>kWh/yr</th><th>€/yr</th><th style="width:100px"></th></tr></thead>
+        <tbody>${phantomData.map(p=>`
+          <tr>
+            <td><div style="font-weight:500">${p.name}</div><div style="font-size:.7rem;color:var(--text3)">${p.entity}</div></td>
+            <td style="font-weight:600;color:var(--amber)">${p.avg_phantom_w}W</td>
+            <td>${p.kwh_year}</td>
+            <td style="color:var(--red)">€${p.cost_year_eur}</td>
+            <td><div class="bar-wrap"><div class="bar amber" style="width:${Math.round(p.kwh_year/maxKwh*100)}%"></div></div></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+  } else {
+    document.getElementById('phantom-list').innerHTML = '<div style="color:var(--text3);padding:12px">No phantom loads detected — great! 🎉</div>';
+  }
+
+  // Insights — Routine Drift
+  if (driftData && driftData.drifts && driftData.drifts.length) {
+    const sig = driftData.drifts.filter(d=>d.significant);
+    document.getElementById('drift-info').innerHTML = `
+      <div style="margin-bottom:14px;font-size:.88rem;font-weight:600;color:${sig.length?'var(--amber)':'var(--green)'}">${driftData.summary || 'No significant drift'}</div>
+      <div class="pat-grid">${driftData.drifts.map(d=>`
+        <div class="pat-item">
+          <div class="pi-label">${d.metric.replace(/_/g,' ')}</div>
+          <div class="pi-val" style="color:${d.significant?'var(--amber)':'var(--text)'}">${d.diff_min!=null?(d.diff_min>0?'+':'')+d.diff_min+' min':d.diff+' '+d.unit}</div>
+          ${d.direction?`<div style="font-size:.72rem;color:var(--text3)">${d.direction}</div>`:''}
+        </div>`).join('')}
+      </div>`;
+  } else {
+    const reason = driftData.reason || 'Not enough data yet';
+    document.getElementById('drift-info').innerHTML = `<div style="color:var(--text3);padding:12px">${reason}</div>`;
+  }
+
+  // Insights — Automation Health
+  if (autoScores && autoScores.length) {
+    document.getElementById('auto-scores').innerHTML = `
+      <table>
+        <thead><tr><th>Automation</th><th>Triggers/7d</th><th>Overrides</th><th>Score</th><th style="width:80px"></th></tr></thead>
+        <tbody>${autoScores.map(a=>{
+          const col = a.score>=70?'var(--green)':a.score>=40?'var(--amber)':'var(--red)';
+          const bc = a.score>=70?'b-ok':a.score>=40?'b-warn':'b-alert';
+          const emoji = a.score>=70?'🟢':a.score>=40?'🟡':'🔴';
+          return `<tr>
+            <td><div style="font-weight:500">${a.name}</div><div style="font-size:.7rem;color:var(--text3)">${a.entity_id}</div></td>
+            <td>${a.triggers_7d}</td>
+            <td style="color:${a.overrides?'var(--amber)':'var(--text3)'}">${a.overrides}</td>
+            <td><span class="badge ${bc}">${emoji} ${a.score}/100</span></td>
+            <td><div class="bar-wrap"><div class="bar" style="width:${a.score}%;background:${col}"></div></div></td>
+          </tr>`;}).join('')}
+        </tbody>
+      </table>`;
+  } else {
+    document.getElementById('auto-scores').innerHTML = '<div style="color:var(--text3);padding:12px">No automations scored yet.</div>';
+  }
 
   // Settings
   document.getElementById('raw-state').textContent = JSON.stringify(state,null,2);
@@ -1084,6 +1170,24 @@ def api_add_automation():
         return jsonify({"ok": False, "error": f"HA {r.status_code}"}), 400
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/phantom")
+@app.route("/ingress/api/phantom")
+def api_phantom():
+    return jsonify(_read(PHANTOM_PATH) or [])
+
+
+@app.route("/api/drift")
+@app.route("/ingress/api/drift")
+def api_drift():
+    return jsonify(_read(DRIFT_PATH) or {})
+
+
+@app.route("/api/automation_scores")
+@app.route("/ingress/api/automation_scores")
+def api_automation_scores():
+    return jsonify(_read(AUTO_SCORES_PATH) or [])
 
 
 def start_web(port=8099):
