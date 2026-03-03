@@ -875,8 +875,10 @@ async function load() {
   }
   document.getElementById('prog-overlay').style.display = 'none';
 
-  // Header
-  const score = state.anomaly_score ?? 0;
+  // Header — treat as normal during warmup grace period
+  const warmingUp = state.warming_up || state.phase === 'warming_up';
+  const warmupDaysLeft = state.warmup_days_remaining ?? 0;
+  const score = warmingUp ? 0 : (state.anomaly_score ?? 0);
   document.getElementById('hdr-dot').className = 'status-dot ' + (score>=70?'bad':score>=40?'warn':'ok');
   document.getElementById('hdr-label').textContent = score>=70?'Anomaly Detected':score>=40?'Elevated':'Normal';
   const lr = state.last_run ? new Date(state.last_run).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';

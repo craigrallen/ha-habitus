@@ -37,6 +37,8 @@ HA_TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
 NOTIFY_SVC = os.environ.get("HABITUS_NOTIFY_SERVICE", "notify.notify")
 NOTIFY_ON = os.environ.get("HABITUS_NOTIFY_ON", "true").lower() == "true"
 THRESHOLD = int(os.environ.get("HABITUS_ANOMALY_THRESHOLD", "70"))
+# Minimum training days before anomaly scoring is trusted — assume normal until then
+MIN_SCORING_DAYS = int(os.environ.get("HABITUS_MIN_SCORING_DAYS", "7"))
 
 MODEL_PATH = os.path.join(DATA_DIR, "model.pkl")
 SCALER_PATH = os.path.join(DATA_DIR, "scaler.pkl")
@@ -408,6 +410,18 @@ def save_artifacts(model, scaler, features):
 
 
 def score_current(features):
+    # During warmup grace period, never report anomaly — assume normal
+    training_days = 0
+    try:
+        training_days = round(
+            (features["hour"].max() - features["hour"].min()).total_seconds() / 86400
+        )
+    except Exception:
+        pass
+    if training_days < MIN_SCORING_DAYS:
+        log.info("Warmup: only %d training days — score capped at 0 (need %d)", training_days, MIN_SCORING_DAYS)
+        return 0
+
     now = datetime.datetime.now(datetime.UTC).replace(minute=0, second=0, microsecond=0)
     row = features[features["hour"] == pd.Timestamp(now)]
     if not row.empty:
@@ -815,13 +829,16 @@ async def run(days_history: int, mode: str = "full") -> None:
             save_artifacts(model, scaler, features)
             # Partial score after training — baseline + initial anomaly data visible
             _partial_score = score_current(features)
+            _warming_up = training_days < MIN_SCORING_DAYS
             state.update(
                 {
-                    "phase": "model_ready",
+                    "phase": "warming_up" if _warming_up else "model_ready",
                     "anomaly_score": _partial_score,
                     "training_days": round(
                         (features["hour"].max() - features["hour"].min()).total_seconds() / 86400
                     ),
+                    "warming_up": training_days < MIN_SCORING_DAYS,
+                    "warmup_days_remaining": max(0, MIN_SCORING_DAYS - training_days),
                 }
             )
             save_state(state)
