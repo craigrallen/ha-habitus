@@ -145,12 +145,68 @@ def find_phantom_loads(entity_baselines: dict = None, threshold_w: float = 2.0) 
     return results
 
 
+def _get_grid_annual_kwh() -> float | None:
+    """Fetch actual annual grid consumption from HA long-term stats."""
+    import requests as req
+    import datetime, json as _json
+
+    grid_entity = os.environ.get("HABITUS_ENERGY_GRID", "")
+    ha_url = os.environ.get("HA_URL", "http://supervisor/core")
+    token = os.environ.get("SUPERVISOR_TOKEN", os.environ.get("HABITUS_HA_TOKEN", ""))
+    if not grid_entity or not token:
+        return None
+    try:
+        end = datetime.datetime.now(datetime.timezone.utc)
+        start = end - datetime.timedelta(days=365)
+        r = req.get(
+            f"{ha_url}/api/history/period/{start.isoformat()}",
+            params={"filter_entity_id": grid_entity, "end_time": end.isoformat(), "minimal_response": "true"},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=15,
+        )
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        if not data or not data[0]:
+            return None
+        states = [s for s in data[0] if s.get("state") not in ("unavailable", "unknown")]
+        if len(states) < 2:
+            return None
+        first = float(states[0]["state"])
+        last = float(states[-1]["state"])
+        return max(0.0, last - first)
+    except Exception as e:
+        log.debug("Grid annual kWh lookup failed: %s", e)
+        return None
+
+
 def save(results: list) -> None:
     total_w = sum(r["avg_phantom_w"] for r in results)
     total_kwh = sum(r["kwh_year"] for r in results)
-    kwh_price = float(os.environ.get("HABITUS_KWH_PRICE", "0.20"))
-    currency = os.environ.get("HABITUS_CURRENCY", "€")
+    kwh_price = float(os.environ.get("HABITUS_KWH_PRICE", "3.0"))
+    currency = os.environ.get("HABITUS_CURRENCY", "kr")
     total_cost = round(total_kwh * kwh_price, 2)
+
+    # Validate against actual grid consumption from Energy Dashboard
+    grid_annual_kwh = _get_grid_annual_kwh()
+    grid_annual_cost = round(grid_annual_kwh * kwh_price, 2) if grid_annual_kwh else None
+    phantom_pct = round(100 * total_kwh / grid_annual_kwh, 1) if grid_annual_kwh and grid_annual_kwh > 0 else None
+
+    # Sanity: if phantom total > grid total, something is wrong — cap and warn
+    if grid_annual_kwh and total_kwh > grid_annual_kwh:
+        log.warning(
+            "Phantom kWh (%.0f) exceeds grid total (%.0f) — likely bad sensor data, capping",
+            total_kwh, grid_annual_kwh,
+        )
+        # Rescale results proportionally
+        scale = grid_annual_kwh * 0.5 / total_kwh  # assume max 50% could be phantom
+        for r in results:
+            r["kwh_year"] = round(r["kwh_year"] * scale, 1)
+            r["cost_year"] = round(r["kwh_year"] * kwh_price, 2)
+        total_kwh = sum(r["kwh_year"] for r in results)
+        total_cost = round(total_kwh * kwh_price, 2)
+        phantom_pct = round(100 * total_kwh / grid_annual_kwh, 1) if grid_annual_kwh else None
+
     payload = {
         "phantom_loads": results,
         "total_phantom_w": round(total_w, 1),
@@ -158,6 +214,9 @@ def save(results: list) -> None:
         "total_cost_year": total_cost,
         "currency": currency,
         "count": len(results),
+        "grid_annual_kwh": round(grid_annual_kwh, 0) if grid_annual_kwh else None,
+        "grid_annual_cost": grid_annual_cost,
+        "phantom_pct_of_bill": phantom_pct,
     }
     try:
         with open(PHANTOM_PATH, "w") as f:

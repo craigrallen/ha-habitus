@@ -995,28 +995,45 @@ async function load() {
     </div>`).join('');
 
   // Insights — Phantom Loads
-  if (phantomData && phantomData.length) {
-    const maxKwh = Math.max(...phantomData.map(p=>p.kwh_year),1);
-    const totalCost = phantomData.reduce((s,p)=>s+p.cost_year_eur,0);
-    document.getElementById('phantom-list').innerHTML = `
+  const phantomPayload = phantomData && !Array.isArray(phantomData) ? phantomData : {phantom_loads: phantomData || []};
+  const phantomList = phantomPayload.phantom_loads || [];
+  const gridKwh = phantomPayload.grid_annual_kwh;
+  const gridCost = phantomPayload.grid_annual_cost;
+  const phantomPct = phantomPayload.phantom_pct_of_bill;
+  const currency = phantomPayload.currency || 'kr';
+
+  let phantomHtml = '';
+  if (gridKwh) {
+    phantomHtml += `<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:.8rem;color:var(--text2)">
+      📊 Grid (Energy Dashboard): <strong style="color:var(--text)">${Math.round(gridKwh).toLocaleString()} kWh/year</strong>
+      ${gridCost ? `≈ <strong style="color:var(--text)">${Math.round(gridCost).toLocaleString()} ${currency}</strong>` : ''}
+      ${phantomPct != null ? `· Phantom waste: <strong style="color:var(--amber)">${phantomPct}% of bill</strong>` : ''}
+    </div>`;
+  }
+
+  if (phantomList.length) {
+    const maxKwh = Math.max(...phantomList.map(p=>p.kwh_year), 1);
+    const totalCost = phantomPayload.total_cost_year || phantomList.reduce((s,p)=>s+(p.cost_year||0),0);
+    phantomHtml += `
       <div style="margin-bottom:14px;font-size:.82rem;color:var(--text2)">
-        ${phantomData.length} phantom loads detected · <strong style="color:var(--amber)">€${totalCost.toFixed(0)}/year</strong> wasted
+        ${phantomList.length} always-on devices · <strong style="color:var(--amber)">${Math.round(totalCost).toLocaleString()} ${currency}/year</strong> wasted
       </div>
       <table>
-        <thead><tr><th>Device</th><th>Phantom W</th><th>kWh/yr</th><th>€/yr</th><th style="width:100px"></th></tr></thead>
-        <tbody>${phantomData.map(p=>`
+        <thead><tr><th>Device</th><th>Phantom W</th><th>kWh/yr</th><th>${currency}/yr</th><th style="width:100px"></th></tr></thead>
+        <tbody>${phantomList.map(p=>`
           <tr>
             <td><div style="font-weight:500">${p.name}</div><div style="font-size:.7rem;color:var(--text3)">${p.entity}</div></td>
             <td style="font-weight:600;color:var(--amber)">${p.avg_phantom_w}W</td>
             <td>${p.kwh_year}</td>
-            <td style="color:var(--red)">€${p.cost_year_eur}</td>
+            <td style="color:var(--red)">${Math.round(p.cost_year||0)}</td>
             <td><div class="bar-wrap"><div class="bar amber" style="width:${Math.round(p.kwh_year/maxKwh*100)}%"></div></div></td>
           </tr>`).join('')}
         </tbody>
       </table>`;
   } else {
-    document.getElementById('phantom-list').innerHTML = '<div style="color:var(--text3);padding:12px">No phantom loads detected — great! 🎉</div>';
+    phantomHtml += '<div style="color:var(--text3);padding:12px">No phantom loads detected — great! 🎉</div>';
   }
+  document.getElementById('phantom-list').innerHTML = phantomHtml;
 
   // Insights — Routine Drift
   if (driftData && driftData.drifts && driftData.drifts.length) {
