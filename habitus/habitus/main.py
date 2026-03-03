@@ -506,6 +506,12 @@ async def get_energy_entities() -> dict:
                 flows = src.get("flow_from", [])
                 if flows:
                     result["grid_kwh"] = flows[0].get("stat_energy_from")
+                    # Pull price from Energy Dashboard config
+                    price = flows[0].get("number_energy_price")
+                    if price:
+                        result["kwh_price"] = float(price)
+                    elif flows[0].get("entity_energy_price"):
+                        result["kwh_price_entity"] = flows[0]["entity_energy_price"]
 
         # Per-device watt-rate sensors (instantaneous W)
         result["device_rates"] = [
@@ -753,6 +759,13 @@ async def run(days_history: int, mode: str = "full") -> None:
         if energy.get("grid_kwh"):
             os.environ["HABITUS_ENERGY_GRID"] = energy["grid_kwh"]
             log.info("Using Energy Dashboard grid entity: %s", energy["grid_kwh"])
+        if energy.get("kwh_price"):
+            os.environ["HABITUS_KWH_PRICE"] = str(energy["kwh_price"])
+            log.info("Energy Dashboard price: %.2f %s/kWh", energy["kwh_price"], os.environ.get("HABITUS_CURRENCY", "kr"))
+        # Pull electricity price + currency directly from Energy Dashboard
+        if energy.get("kwh_price") and not os.environ.get("HABITUS_KWH_PRICE_LOCKED"):
+            os.environ["HABITUS_KWH_PRICE"] = str(energy["kwh_price"])
+            log.info("Energy Dashboard price: %s %s/kWh", energy["kwh_price"], os.environ.get("HABITUS_CURRENCY","kr"))
             # Prefer a real-time watt sensor over kWh delta — look for _w companion
             # e.g. sensor.foo_electric_consumption_kwh → sensor.foo_electric_consumption_w
             kwh_id = energy["grid_kwh"]
