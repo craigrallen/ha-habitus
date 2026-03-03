@@ -212,7 +212,97 @@ def _cluster_events(events: list[dict]) -> list[dict]:
     return clusters
 
 
-def _match_to_appliances(clusters: list[dict]) -> list[dict]:
+def _learn_signatures_from_known_monitors(exclude_entity: str = "", days: int = 30) -> dict[str, dict[str, Any]]:
+    """Learn appliance signatures from known HA power monitors (smart plugs etc).
+
+    This treats device-level power sensors as ground truth fingerprints.
+    Returns a signature map compatible with _match_to_appliances.
+    """
+    learned: dict[str, dict[str, Any]] = {}
+    if not os.path.exists(HA_DB):
+        return learned
+
+    cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)
+    cutoff_ts = cutoff.timestamp()
+    try:
+        conn = sqlite3.connect(f"file:{HA_DB}?mode=ro", uri=True)
+        candidates = conn.execute("""
+            SELECT DISTINCT sm.entity_id
+            FROM states_meta sm
+            WHERE sm.entity_id LIKE 'sensor.%'
+              AND (
+                sm.entity_id LIKE '%_power%'
+                OR sm.entity_id LIKE '%_watt%'
+                OR sm.entity_id LIKE '%_watts%'
+                OR sm.entity_id LIKE '%energy_watts%'
+                OR sm.entity_id LIKE '%consumption_w%'
+              )
+        """).fetchall()
+
+        for (eid,) in candidates:
+            if eid == exclude_entity:
+                continue
+            # Skip known aggregate/system meters
+            low = eid.lower()
+            if any(k in low for k in (
+                'shore_power', 'mastervolt', 'solar_', 'battery_', 'inverter',
+                'charger_input_power', 'wind_turbine', 'combined_wattage'
+            )):
+                continue
+
+            rows = conn.execute("""
+                SELECT s.state
+                FROM states s
+                JOIN states_meta sm ON s.metadata_id = sm.metadata_id
+                WHERE sm.entity_id = ? AND s.last_changed_ts > ?
+                ORDER BY s.last_changed_ts
+            """, (eid, cutoff_ts)).fetchall()
+
+            watts = []
+            for (state_val,) in rows:
+                try:
+                    w = float(state_val)
+                    if 0 <= w <= 25000:
+                        watts.append(w)
+                except (ValueError, TypeError):
+                    continue
+
+            if len(watts) < 20:
+                continue
+
+            arr = np.array(watts)
+            active = arr[arr > 30]  # above standby
+            if len(active) < 10:
+                continue
+
+            # Robust fingerprint from active periods
+            median_w = float(np.median(active))
+            p90_w = float(np.percentile(active, 90))
+            duty = float(len(active) / len(arr))
+
+            key = eid.replace('sensor.', '').replace('.', '_')
+            learned[key] = {
+                'power': round(median_w, 1),
+                'power_p90': round(p90_w, 1),
+                'icon': '🔎',
+                'source': 'ha_monitor',
+                'entity_id': eid,
+                'duty_cycle': round(duty, 3),
+            }
+
+            # Promote likely water heater naming so it wins matching
+            if any(k in low for k in ('water_heater', 'waterheater', 'boiler', 'varmvatten', 'heater')):
+                learned[key]['icon'] = '🚿'
+                learned[key]['priority'] = 1
+
+        conn.close()
+    except Exception as e:
+        log.warning("nilm: failed learning monitor signatures: %s", e)
+
+    return learned
+
+
+def _match_to_appliances(clusters: list[dict], learned_sigs: dict[str, dict[str, Any]] | None = None) -> list[dict]:
     """Match discovered clusters to known appliance signatures."""
     # Load custom signatures
     custom_sigs = {}
@@ -228,8 +318,9 @@ def _match_to_appliances(clusters: list[dict]) -> list[dict]:
     except Exception:
         pass
 
-    # Merge generic + custom
-    all_sigs = {**GENERIC_APPLIANCES, **custom_sigs}
+    # Merge generic + custom + learned from HA power monitors
+    learned_sigs = learned_sigs or {}
+    all_sigs = {**GENERIC_APPLIANCES, **custom_sigs, **learned_sigs}
 
     matched = []
     used_sigs = set()
@@ -355,10 +446,12 @@ def run_disaggregation(power_entity: str = "", days: int = 7) -> dict[str, Any]:
     if len(readings) < 20:
         return {"error": "Insufficient data", "readings_count": len(readings), "breakdown": []}
 
+    learned_monitor_sigs = _learn_signatures_from_known_monitors(exclude_entity=power_entity, days=min(days, 30))
+
     edges = _detect_edges(readings)
     events = _pair_edges(edges)
     clusters = _cluster_events(events)
-    matched = _match_to_appliances(clusters)
+    matched = _match_to_appliances(clusters, learned_sigs=learned_monitor_sigs)
     breakdown = _estimate_current_breakdown(readings, matched)
 
     # Energy breakdown (last 24h estimation)
@@ -388,6 +481,8 @@ def run_disaggregation(power_entity: str = "", days: int = 7) -> dict[str, Any]:
         "edges_detected": len(edges),
         "events_paired": len(events),
         "appliance_slots": len(matched),
+        "learned_monitor_signatures": len(learned_monitor_sigs),
+        "monitor_signature_entities": sorted([v.get("entity_id", "") for v in learned_monitor_sigs.values() if v.get("entity_id")])[:50],
         "current_breakdown": breakdown,
         "current_total_w": round(float(np.median([w for _, w in readings[-10:]])), 0) if readings else 0,
         "discovered_appliances": matched,

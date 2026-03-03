@@ -579,3 +579,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - No external NILM libraries — runs on numpy + sklearn (already installed)
 - New API endpoints: `/api/nilm`, `/api/nilm/run`
 - NILM section in Energy & Patterns tab
+
+## [3.7.2] - 2026-03-03
+
+### Added
+- NILM now learns signatures from known HA per-device power monitors (smart plugs) and uses them as high-confidence fingerprints
+- Water-heater-like monitor names (water_heater/boiler/varmvatten/heater) are prioritised in matching
+- NILM output includes learned monitor signature count + source entities for auditability
+
