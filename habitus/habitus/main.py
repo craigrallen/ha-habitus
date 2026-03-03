@@ -1143,7 +1143,7 @@ async def run(days_history: int, mode: str = "full") -> None:
                 scene_detector.save(scenes)
                 log.info("Detected %d implicit scenes", len(scenes))
 
-                                log.info("Running routine prediction...")
+                log.info("Running routine prediction...")
                 try:
                     routine_predictor.run_routine_prediction(days=min(days_history, 30))
                 except Exception as e:
