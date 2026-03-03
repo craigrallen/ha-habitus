@@ -84,8 +84,11 @@ class TestExtractActivityFeatures:
 
     def test_values_non_negative(self, sample_df):
         result = extract_activity_features(sample_df)
-        numeric_cols = result.select_dtypes(include=np.number).columns
-        assert (result[numeric_cols] >= 0).all().all()
+        # Exclude temperature columns — outdoor_temp_c is legitimately negative in winter
+        non_temp_cols = [
+            c for c in result.select_dtypes(include=np.number).columns if "temp" not in c
+        ]
+        assert (result[non_temp_cols] >= 0).all().all()
 
     def test_empty_df_returns_empty(self):
         result = extract_activity_features(pd.DataFrame())

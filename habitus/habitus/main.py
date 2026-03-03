@@ -5,6 +5,7 @@ HA is source of truth. /data stores only inference artifacts.
 
 import argparse
 import asyncio
+import contextlib
 import datetime
 import json
 import logging
@@ -13,13 +14,12 @@ import pickle
 
 import numpy as np
 import pandas as pd
-import requests
+import requests  # type: ignore[import-untyped]
 import websockets
 
 from . import activity as activity_engine
-from . import anomaly_breakdown, seasonal
+from . import anomaly_breakdown, automation_gap, automation_score, drift, phantom, seasonal
 from . import patterns as pattern_engine
-from . import phantom, drift, automation_score, automation_gap
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("habitus")
@@ -224,9 +224,7 @@ async def fetch_stats(entity_ids, start_iso, end_iso=None):
     """
     if end_iso is None:
         end_iso = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:00:00+00:00")
-    # Accumulate pre-aggregated hourly rows keyed by (hour, entity_id)
-    hourly_agg: dict[tuple, list[float]] = {}
-    all_rows = []  # kept for compatibility — will be small after aggregation
+    all_rows = []  # accumulated hourly rows
     done = 0
     total = len(entity_ids)
     import time as _t
@@ -412,14 +410,16 @@ def save_artifacts(model, scaler, features):
 def score_current(features):
     # During warmup grace period, never report anomaly — assume normal
     training_days = 0
-    try:
+    with contextlib.suppress(Exception):
         training_days = round(
             (features["hour"].max() - features["hour"].min()).total_seconds() / 86400
         )
-    except Exception:
-        pass
     if training_days < MIN_SCORING_DAYS:
-        log.info("Warmup: only %d training days — score capped at 0 (need %d)", training_days, MIN_SCORING_DAYS)
+        log.info(
+            "Warmup: only %d training days — score capped at 0 (need %d)",
+            training_days,
+            MIN_SCORING_DAYS,
+        )
         return 0
 
     now = datetime.datetime.now(datetime.UTC).replace(minute=0, second=0, microsecond=0)
@@ -599,15 +599,13 @@ def publish_dashboard_entities(
     else:
         # Score normal — clear any previous anomaly notification
         headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
-        try:
+        with contextlib.suppress(Exception):
             requests.post(
                 f"{HA_URL}/api/services/persistent_notification/dismiss",
                 headers=headers,
                 json={"notification_id": "habitus_anomaly"},
                 timeout=5,
             )
-        except Exception:
-            pass
 
     # 2b. Immediate leak alert — doesn't wait for anomaly score
     try:
@@ -617,7 +615,10 @@ def publish_dashboard_entities(
             s["entity_id"].replace("binary_sensor.", "").replace("_", " ")
             for s in leak_states
             if s["entity_id"].startswith("binary_sensor.")
-            and any(k in s["entity_id"].lower() for k in ("leak_detected", "water_leak", "flood", "moisture"))
+            and any(
+                k in s["entity_id"].lower()
+                for k in ("leak_detected", "water_leak", "flood", "moisture")
+            )
             and str(s.get("state", "")).lower() in ("on", "wet", "detected", "true")
         ]
         if active_leaks:
@@ -625,7 +626,7 @@ def publish_dashboard_entities(
                 "habitus_leak",
                 "🚨 Habitus — Water Leak Detected",
                 "**Active leak sensors:**\n"
-                + "\n".join(f"- {l}" for l in active_leaks)
+                + "\n".join(f"- {leak}" for leak in active_leaks)
                 + "\n\nCheck immediately!",
             )
             log.warning("LEAK ALERT: %s", active_leaks)
@@ -752,23 +753,36 @@ async def run(days_history: int, mode: str = "full") -> None:
             log.info("Using Energy Dashboard grid entity: %s", energy["grid_kwh"])
         if energy.get("kwh_price"):
             os.environ["HABITUS_KWH_PRICE"] = str(energy["kwh_price"])
-            log.info("Energy Dashboard price: %.2f %s/kWh", energy["kwh_price"], os.environ.get("HABITUS_CURRENCY", "kr"))
+            log.info(
+                "Energy Dashboard price: %.2f %s/kWh",
+                energy["kwh_price"],
+                os.environ.get("HABITUS_CURRENCY", "kr"),
+            )
         # Pull electricity price + currency directly from Energy Dashboard
         if energy.get("kwh_price") and not os.environ.get("HABITUS_KWH_PRICE_LOCKED"):
             os.environ["HABITUS_KWH_PRICE"] = str(energy["kwh_price"])
-            log.info("Energy Dashboard price: %s %s/kWh", energy["kwh_price"], os.environ.get("HABITUS_CURRENCY","kr"))
+            log.info(
+                "Energy Dashboard price: %s %s/kWh",
+                energy["kwh_price"],
+                os.environ.get("HABITUS_CURRENCY", "kr"),
+            )
             # Prefer a real-time watt sensor over kWh delta — look for _w companion
             # e.g. sensor.foo_electric_consumption_kwh → sensor.foo_electric_consumption_w
             kwh_id = energy["grid_kwh"]
             watt_candidate = kwh_id.replace("_kwh", "_w").replace("_energy", "_power")
             try:
                 headers = {"Authorization": f"Bearer {HA_TOKEN}"}
-                r = requests.get(f"{HA_URL}/api/states/{watt_candidate}", headers=headers, timeout=5)
+                r = requests.get(
+                    f"{HA_URL}/api/states/{watt_candidate}", headers=headers, timeout=5
+                )
                 if r.status_code == 200:
                     uom = r.json().get("attributes", {}).get("unit_of_measurement", "")
                     if uom == "W":
                         os.environ["HABITUS_POWER_ENTITY"] = watt_candidate
-                        log.info("Auto-detected watt sensor companion: %s (preferred over kWh delta)", watt_candidate)
+                        log.info(
+                            "Auto-detected watt sensor companion: %s (preferred over kWh delta)",
+                            watt_candidate,
+                        )
             except Exception as e:
                 log.debug("Watt companion probe failed: %s", e)
         if energy.get("device_rates"):
@@ -848,13 +862,17 @@ async def run(days_history: int, mode: str = "full") -> None:
             save_state(state)
             log.info(f"Model ready — preliminary score {_partial_score}/100")
             # Only train seasonal models with enough data (need ≥180d for all seasons)
-            _days_of_data = (features["hour"].max() - features["hour"].min()).days if not features.empty else 0
+            _days_of_data = (
+                (features["hour"].max() - features["hour"].min()).days if not features.empty else 0
+            )
             if _days_of_data >= 180:
                 set_progress("seasonal_training", len(stat_ids), len(stat_ids), len(features), 0, 0)
                 log.info("Training seasonal models (%d days of data)...", _days_of_data)
                 seasonal.train_seasonal_models(features)
             else:
-                log.info("Skipping seasonal models — only %d days of data (need ≥180)", _days_of_data)
+                log.info(
+                    "Skipping seasonal models — only %d days of data (need ≥180)", _days_of_data
+                )
             set_progress("pattern_analysis", len(stat_ids), len(stat_ids), len(features), 0, 0)
             log.info("Discovering patterns...")
             pattern_engine.run(features, stat_ids)
@@ -863,22 +881,26 @@ async def run(days_history: int, mode: str = "full") -> None:
             log.info("Running phantom load detection...")
             phantom_results = phantom.run()
             phantom.save(phantom_results)
-            
+
             drift_data = drift.detect_drift(features)
             drift.save(drift_data)
-            
+
             try:
                 auto_scores = await automation_score.score_all(HA_URL, HA_TOKEN)
                 automation_score.save(auto_scores)
             except Exception as e:
                 log.warning("Automation scoring failed: %s", e)
-                auto_scores = {}
-            
+                auto_scores = []
+
             try:
-                suggestions_for_gap = (
-                    json.loads(open(SUGGESTIONS_PATH).read()) if os.path.exists(SUGGESTIONS_PATH) else []
+                if os.path.exists(SUGGESTIONS_PATH):
+                    with open(SUGGESTIONS_PATH) as _f:
+                        suggestions_for_gap = json.loads(_f.read())
+                else:
+                    suggestions_for_gap = []
+                gaps = await automation_gap.analyse(
+                    HA_URL, HA_TOKEN, suggestions_for_gap, auto_scores
                 )
-                gaps = await automation_gap.analyse(HA_URL, HA_TOKEN, suggestions_for_gap, auto_scores)
                 automation_gap.save(gaps)
             except Exception as e:
                 log.warning("Automation gap analysis failed: %s", e)
@@ -924,7 +946,9 @@ async def run(days_history: int, mode: str = "full") -> None:
         save_state(state)
         log.info(f"Model ready — preliminary score {_partial_score}/100")
         # Only train seasonal models with enough data (need ≥180d for all seasons)
-        _days_of_data = (features["hour"].max() - features["hour"].min()).days if not features.empty else 0
+        _days_of_data = (
+            (features["hour"].max() - features["hour"].min()).days if not features.empty else 0
+        )
         if _days_of_data >= 180:
             set_progress("seasonal_training", len(stat_ids), len(stat_ids), len(features), 0, 0)
             log.info("Training seasonal models (%d days of data)...", _days_of_data)
@@ -950,12 +974,14 @@ async def run(days_history: int, mode: str = "full") -> None:
             automation_score.save(auto_scores)
         except Exception as e:
             log.warning("Automation scoring failed: %s", e)
-            auto_scores = {}
+            auto_scores = []
 
         try:
-            suggestions_for_gap = (
-                json.loads(open(SUGGESTIONS_PATH).read()) if os.path.exists(SUGGESTIONS_PATH) else []
-            )
+            if os.path.exists(SUGGESTIONS_PATH):
+                with open(SUGGESTIONS_PATH) as _f:
+                    suggestions_for_gap = json.loads(_f.read())
+            else:
+                suggestions_for_gap = []
             gaps = await automation_gap.analyse(HA_URL, HA_TOKEN, suggestions_for_gap, auto_scores)
             automation_gap.save(gaps)
         except Exception as e:
@@ -1014,9 +1040,11 @@ async def run(days_history: int, mode: str = "full") -> None:
 
     # Surface anomalies and suggestions on the HA dashboard automatically
     try:
-        suggestions = (
-            json.loads(open(SUGGESTIONS_PATH).read()) if os.path.exists(SUGGESTIONS_PATH) else []
-        )
+        if os.path.exists(SUGGESTIONS_PATH):
+            with open(SUGGESTIONS_PATH) as _f:
+                suggestions = json.loads(_f.read())
+        else:
+            suggestions = []
     except Exception:
         suggestions = []
     publish_dashboard_entities(anomaly_score, entity_anomalies, suggestions)
@@ -1106,8 +1134,9 @@ if __name__ == "__main__":
 
 async def _register_lovelace_card():
     """Register Habitus Lovelace card resource and inject into default dashboard."""
-    import websockets
     import json
+
+    import websockets
 
     resource_url = "/local/habitus/habitus-card.js"
 
@@ -1132,12 +1161,16 @@ async def _register_lovelace_card():
 
         if not already_registered:
             msg_id += 1
-            await ws.send(json.dumps({
-                "id": msg_id,
-                "type": "lovelace/resources/create",
-                "res_type": "module",
-                "url": resource_url + "?v=2.52.0",
-            }))
+            await ws.send(
+                json.dumps(
+                    {
+                        "id": msg_id,
+                        "type": "lovelace/resources/create",
+                        "res_type": "module",
+                        "url": resource_url + "?v=2.52.0",
+                    }
+                )
+            )
             await ws.recv()
 
         # Try to inject card into default dashboard view 0
@@ -1154,14 +1187,19 @@ async def _register_lovelace_card():
                 cards.insert(0, {"type": "custom:habitus-card"})
                 view["cards"] = cards
                 msg_id += 1
-                await ws.send(json.dumps({
-                    "id": msg_id,
-                    "type": "lovelace/config/save",
-                    "config": dash,
-                }))
+                await ws.send(
+                    json.dumps(
+                        {
+                            "id": msg_id,
+                            "type": "lovelace/config/save",
+                            "config": dash,
+                        }
+                    )
+                )
                 await ws.recv()
 
         await ws.close()
     except Exception as exc:
         import logging
+
         logging.getLogger("habitus").warning("Lovelace card registration failed: %s", exc)

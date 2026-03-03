@@ -4,6 +4,7 @@ import datetime
 import json
 import logging
 import os
+from typing import Any
 
 import aiohttp
 
@@ -17,7 +18,7 @@ MIN_TRIGGERS = 10
 OVERRIDE_WINDOW_S = 300  # 5 minutes
 
 
-async def score_all(ha_url: str = None, ha_token: str = None) -> list:
+async def score_all(ha_url: str | None = None, ha_token: str | None = None) -> list[Any]:
     """Score all HA automations by override rate.
 
     Args:
@@ -34,7 +35,9 @@ async def score_all(ha_url: str = None, ha_token: str = None) -> list:
     try:
         async with aiohttp.ClientSession() as session:
             # Get all automation entities
-            async with session.get(f"{ha_url}/api/states", headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            async with session.get(
+                f"{ha_url}/api/states", headers=headers, timeout=aiohttp.ClientTimeout(total=15)
+            ) as resp:
                 if resp.status != 200:
                     log.warning("Could not fetch states: %d", resp.status)
                     return []
@@ -54,14 +57,19 @@ async def score_all(ha_url: str = None, ha_token: str = None) -> list:
 
             for auto in automations:
                 auto_id = auto["entity_id"]
-                friendly = auto.get("attributes", {}).get("friendly_name", auto_id.split(".")[-1].replace("_", " ").title())
+                friendly = auto.get("attributes", {}).get(
+                    "friendly_name", auto_id.split(".")[-1].replace("_", " ").title()
+                )
 
                 try:
                     # Get automation trigger events from logbook
                     async with session.get(
                         f"{ha_url}/api/logbook/{start_iso}",
                         headers=headers,
-                        params={"entity": auto_id, "end_time": end.strftime("%Y-%m-%dT%H:%M:%S+00:00")},
+                        params={
+                            "entity": auto_id,
+                            "end_time": end.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+                        },
                         timeout=aiohttp.ClientTimeout(total=10),
                     ) as resp:
                         if resp.status != 200:
@@ -70,8 +78,10 @@ async def score_all(ha_url: str = None, ha_token: str = None) -> list:
 
                     # Count trigger events
                     triggers = [
-                        e for e in log_entries
-                        if e.get("state") == "on" or "triggered" in str(e.get("message", "")).lower()
+                        e
+                        for e in log_entries
+                        if e.get("state") == "on"
+                        or "triggered" in str(e.get("message", "")).lower()
                     ]
 
                     if len(triggers) < MIN_TRIGGERS:
@@ -81,15 +91,17 @@ async def score_all(ha_url: str = None, ha_token: str = None) -> list:
                     target_entities = _extract_target_entities(auto)
                     if not target_entities:
                         # Can't determine override rate without targets
-                        results.append({
-                            "entity_id": auto_id,
-                            "name": friendly,
-                            "triggers_7d": len(triggers),
-                            "overrides": 0,
-                            "override_rate": 0,
-                            "score": 100,
-                            "note": "No target entities detected — assumed effective",
-                        })
+                        results.append(
+                            {
+                                "entity_id": auto_id,
+                                "name": friendly,
+                                "triggers_7d": len(triggers),
+                                "overrides": 0,
+                                "override_rate": 0,
+                                "score": 100,
+                                "note": "No target entities detected — assumed effective",
+                            }
+                        )
                         continue
 
                     # Check for manual overrides after each trigger
@@ -114,10 +126,7 @@ async def score_all(ha_url: str = None, ha_token: str = None) -> list:
                                         continue
                                     target_logs = await resp2.json()
 
-                                manual = [
-                                    e for e in target_logs
-                                    if _is_manual_change(e, auto_id)
-                                ]
+                                manual = [e for e in target_logs if _is_manual_change(e, auto_id)]
                                 if manual:
                                     overrides += 1
                                     break  # One override per trigger is enough
@@ -127,14 +136,16 @@ async def score_all(ha_url: str = None, ha_token: str = None) -> list:
                     override_rate = round(overrides / len(triggers) * 100) if triggers else 0
                     score = max(0, 100 - override_rate)
 
-                    results.append({
-                        "entity_id": auto_id,
-                        "name": friendly,
-                        "triggers_7d": len(triggers),
-                        "overrides": overrides,
-                        "override_rate": override_rate,
-                        "score": score,
-                    })
+                    results.append(
+                        {
+                            "entity_id": auto_id,
+                            "name": friendly,
+                            "triggers_7d": len(triggers),
+                            "overrides": overrides,
+                            "override_rate": override_rate,
+                            "score": score,
+                        }
+                    )
 
                 except Exception as e:
                     log.warning("Error scoring %s: %s", auto_id, e)
@@ -192,12 +203,13 @@ def save(results: list) -> None:
     log.info("Automation scores saved: %d automations scored", len(results))
 
 
-def load() -> list:
+def load() -> list[Any]:
     """Load automation scores from disk."""
     if not os.path.exists(SCORES_PATH):
         return []
     try:
         with open(SCORES_PATH) as f:
-            return json.load(f)
+            data: list[Any] = json.load(f)
+            return data
     except Exception:
         return []

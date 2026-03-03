@@ -1,12 +1,17 @@
 """Tests for pattern discovery and automation suggestion generation."""
 from __future__ import annotations
 
+import json
+import os
+
 import pytest
 
 from habitus.habitus.patterns import (
+    _has,
+    _max_consecutive_zeros,
     discover_patterns,
     generate_suggestions,
-    _has,
+    run,
 )
 
 
@@ -84,6 +89,7 @@ class TestGenerateSuggestions:
 
     def test_yaml_parseable(self, sample_features):
         import yaml
+
         patterns = discover_patterns(sample_features)
         suggestions = generate_suggestions(patterns, sample_features, [])
         for s in suggestions:
@@ -91,3 +97,208 @@ class TestGenerateSuggestions:
                 # Should parse without error
                 parsed = yaml.safe_load(s["yaml"])
                 assert parsed is not None
+
+
+class TestMaxConsecutiveZeros:
+    def test_all_zeros(self):
+        import pandas as pd
+
+        assert _max_consecutive_zeros(pd.Series([0, 0, 0])) == 3
+
+    def test_no_zeros(self):
+        import pandas as pd
+
+        assert _max_consecutive_zeros(pd.Series([1, 2, 3])) == 0
+
+    def test_mixed(self):
+        import pandas as pd
+
+        assert _max_consecutive_zeros(pd.Series([1, 0, 0, 1, 0])) == 2
+
+    def test_empty(self):
+        import pandas as pd
+
+        assert _max_consecutive_zeros(pd.Series([], dtype=float)) == 0
+
+
+class TestNewPatterns:
+    def test_morning_lights_pattern_present(self, sample_features):
+        patterns = discover_patterns(sample_features)
+        assert "morning_lights_pattern" in patterns
+
+    def test_morning_lights_ratio_in_range(self, sample_features):
+        patterns = discover_patterns(sample_features)
+        mlp = patterns["morning_lights_pattern"]
+        assert 0.0 <= mlp["lights_on_ratio"] <= 1.0
+        assert 0 <= mlp["confidence"] <= 95
+
+    def test_peak_tariff_pattern_present(self, sample_features):
+        patterns = discover_patterns(sample_features)
+        assert "peak_tariff_pattern" in patterns
+
+    def test_peak_tariff_fields(self, sample_features):
+        patterns = discover_patterns(sample_features)
+        ptp = patterns["peak_tariff_pattern"]
+        assert "high_power_ratio" in ptp
+        assert "mean_power_w" in ptp
+        assert ptp["threshold_w"] == 800
+        assert 0.0 <= ptp["high_power_ratio"] <= 1.0
+
+    def test_vacancy_pattern_present(self, sample_features):
+        patterns = discover_patterns(sample_features)
+        assert "vacancy_pattern" in patterns
+
+    def test_vacancy_pattern_fields(self, sample_features):
+        patterns = discover_patterns(sample_features)
+        vp = patterns["vacancy_pattern"]
+        assert "max_no_motion_hours" in vp
+        assert "extended_vacancy_detected" in vp
+        assert vp["max_no_motion_hours"] >= 0
+
+    def test_bilge_temp_baseline_present(self, sample_features):
+        patterns = discover_patterns(sample_features)
+        assert "bilge_temp_baseline" in patterns
+
+    def test_bilge_temp_baseline_fields(self, sample_features):
+        patterns = discover_patterns(sample_features)
+        btp = patterns["bilge_temp_baseline"]
+        assert "mean_c" in btp
+        assert "std_c" in btp
+        assert "alert_threshold_c" in btp
+        # alert threshold should be 3°C above mean
+        assert abs(btp["alert_threshold_c"] - (btp["mean_c"] + 3.0)) < 0.01
+
+
+class TestNewSuggestions:
+    def test_morning_lights_suggestion_present(self, sample_features):
+        patterns = discover_patterns(sample_features)
+        suggestions = generate_suggestions(patterns, sample_features, [])
+        ids = {s["id"] for s in suggestions}
+        assert "morning_lights" in ids
+
+    def test_peak_tariff_alert_suggestion_present(self, sample_features):
+        patterns = discover_patterns(sample_features)
+        suggestions = generate_suggestions(patterns, sample_features, [])
+        ids = {s["id"] for s in suggestions}
+        assert "peak_tariff_alert" in ids
+
+    def test_vacancy_security_suggestion_present(self, sample_features):
+        patterns = discover_patterns(sample_features)
+        suggestions = generate_suggestions(patterns, sample_features, [])
+        ids = {s["id"] for s in suggestions}
+        assert "vacancy_security" in ids
+
+    def test_bilge_temp_anomaly_suggestion_when_bilge_entity(self, sample_features):
+        patterns = discover_patterns(sample_features)
+        suggestions = generate_suggestions(
+            patterns, sample_features, ["sensor.bilge_sensor_air_temperature"]
+        )
+        ids = {s["id"] for s in suggestions}
+        assert "bilge_temp_anomaly" in ids
+
+    def test_bilge_temp_anomaly_absent_without_entity(self, sample_features):
+        patterns = discover_patterns(sample_features)
+        suggestions = generate_suggestions(patterns, sample_features, [])
+        ids = {s["id"] for s in suggestions}
+        assert "bilge_temp_anomaly" not in ids
+
+    def test_shore_power_battery_when_both_entities(self, sample_features):
+        patterns = discover_patterns(sample_features)
+        suggestions = generate_suggestions(
+            patterns,
+            sample_features,
+            ["sensor.shore_power_smart_meter_electric_consumption_w", "sensor.house_battery_soc"],
+        )
+        ids = {s["id"] for s in suggestions}
+        assert "shore_power_battery" in ids
+
+    def test_shore_power_battery_absent_without_battery(self, sample_features):
+        patterns = discover_patterns(sample_features)
+        suggestions = generate_suggestions(
+            patterns, sample_features, ["sensor.shore_power_smart_meter_electric_consumption_w"]
+        )
+        ids = {s["id"] for s in suggestions}
+        assert "shore_power_battery" not in ids
+
+    def test_new_suggestions_have_required_fields(self, sample_features):
+        patterns = discover_patterns(sample_features)
+        suggestions = generate_suggestions(
+            patterns,
+            sample_features,
+            [
+                "sensor.bilge_sensor_air_temperature",
+                "sensor.shore_power_smart_meter_electric_consumption_w",
+                "sensor.house_battery_soc",
+            ],
+        )
+        required = {"id", "title", "description", "confidence", "category", "yaml"}
+        new_ids = {
+            "morning_lights",
+            "peak_tariff_alert",
+            "vacancy_security",
+            "bilge_temp_anomaly",
+            "shore_power_battery",
+        }
+        for s in suggestions:
+            if s["id"] in new_ids:
+                assert required.issubset(s.keys()), f"Missing fields in {s['id']}"
+                assert 0 <= s["confidence"] <= 100
+
+    def test_new_suggestions_yaml_parseable(self, sample_features):
+        import yaml
+
+        patterns = discover_patterns(sample_features)
+        suggestions = generate_suggestions(
+            patterns,
+            sample_features,
+            [
+                "sensor.bilge_sensor_air_temperature",
+                "sensor.shore_power_smart_meter_electric_consumption_w",
+                "sensor.house_battery_soc",
+            ],
+        )
+        new_ids = {
+            "morning_lights",
+            "peak_tariff_alert",
+            "vacancy_security",
+            "bilge_temp_anomaly",
+            "shore_power_battery",
+        }
+        for s in suggestions:
+            if s["id"] in new_ids and s.get("yaml"):
+                parsed = yaml.safe_load(s["yaml"])
+                assert parsed is not None, f"YAML parse failed for {s['id']}"
+
+
+class TestRunFunction:
+    def test_run_writes_patterns_and_suggestions(self, sample_features, tmp_data_dir):
+        import habitus.habitus.patterns as pat
+
+        pat.PATTERNS_PATH = str(tmp_data_dir / "patterns.json")
+        pat.SUGGESTIONS_PATH = str(tmp_data_dir / "suggestions.json")
+        run(sample_features, [])
+        assert (tmp_data_dir / "patterns.json").exists()
+        assert (tmp_data_dir / "suggestions.json").exists()
+
+    def test_run_suggestions_json_valid(self, sample_features, tmp_data_dir):
+        import habitus.habitus.patterns as pat
+
+        pat.PATTERNS_PATH = str(tmp_data_dir / "patterns.json")
+        pat.SUGGESTIONS_PATH = str(tmp_data_dir / "suggestions.json")
+        run(sample_features, ["sensor.house_battery_soc"])
+        with open(os.path.join(str(tmp_data_dir), "suggestions.json")) as fh:
+            data = json.load(fh)
+        assert isinstance(data, list)
+        assert len(data) > 0
+
+    def test_run_returns_tuple(self, sample_features, tmp_data_dir):
+        import habitus.habitus.patterns as pat
+
+        pat.PATTERNS_PATH = str(tmp_data_dir / "patterns.json")
+        pat.SUGGESTIONS_PATH = str(tmp_data_dir / "suggestions.json")
+        result = run(sample_features, [])
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        patterns, suggestions = result
+        assert isinstance(patterns, dict)
+        assert isinstance(suggestions, list)

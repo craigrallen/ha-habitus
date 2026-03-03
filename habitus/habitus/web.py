@@ -3,7 +3,7 @@
 import json
 import os
 
-import yaml as _yaml
+import yaml as _yaml  # type: ignore[import-untyped]
 from flask import Flask, jsonify, render_template_string, request
 
 from habitus import trainer as _trainer
@@ -1036,7 +1036,7 @@ async function load() {
   }
 
   let phantomHtml = '';
-  
+
   // 12-month total header
   if (total12mo) {
     phantomHtml += `<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:14px">
@@ -1394,12 +1394,12 @@ def api_training_status():
     return jsonify({"running": _trainer.is_running()})
 
 
-
 @app.route("/api/power_sensors")
 @app.route("/ingress/api/power_sensors")
 def api_power_sensors():
     """Return all watt sensors from HA, plus current selection."""
-    import requests as req
+    import requests as req  # type: ignore[import-untyped]
+
     ha_url = os.environ.get("HA_URL", "http://supervisor/core")
     token = os.environ.get("SUPERVISOR_TOKEN", os.environ.get("HABITUS_HA_TOKEN", ""))
     current = os.environ.get("HABITUS_POWER_ENTITY", "")
@@ -1412,7 +1412,13 @@ def api_power_sensors():
             if uom == "W" and eid.startswith("sensor."):
                 try:
                     val = float(s["state"])
-                    sensors.append({"entity_id": eid, "name": s["attributes"].get("friendly_name", eid), "current_w": round(val, 1)})
+                    sensors.append(
+                        {
+                            "entity_id": eid,
+                            "name": s["attributes"].get("friendly_name", eid),
+                            "current_w": round(val, 1),
+                        }
+                    )
                 except Exception:
                     pass
         sensors.sort(key=lambda x: -x["current_w"])
@@ -1447,6 +1453,7 @@ def api_settings():
         return jsonify({"ok": True, "settings": settings})
 
     return jsonify({"settings": settings})
+
 
 @app.route("/api/add_automation", methods=["POST"])
 @app.route("/ingress/api/add_automation", methods=["POST"])
@@ -1498,11 +1505,11 @@ def api_automation_scores():
     return jsonify(_read(AUTO_SCORES_PATH) or [])
 
 
-
 @app.route("/api/automation_gap")
 @app.route("/ingress/api/automation_gap")
 def api_automation_gap():
     return jsonify(_read(GAP_PATH) or {})
+
 
 def start_web(port=8099):
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)

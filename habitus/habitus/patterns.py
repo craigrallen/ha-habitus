@@ -4,6 +4,7 @@ import datetime
 import json
 import logging
 import os
+from typing import Any
 
 import pandas as pd
 
@@ -16,14 +17,35 @@ NOTIFY = os.environ.get("HABITUS_NOTIFY_SERVICE", "notify.notify")
 THRESHOLD = int(os.environ.get("HABITUS_ANOMALY_THRESHOLD", "70"))
 
 
-def _has(stat_ids, *keywords):
+def _has(stat_ids: list[str], *keywords: str) -> bool:
     """Check if any of the keywords appear in the tracked entity list."""
     joined = " ".join(stat_ids).lower()
     return any(k in joined for k in keywords)
 
 
-def discover_patterns(features: pd.DataFrame) -> dict:
-    patterns = {}
+def _max_consecutive_zeros(series: pd.Series) -> int:
+    """Return the maximum number of consecutive zero-valued entries in a series.
+
+    Args:
+        series: Numeric Series (e.g. motion_events per hour).
+
+    Returns:
+        Integer count of the longest contiguous run of zero values.
+    """
+    max_run = 0
+    current_run = 0
+    for v in series:
+        if v == 0:
+            current_run += 1
+            if current_run > max_run:
+                max_run = current_run
+        else:
+            current_run = 0
+    return max_run
+
+
+def discover_patterns(features: pd.DataFrame) -> dict[str, Any]:
+    patterns: dict[str, Any] = {}
     hourly = (
         features.groupby("hour_of_day")
         .agg(
@@ -95,11 +117,59 @@ def discover_patterns(features: pd.DataFrame) -> dict:
         }
         for m in seasonal.index
     }
+    # ── MORNING LIGHTS PATTERN (weekday 06:00–07:59) ──────────────────────────
+    morning_mask = (features["is_weekend"] == 0) & features["hour_of_day"].isin([6, 7])
+    if morning_mask.any() and "lights_on" in features.columns:
+        morning_lights_ratio = float((features.loc[morning_mask, "lights_on"] > 0).mean())
+    else:
+        morning_lights_ratio = 0.0
+    patterns["morning_lights_pattern"] = {
+        "lights_on_ratio": round(morning_lights_ratio, 3),
+        "confidence": min(95, int(morning_lights_ratio * 100)),
+    }
+
+    # ── PEAK TARIFF POWER PATTERN (weekday 07:00–08:59, >800 W) ──────────────
+    tariff_mask = (features["is_weekend"] == 0) & features["hour_of_day"].isin([7, 8])
+    if tariff_mask.any():
+        tariff_power = features.loc[tariff_mask, "total_power_w"]
+        peak_tariff_ratio = float((tariff_power > 800).mean())
+        mean_tariff_power = round(float(tariff_power.mean()), 1)
+    else:
+        peak_tariff_ratio = 0.0
+        mean_tariff_power = 0.0
+    patterns["peak_tariff_pattern"] = {
+        "high_power_ratio": round(peak_tariff_ratio, 3),
+        "mean_power_w": mean_tariff_power,
+        "threshold_w": 800,
+        "confidence": min(95, int(peak_tariff_ratio * 100)),
+    }
+
+    # ── VACANCY PATTERN (longest consecutive no-motion window) ────────────────
+    if "motion_events" in features.columns:
+        max_no_motion = _max_consecutive_zeros(features["motion_events"])
+    else:
+        max_no_motion = 0
+    patterns["vacancy_pattern"] = {
+        "max_no_motion_hours": max_no_motion,
+        "extended_vacancy_detected": max_no_motion >= 12,
+    }
+
+    # ── BILGE TEMPERATURE BASELINE ─────────────────────────────────────────────
+    temp_mean = round(float(features["avg_temp_c"].mean()), 2)
+    temp_std = round(float(features["avg_temp_c"].std()), 2)
+    patterns["bilge_temp_baseline"] = {
+        "mean_c": temp_mean,
+        "std_c": temp_std,
+        "alert_threshold_c": round(temp_mean + 3.0, 2),
+    }
+
     patterns["generated_at"] = datetime.datetime.now(datetime.UTC).isoformat()
     return patterns
 
 
-def generate_suggestions(patterns: dict, features: pd.DataFrame, stat_ids: list) -> list:
+def generate_suggestions(
+    patterns: dict[str, Any], features: pd.DataFrame, stat_ids: list[str]
+) -> list[dict[str, Any]]:
     suggestions = []
     routine = patterns.get("daily_routine", {})
     wakeup = routine.get("estimated_wakeup_hour")
@@ -475,6 +545,172 @@ def generate_suggestions(patterns: dict, features: pd.DataFrame, stat_ids: list)
         }
     )
 
+    # ── DATA-DRIVEN PATTERNS (TASK-001) ───────────────────────────────────────
+    morning_p = patterns.get("morning_lights_pattern", {})
+    morning_ratio = morning_p.get("lights_on_ratio", 0.0)
+    morning_conf = morning_p.get("confidence", int(morning_ratio * 100))
+    suggestions.append(
+        {
+            "id": "morning_lights",
+            "title": "Morning Lights Routine (06:30–07:15 weekdays)",
+            "description": (
+                f"Lights active in {morning_ratio:.0%} of observed weekday mornings "
+                f"(06:00–08:00 window). Habitus suggests automating this routine."
+            ),
+            "confidence": morning_conf,
+            "category": "routine",
+            "applicable": morning_ratio > 0.3,
+            "yaml": f"""automation:
+  alias: "Habitus — Morning lights"
+  description: "Observed in {morning_ratio:.0%} of weekday mornings"
+  trigger:
+    - platform: time
+      at: "06:30:00"
+  condition:
+    - condition: time
+      weekday: [mon, tue, wed, thu, fri]
+  action:
+    - service: light.turn_on
+      target:
+        area_id: living_room  # adjust to your area""",
+        }
+    )
+
+    tariff_p = patterns.get("peak_tariff_pattern", {})
+    tariff_ratio = tariff_p.get("high_power_ratio", 0.0)
+    tariff_mean = tariff_p.get("mean_power_w", 0.0)
+    tariff_conf = tariff_p.get("confidence", int(tariff_ratio * 100))
+    suggestions.append(
+        {
+            "id": "peak_tariff_alert",
+            "title": "Peak Tariff High Usage Alert (07:00–08:30 weekdays)",
+            "description": (
+                f"Power exceeded 800W during peak tariff hours in {tariff_ratio:.0%} of weekday "
+                f"mornings. Mean peak load: {tariff_mean:.0f}W. Consider shifting loads earlier."
+            ),
+            "confidence": tariff_conf,
+            "category": "energy",
+            "applicable": tariff_ratio > 0.2,
+            "yaml": f"""automation:
+  alias: "Habitus — Peak tariff alert"
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.mastervolt_total_load  # adjust entity
+      above: 800
+  condition:
+    - condition: time
+      after: "07:00:00"
+      before: "08:30:00"
+      weekday: [mon, tue, wed, thu, fri]
+  action:
+    - service: {NOTIFY}
+      data:
+        title: "\u26a1 Peak Tariff \u2014 High Usage"
+        message: >
+          Power is {{{{ states('sensor.mastervolt_total_load') }}}}W during peak tariff hours
+          (07:00\u201308:30). Consider delaying high-load appliances.""",
+        }
+    )
+
+    vacancy_p = patterns.get("vacancy_pattern", {})
+    max_no_motion = vacancy_p.get("max_no_motion_hours", 0)
+    extended = vacancy_p.get("extended_vacancy_detected", False)
+    vacancy_conf = min(90, int(max_no_motion / 24 * 80)) if extended else 40
+    suggestions.append(
+        {
+            "id": "vacancy_security",
+            "title": "Extended Vacancy Security Alert (No Motion >24h)",
+            "description": (
+                f"Longest unoccupied window detected: {max_no_motion}h. "
+                "Alert if no motion in living areas for over 24 hours — possible security or "
+                "sensor issue."
+            ),
+            "confidence": vacancy_conf,
+            "category": "anomaly",
+            "applicable": True,
+            "yaml": f"""automation:
+  alias: "Habitus \u2014 Extended vacancy alert"
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.hallway_motion  # adjust to your motion sensor
+      to: "off"
+      for:
+        hours: 24
+  action:
+    - service: {NOTIFY}
+      data:
+        title: "\U0001f3e0 Extended Vacancy Detected"
+        message: "No motion detected for 24+ hours (longest observed gap: {max_no_motion}h). Is everything okay?" """,
+        }
+    )
+
+    bilge_p = patterns.get("bilge_temp_baseline", {})
+    bilge_mean = bilge_p.get("mean_c", 12.0)
+    bilge_threshold = bilge_p.get("alert_threshold_c", round(bilge_mean + 3.0, 2))
+    if has_bilge:
+        suggestions.append(
+            {
+                "id": "bilge_temp_anomaly",
+                "title": f"Bilge Temperature Anomaly (>{bilge_threshold:.1f}\u00b0C)",
+                "description": (
+                    f"Bilge temp baseline: {bilge_mean:.1f}\u00b0C. Alert when bilge rises 3\u00b0C "
+                    "above baseline — may indicate engine heat, poor ventilation, or fire risk."
+                ),
+                "confidence": 92,
+                "category": "boat",
+                "applicable": True,
+                "yaml": f"""automation:
+  alias: "Habitus \u2014 Bilge temperature anomaly"
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.bilge_sensor_air_temperature  # adjust entity
+      above: {bilge_threshold:.1f}
+  action:
+    - service: {NOTIFY}
+      data:
+        title: "\U0001f321 Bilge Temperature Alert"
+        message: >
+          Bilge temperature has exceeded {bilge_threshold:.1f}\u00b0C
+          (baseline: {bilge_mean:.1f}\u00b0C). Check for heat source or ventilation issue.""",
+            }
+        )
+
+    if has_shore and has_battery:
+        suggestions.append(
+            {
+                "id": "shore_power_battery",
+                "title": "Shore Power Loss with Low Battery Alert",
+                "description": (
+                    "Shore power entities and battery monitoring detected. Fires when shore power "
+                    "drops near zero while battery SOC is below 40% — critical combined alert."
+                ),
+                "confidence": 95,
+                "category": "boat",
+                "applicable": True,
+                "yaml": """automation:
+  alias: "Habitus \u2014 Shore power lost with low battery"
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.shore_power_smart_meter_electric_consumption_w  # adjust entity
+      below: 10
+      for:
+        minutes: 2
+  condition:
+    - condition: numeric_state
+      entity_id: sensor.house_battery_soc  # adjust entity
+      below: 40
+  action:
+    - service: """
+                + NOTIFY
+                + """
+      data:
+        title: "\U0001f50c\U0001f50b Shore Power Lost \u2014 Battery Low"
+        message: >
+          Shore power disconnected and battery SOC is below 40%.
+          Connect shore power or start generator immediately.""",
+            }
+        )
+
     # ── LOVELACE ──────────────────────────────────────────────────────────────
     suggestions.append(
         {
@@ -519,7 +755,18 @@ cards:
     return suggestions
 
 
-def run(features: pd.DataFrame, stat_ids: list = None):
+def run(
+    features: pd.DataFrame, stat_ids: list[str] | None = None
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Discover patterns and write suggestions.json + patterns.json to DATA_DIR.
+
+    Args:
+        features: Hourly feature matrix from ``build_features``.
+        stat_ids: Entity IDs tracked by this installation.
+
+    Returns:
+        Tuple of (patterns dict, suggestions list).
+    """
     stat_ids = stat_ids or []
     patterns = discover_patterns(features)
     suggestions = generate_suggestions(patterns, features, stat_ids)

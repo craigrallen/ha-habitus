@@ -46,7 +46,7 @@ def build_entity_baselines(df: pd.DataFrame):
     log.info(f"Entity baselines saved for {len(baselines)} entities")
 
 
-def score_entities(current_states: dict = None) -> list:
+def score_entities(current_states: dict | None = None) -> list:
     """
     Score each entity's current value against its baseline.
     current_states: {entity_id: current_value} — if None, uses HA REST API.
@@ -111,7 +111,7 @@ def score_entities(current_states: dict = None) -> list:
 
 
 def _fetch_current_states(entity_ids: list) -> dict:
-    import requests
+    import requests  # type: ignore[import-untyped]
 
     ha_url = os.environ.get("HA_URL", "http://supervisor/core")
     token = os.environ.get("SUPERVISOR_TOKEN", "")

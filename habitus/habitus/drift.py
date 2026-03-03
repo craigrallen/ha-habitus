@@ -4,6 +4,7 @@ import datetime
 import json
 import logging
 import os
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -67,8 +68,12 @@ def detect_drift(df: pd.DataFrame) -> dict:
 
             if motion_col and day_data[motion_col].sum() > 0:
                 active = day_data[day_data[motion_col] > 0]
-                first_motion_hours.append(active["hour"].iloc[0].hour + active["hour"].iloc[0].minute / 60)
-                last_motion_hours.append(active["hour"].iloc[-1].hour + active["hour"].iloc[-1].minute / 60)
+                first_motion_hours.append(
+                    active["hour"].iloc[0].hour + active["hour"].iloc[0].minute / 60
+                )
+                last_motion_hours.append(
+                    active["hour"].iloc[-1].hour + active["hour"].iloc[-1].minute / 60
+                )
 
             # Peak activity hour (by sensor_changes)
             if "sensor_changes" in day_data.columns and day_data["sensor_changes"].sum() > 0:
@@ -85,7 +90,10 @@ def detect_drift(df: pd.DataFrame) -> dict:
             "avg_lights_on_hours": np.mean(lights_hours) if lights_hours else None,
         }
 
-    result = {"timestamp": datetime.datetime.now(datetime.UTC).isoformat(), "drifts": []}
+    result: dict[str, Any] = {
+        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+        "drifts": [],
+    }
 
     drift_names = {
         "first_motion_hour": ("morning_drift_min", "Morning routine"),
@@ -102,12 +110,14 @@ def detect_drift(df: pd.DataFrame) -> dict:
 
         if metric_key == "avg_lights_on_hours":
             diff_hours = r_val - b_val
-            result["drifts"].append({
-                "metric": drift_key,
-                "diff": round(diff_hours, 1),
-                "unit": "hours",
-                "significant": abs(diff_hours) > 0.75,
-            })
+            result["drifts"].append(
+                {
+                    "metric": drift_key,
+                    "diff": round(diff_hours, 1),
+                    "unit": "hours",
+                    "significant": abs(diff_hours) > 0.75,
+                }
+            )
         else:
             diff_min = (r_val - b_val) * 60
             direction = "later" if diff_min > 0 else "earlier"
@@ -119,7 +129,9 @@ def detect_drift(df: pd.DataFrame) -> dict:
                 "significant": significant,
             }
             if significant:
-                entry["summary"] = f"{friendly} has shifted {abs(round(diff_min))} min {direction} over recent weeks"
+                entry["summary"] = (
+                    f"{friendly} has shifted {abs(round(diff_min))} min {direction} over recent weeks"
+                )
                 drifts.append(entry)
             result["drifts"].append(entry)
 
@@ -143,12 +155,13 @@ def save(data: dict) -> None:
     log.info("Drift analysis saved: %s", data.get("summary", ""))
 
 
-def load() -> dict:
+def load() -> dict[str, Any]:
     """Load drift results from disk."""
     if not os.path.exists(DRIFT_PATH):
         return {}
     try:
         with open(DRIFT_PATH) as f:
-            return json.load(f)
+            data: dict[str, Any] = json.load(f)
+            return data
     except Exception:
         return {}
