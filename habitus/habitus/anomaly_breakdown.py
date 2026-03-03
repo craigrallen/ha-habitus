@@ -861,7 +861,7 @@ def score_entities(current_states: dict | None = None) -> list:
     weighted_score = compute_weighted_score(top)
     with open(ENTITY_ANOMALIES_PATH, "w") as f:
         json.dump(
-            {"timestamp": now.isoformat(, default=str), "weighted_score": weighted_score, "anomalies": top},
+            {"timestamp": now.isoformat(), "weighted_score": weighted_score, "anomalies": top},
             f,
             indent=2,
         )
