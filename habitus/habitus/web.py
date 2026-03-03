@@ -1024,7 +1024,8 @@ def api_anomalies():
 @app.route("/ingress/api/rescan", methods=["POST"])
 def api_rescan():
     try:
-        for p in [MODEL_PATH, STATE_PATH, BASELINE_PATH, PATTERNS_PATH, SUGGESTIONS_PATH]:
+        import glob as _glob  # noqa: PLC0415
+        for p in _glob.glob(os.path.join(DATA_DIR, "*.pkl")) + [STATE_PATH, BASELINE_PATH, PATTERNS_PATH, SUGGESTIONS_PATH]:
             if os.path.exists(p):
                 os.remove(p)
         days = int(os.environ.get("HABITUS_DAYS", "365"))
