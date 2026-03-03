@@ -864,36 +864,28 @@ async def run(days_history: int, mode: str = "full") -> None:
             pattern_engine.run(features, stat_ids)
 
             # ── Novel ML features (incremental) ──
-            _bl_data = None
-            if os.path.exists(os.path.join(DATA_DIR, "entity_baselines.json")):
-                with open(os.path.join(DATA_DIR, "entity_baselines.json")) as _f:
-                    _bl_data = json.load(_f)
-            phantom_results = phantom.find_phantom_loads(_bl_data)
+            log.info("Running phantom load detection...")
+            phantom_results = phantom.run()
             phantom.save(phantom_results)
-            if phantom_results:
-                total_cost = sum(p["cost_year_eur"] for p in phantom_results)
-                phantom_lines = "\n".join(f"- {p['name']}: {p['avg_phantom_w']}W = \u20ac{p['cost_year_eur']}/yr" for p in phantom_results[:3])
-                persistent_notification(
-                    "habitus_phantom",
-                    f"\U0001f4a1 Habitus \u2014 {len(phantom_results)} phantom loads found, wasting \u20ac{total_cost:.0f}/year",
-                    phantom_lines + "\n\n[Open Habitus](/hassio/ingress/57582523_habitus)",
-                )
+            
             drift_data = drift.detect_drift(features)
             drift.save(drift_data)
+            
             try:
                 auto_scores = await automation_score.score_all(HA_URL, HA_TOKEN)
                 automation_score.save(auto_scores)
-
-        try:
-            suggestions_for_gap = (
-                json.loads(open(SUGGESTIONS_PATH).read()) if os.path.exists(SUGGESTIONS_PATH) else []
-            )
-            gaps = await automation_gap.analyse(HA_URL, HA_TOKEN, suggestions_for_gap, auto_scores)
-            automation_gap.save(gaps)
-        except Exception as e:
-            log.warning("Automation gap analysis failed: %s", e)
             except Exception as e:
                 log.warning("Automation scoring failed: %s", e)
+                auto_scores = {}
+            
+            try:
+                suggestions_for_gap = (
+                    json.loads(open(SUGGESTIONS_PATH).read()) if os.path.exists(SUGGESTIONS_PATH) else []
+                )
+                gaps = await automation_gap.analyse(HA_URL, HA_TOKEN, suggestions_for_gap, auto_scores)
+                automation_gap.save(gaps)
+            except Exception as e:
+                log.warning("Automation gap analysis failed: %s", e)
 
             anomaly_score = score_current(features)
             training_days = round(
@@ -944,48 +936,20 @@ async def run(days_history: int, mode: str = "full") -> None:
 
         # ── Novel ML features ──
         log.info("Running phantom load detection...")
-        _bl_data = None
-        if os.path.exists(os.path.join(DATA_DIR, "entity_baselines.json")):
-            with open(os.path.join(DATA_DIR, "entity_baselines.json")) as _f:
-                _bl_data = json.load(_f)
-        phantom_results = phantom.find_phantom_loads(_bl_data)
+        phantom_results = phantom.run()
         phantom.save(phantom_results)
-        if phantom_results:
-            top3 = phantom_results[:3]
-            total_cost = sum(p["cost_year_eur"] for p in phantom_results)
-            phantom_lines = "\n".join(f"- {p['name']}: {p['avg_phantom_w']}W = \u20ac{p['cost_year_eur']}/yr" for p in top3)
-            more = f"\n- ...and {len(phantom_results)-3} more" if len(phantom_results) > 3 else ""
-            persistent_notification(
-                "habitus_phantom",
-                f"\U0001f4a1 Habitus \u2014 {len(phantom_results)} phantom loads found, wasting \u20ac{total_cost:.0f}/year",
-                phantom_lines + more + "\n\n[Open Habitus](/hassio/ingress/57582523_habitus)",
-            )
 
         log.info("Running routine drift detection...")
         drift_data = drift.detect_drift(features)
         drift.save(drift_data)
-        sig_drifts = [d for d in drift_data.get("drifts", []) if d.get("significant")]
-        if sig_drifts and os.path.exists(SUGGESTIONS_PATH):
-            try:
-                sug = json.loads(open(SUGGESTIONS_PATH).read())
-                sug.append({
-                    "id": "routine_drift",
-                    "title": "Routine Drift Detected",
-                    "description": drift_data.get("summary", ""),
-                    "category": "anomaly",
-                    "confidence": 70,
-                    "yaml": "",
-                    "applicable": True,
-                })
-                with open(SUGGESTIONS_PATH, "w") as _f:
-                    json.dump(sug, _f)
-            except Exception:
-                pass
 
         log.info("Scoring automation effectiveness...")
         try:
             auto_scores = await automation_score.score_all(HA_URL, HA_TOKEN)
             automation_score.save(auto_scores)
+        except Exception as e:
+            log.warning("Automation scoring failed: %s", e)
+            auto_scores = {}
 
         try:
             suggestions_for_gap = (
@@ -995,26 +959,6 @@ async def run(days_history: int, mode: str = "full") -> None:
             automation_gap.save(gaps)
         except Exception as e:
             log.warning("Automation gap analysis failed: %s", e)
-            poor = [a for a in auto_scores if a["score"] < 40]
-            if poor and os.path.exists(SUGGESTIONS_PATH):
-                try:
-                    sug = json.loads(open(SUGGESTIONS_PATH).read())
-                    for a in poor[:3]:
-                        sug.append({
-                            "id": f"auto_score_{a['entity_id']}",
-                            "title": f"Automation '{a['name']}' seems wrong {a['override_rate']}% of the time",
-                            "description": f"Override rate: {a['override_rate']}% ({a['overrides']}/{a['triggers_7d']} triggers). Consider reviewing.",
-                            "category": "anomaly",
-                            "confidence": min(90, 50 + a['override_rate']),
-                            "yaml": "",
-                            "applicable": True,
-                        })
-                    with open(SUGGESTIONS_PATH, "w") as _f:
-                        json.dump(sug, _f)
-                except Exception:
-                    pass
-        except Exception as e:
-            log.warning("Automation scoring failed: %s", e)
 
         anomaly_score = score_current(features)
         training_days = round(
