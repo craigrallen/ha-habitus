@@ -37,19 +37,33 @@ HA_DB = "/homeassistant/home-assistant_v2.db"
 
 # Known appliance power signatures (watts) — used as hints for classification
 KNOWN_SIGNATURES: dict[str, dict[str, Any]] = {
-    "oven": {"min_w": 1800, "max_w": 3500, "min_duration_min": 10, "max_duration_min": 120, "icon": "🔥"},
-    "hob_element": {"min_w": 1000, "max_w": 2500, "min_duration_min": 3, "max_duration_min": 60, "icon": "🍳"},
-    "kettle": {"min_w": 1500, "max_w": 2400, "min_duration_min": 1, "max_duration_min": 6, "icon": "☕"},
-    "washing_machine": {"min_w": 300, "max_w": 2200, "min_duration_min": 30, "max_duration_min": 180, "icon": "👕"},
-    "dishwasher": {"min_w": 1000, "max_w": 2000, "min_duration_min": 45, "max_duration_min": 180, "icon": "🍽️"},
-    "hair_dryer": {"min_w": 800, "max_w": 2200, "min_duration_min": 2, "max_duration_min": 20, "icon": "💇"},
-    "toaster": {"min_w": 700, "max_w": 1400, "min_duration_min": 1, "max_duration_min": 5, "icon": "🍞"},
-    "microwave": {"min_w": 700, "max_w": 1500, "min_duration_min": 0.5, "max_duration_min": 15, "icon": "📡"},
-    "water_heater": {"min_w": 1800, "max_w": 3500, "min_duration_min": 10, "max_duration_min": 120, "icon": "🚿"},
-    "space_heater": {"min_w": 500, "max_w": 2500, "min_duration_min": 15, "max_duration_min": 480, "icon": "🌡️"},
-    "vacuum": {"min_w": 400, "max_w": 1800, "min_duration_min": 5, "max_duration_min": 60, "icon": "🧹"},
-    "iron": {"min_w": 1000, "max_w": 2500, "min_duration_min": 5, "max_duration_min": 60, "icon": "👔"},
+    "oven": {"min_w": 1800, "max_w": 3500, "min_duration_min": 10, "max_duration_min": 120, "icon": "🔥", "shape": "steady"},
+    "hob_element": {"min_w": 1000, "max_w": 2500, "min_duration_min": 3, "max_duration_min": 60, "icon": "🍳", "shape": "cycling"},
+    "kettle": {"min_w": 1500, "max_w": 2400, "min_duration_min": 1, "max_duration_min": 6, "icon": "☕", "shape": "steady"},
+    "washing_machine": {"min_w": 300, "max_w": 2200, "min_duration_min": 30, "max_duration_min": 180, "icon": "👕", "shape": "phased"},
+    "dishwasher": {"min_w": 1000, "max_w": 2000, "min_duration_min": 45, "max_duration_min": 180, "icon": "🍽️", "shape": "phased"},
+    "hair_dryer": {"min_w": 800, "max_w": 2200, "min_duration_min": 2, "max_duration_min": 20, "icon": "💇", "shape": "steady"},
+    "toaster": {"min_w": 700, "max_w": 1400, "min_duration_min": 1, "max_duration_min": 5, "icon": "🍞", "shape": "steady"},
+    "microwave": {"min_w": 700, "max_w": 1500, "min_duration_min": 0.5, "max_duration_min": 15, "icon": "📡", "shape": "steady"},
+    "water_heater": {"min_w": 1800, "max_w": 3500, "min_duration_min": 10, "max_duration_min": 120, "icon": "🚿", "shape": "cycling"},
+    "space_heater": {"min_w": 500, "max_w": 2500, "min_duration_min": 15, "max_duration_min": 480, "icon": "🌡️", "shape": "cycling"},
+    "vacuum": {"min_w": 400, "max_w": 1800, "min_duration_min": 5, "max_duration_min": 60, "icon": "🧹", "shape": "steady"},
+    "iron": {"min_w": 1000, "max_w": 2500, "min_duration_min": 5, "max_duration_min": 60, "icon": "👔", "shape": "cycling"},
+    # Heat pump: high inrush spike → gradually decreasing as target temp approached
+    "heat_pump": {"min_w": 800, "max_w": 4000, "min_duration_min": 15, "max_duration_min": 480, "icon": "♨️", "shape": "decaying"},
+    # Electric radiator: fixed wattage cycling (thermostat on/off/on/off)
+    "electric_radiator": {"min_w": 500, "max_w": 2000, "min_duration_min": 10, "max_duration_min": 480, "icon": "🔲", "shape": "cycling"},
+    # Underfloor heating: low power, very long duration
+    "underfloor_heating": {"min_w": 200, "max_w": 1500, "min_duration_min": 30, "max_duration_min": 720, "icon": "🏠", "shape": "steady"},
+    # Immersion heater: high power, medium duration, steady
+    "immersion_heater": {"min_w": 2000, "max_w": 3500, "min_duration_min": 20, "max_duration_min": 180, "icon": "🔥", "shape": "steady"},
 }
+
+# Power shape types:
+# "steady" — constant power throughout (oven, kettle, microwave)
+# "cycling" — on/off/on/off at regular intervals (heaters, iron, hob)
+# "decaying" — high initial power that gradually decreases (heat pump, compressor)
+# "phased" — distinct phases at different power levels (washing machine, dishwasher)
 
 # Minimum watt change to count as a "step" (filters noise)
 MIN_STEP_WATTS = 150
@@ -187,13 +201,57 @@ def pair_steps_into_events(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return events
 
 
+def detect_power_shape(readings_during_event: list[float]) -> str:
+    """Classify the power shape of an event from its readings.
+
+    Returns one of: 'steady', 'cycling', 'decaying', 'phased', 'unknown'.
+    """
+    if len(readings_during_event) < 3:
+        return "unknown"
+
+    arr = np.array(readings_during_event)
+    mean_val = np.mean(arr)
+    if mean_val < 10:
+        return "unknown"
+
+    # Coefficient of variation — steady loads have low CV
+    cv = np.std(arr) / mean_val if mean_val > 0 else 0
+
+    # Check for decaying pattern: first third avg > last third avg by >30%
+    third = max(1, len(arr) // 3)
+    first_avg = np.mean(arr[:third])
+    last_avg = np.mean(arr[-third:])
+
+    if first_avg > 0 and (first_avg - last_avg) / first_avg > 0.30:
+        return "decaying"
+
+    # Check for cycling: count zero-crossings of (value - mean)
+    centered = arr - mean_val
+    crossings = np.sum(np.diff(np.sign(centered)) != 0)
+    cycling_rate = crossings / len(arr)
+
+    if cycling_rate > 0.15 and cv > 0.3:
+        return "cycling"
+
+    # Check for phased: distinct plateaus
+    if cv > 0.4 and cycling_rate < 0.1:
+        return "phased"
+
+    if cv < 0.2:
+        return "steady"
+
+    return "unknown"
+
+
 def classify_event(event: dict[str, Any]) -> dict[str, Any]:
     """Classify a power event against known appliance signatures.
 
     Returns the event dict with added classification fields.
+    Uses both power/duration matching AND power shape analysis.
     """
     power = event["power_w"]
     duration = event["duration_min"]
+    shape = event.get("power_shape", "unknown")
 
     matches = []
     for name, sig in KNOWN_SIGNATURES.items():
@@ -203,8 +261,10 @@ def classify_event(event: dict[str, Any]) -> dict[str, Any]:
             dur_center = (sig["min_duration_min"] + sig["max_duration_min"]) / 2
             power_score = 1 - abs(power - power_center) / (sig["max_w"] - sig["min_w"])
             dur_score = 1 - abs(duration - dur_center) / (sig["max_duration_min"] - sig["min_duration_min"])
-            score = (power_score + dur_score) / 2
-            matches.append((name, score, sig["icon"]))
+            # Shape bonus: if power shape matches the signature's expected shape, boost score
+            shape_bonus = 0.2 if shape == sig.get("shape") else 0.0
+            score = (power_score + dur_score) / 2 + shape_bonus
+            matches.append((name, min(score, 1.0), sig["icon"]))
 
     if matches:
         matches.sort(key=lambda m: -m[1])
@@ -312,7 +372,19 @@ def run_fingerprinting(power_entities: list[str] | None = None, days: int = 30) 
         steps = detect_power_steps(eid, days=days)
         if not steps:
             continue
+        # Also get raw readings for power shape analysis
+        raw_readings = _get_raw_readings(eid, days=days)
         events = pair_steps_into_events(steps)
+        # Annotate events with power shape from raw readings
+        for evt in events:
+            readings_in_event = [
+                w for ts, w in raw_readings
+                if evt["start_ts"] <= ts <= evt["end_ts"]
+            ]
+            if len(readings_in_event) >= 3:
+                evt["power_shape"] = detect_power_shape(readings_in_event)
+            else:
+                evt["power_shape"] = "unknown"
         classified = [classify_event(e) for e in events]
         if classified:
             per_entity_events[eid] = classified
@@ -346,6 +418,45 @@ def run_fingerprinting(power_entities: list[str] | None = None, days: int = 30) 
     )
 
     return result
+
+
+def _get_raw_readings(entity_id: str, days: int = 30) -> list[tuple[float, float]]:
+    """Get raw (timestamp, watts) readings for power shape analysis."""
+    if not os.path.exists(HA_DB):
+        return []
+    cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)
+    cutoff_ts = cutoff.timestamp()
+    try:
+        conn = sqlite3.connect(f"file:{HA_DB}?mode=ro", uri=True)
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='states_meta'"
+        )
+        has_meta = cursor.fetchone() is not None
+        if has_meta:
+            rows = conn.execute("""
+                SELECT s.state, s.last_changed_ts FROM states s
+                JOIN states_meta sm ON s.metadata_id = sm.metadata_id
+                WHERE sm.entity_id = ? AND s.last_changed_ts > ?
+                ORDER BY s.last_changed_ts
+            """, (entity_id, cutoff_ts)).fetchall()
+        else:
+            rows = conn.execute("""
+                SELECT state, last_changed_ts FROM states
+                WHERE entity_id = ? AND last_changed_ts > ?
+                ORDER BY last_changed_ts
+            """, (entity_id, cutoff_ts)).fetchall()
+        conn.close()
+        result = []
+        for state_val, ts in rows:
+            try:
+                w = float(state_val)
+                if 0 <= w <= 25000:
+                    result.append((ts, w))
+            except (ValueError, TypeError):
+                continue
+        return result
+    except Exception:
+        return []
 
 
 def _find_power_entities() -> list[str]:

@@ -69,6 +69,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Boat-specific room keywords (wheelhouse, engine room, salon, cabin, cockpit, foredeck)
 - Fallback room detection via common prefix extraction when no keyword matches
 - Each scene now includes a `rooms` field for UI grouping
+- Power shape analysis — classifies events as steady/cycling/decaying/phased
+- Heat pump signature: high inrush spike → gradual decay as target temp reached
+- Electric radiator: cycling on/off pattern at fixed wattage
+- Underfloor heating: low power, long duration, steady
+- Immersion heater: high power, medium duration, steady
+- Shape matching boosts classification confidence (shape match = +20% score)
 - Appliance fingerprinting (NILM) — detects oven, hob, kettle, washing machine, etc. from power spike signatures
 - Power step detection reads directly from HA SQLite database for speed
 - 12 known appliance signatures with power range, duration, and icon
