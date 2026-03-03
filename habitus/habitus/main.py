@@ -85,6 +85,18 @@ SKIP = [
     "software_version",
     "uptime",
     "battery_level",  # device battery % — not a behavioral signal
+    # Phone/mobile data — monotonically increasing, not home behavior
+    "_mobile_rx",
+    "_mobile_tx",
+    "_app_rx",
+    "_app_tx",
+    "_wifi_rx",
+    "_wifi_tx",
+    "steps_sensor",
+    "step_sensor",
+    "_bytes_",
+    "data_received",
+    "data_sent",
     "ip_address",
     "mac_address",
     "ssid",
@@ -269,7 +281,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     power = df[
         df["entity_id"].str.contains("consumed_w|watt|power|inverter|load", case=False, na=False)
     ].copy()
-    power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(upper=1_000_000)  # cap at 1MW — filters bad sensors
+    power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(
+        upper=1_000_000
+    )  # cap at 1MW — filters bad sensors
     total_power = power.groupby("hour")["v"].sum().rename("total_power_w")
     temp = df[df["entity_id"].str.contains("temperature", case=False, na=False)].copy()
     temp["v"] = pd.to_numeric(temp["mean"], errors="coerce")
