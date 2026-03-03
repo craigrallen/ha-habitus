@@ -813,7 +813,7 @@ async function load() {
       <div class="pat-item"><div class="pi-label">Est. Wakeup</div><div class="pi-val">${r.estimated_wakeup_hour!=null?r.estimated_wakeup_hour+':00':'—'}</div></div>
       <div class="pat-item"><div class="pi-label">Est. Sleep</div><div class="pi-val">${r.estimated_sleep_hour!=null?r.estimated_sleep_hour+':00':'—'}</div></div>
       <div class="pat-item"><div class="pi-label">Peak Hour</div><div class="pi-val">${r.peak_usage_hour}:00 · ${r.peak_usage_watts}W</div></div>
-      <div class="pat-item"><div class="pi-label">Night Base</div><div class="pi-val">${r.night_baseline_watts}W</div></div>
+      <div class="pat-item"><div class="pi-label">Night Base</div><div class="pi-val">${fmtW(r.night_baseline_watts)}</div></div>
     </div>` : '<div style="color:var(--text3);font-size:.82rem">No patterns yet — run Habitus first.</div>';
 
   // Top anomalies
@@ -872,7 +872,7 @@ async function load() {
     const v=wk[d]||{mean_power_w:0};
     const p=Math.round(v.mean_power_w/mxW*100);
     const we=d==='Sat'||d==='Sun';
-    return`<tr><td>${d}${we?` <span style="color:var(--text3);font-size:.7rem">weekend</span>`:''}</td><td style="font-weight:500">${Math.round(v.mean_power_w)}W</td><td><div class="bar-wrap"><div class="bar" style="width:${p}%;background:${we?'var(--purple)':'var(--accent)'}"></div></div></td></tr>`;
+    return`<tr><td>${d}${we?` <span style="color:var(--text3);font-size:.7rem">weekend</span>`:''}</td><td style="font-weight:500">${fmtW(v.mean_power_w)}</td><td><div class="bar-wrap"><div class="bar" style="width:${p}%;background:${we?'var(--purple)':'var(--accent)'}"></div></div></td></tr>`;
   }).join('');
 
   // Monthly
@@ -881,7 +881,7 @@ async function load() {
   const mxM=Math.max(...Object.values(se).map(v=>v.mean_power_w),1);
   document.getElementById('mo-table').innerHTML=mos.filter(m=>se[m]).map(m=>{
     const v=se[m],p=Math.round(v.mean_power_w/mxM*100);
-    return`<tr><td>${m}</td><td style="font-weight:500">${Math.round(v.mean_power_w)}W</td><td style="color:var(--text3)">${v.mean_temp_c}°C</td><td><div class="bar-wrap"><div class="bar" style="width:${p}%"></div></div></td></tr>`;
+    return`<tr><td>${m}</td><td style="font-weight:500">${fmtW(v.mean_power_w)}</td><td style="color:var(--text3)">${v.mean_temp_c}°C</td><td><div class="bar-wrap"><div class="bar" style="width:${p}%"></div></div></td></tr>`;
   }).join('');
 
   // Season cards
