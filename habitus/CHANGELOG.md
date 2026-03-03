@@ -595,3 +595,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Warmup state now consistently uses computed `_train_days`
 - Unblocks downstream modules (including NILM + monitor-correlated fingerprints)
 
+
+## [3.7.4] - 2026-03-03
+
+### Fixed
+- Web startup crash due to duplicate Flask endpoint name `api_training_status`
+- Device training status endpoint renamed to `/api/device_training/status`
+

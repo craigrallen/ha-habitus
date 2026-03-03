@@ -2365,9 +2365,9 @@ def api_training_stop():
     category = data.get("category", "custom")
     return jsonify(stop_training_session(name, category))
 
-@app.route("/api/training/status")
-@app.route("/ingress/api/training/status")
-def api_training_status():
+@app.route("/api/device_training/status")
+@app.route("/ingress/api/device_training/status")
+def api_device_training_status():
     from .device_trainer import get_training_status
     return jsonify(get_training_status())
 
