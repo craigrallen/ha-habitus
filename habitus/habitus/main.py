@@ -580,7 +580,7 @@ def publish_dashboard_entities(
         )
 
     # 2. Persistent notification — always visible in HA bell icon
-    if anomaly_score >= 40:
+    if anomaly_score >= 90:  # Only notify for genuinely critical anomalies
         lines = [f"**Score: {anomaly_score}/100**"]
         if entity_anomalies:
             lines.append("\n**Anomalies:**")
@@ -642,17 +642,8 @@ def publish_dashboard_entities(
 
     # 3. Always update suggestions notification so user sees new ideas
     if suggestions:
-        lines = ["**Habitus found automation opportunities:**\n"]
-        for s in suggestions[:5]:
-            lines.append(f"**{s.get('title','')}**")
-            lines.append(s.get("description", ""))
-            lines.append("")
-        lines.append("[Review in Habitus](/hassio/ingress/57582523_habitus)")
-        persistent_notification(
-            "habitus_suggestions",
-            "💡 Habitus — Automation Ideas",
-            "\n".join(lines),
-        )
+        # Suggestions available via Habitus UI — no persistent notification (too intrusive)
+        pass
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
