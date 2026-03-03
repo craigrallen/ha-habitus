@@ -21,7 +21,8 @@ from . import activity as activity_engine
 from . import anomaly_breakdown, automation_gap, automation_score, drift, phantom, seasonal
 from . import (activity_hmm, appliance_fingerprint, automation_builder, conflict_detector,
                 correlation_engine, dynamic_automations, energy_forecast, ha_areas,
-                markov_chain, room_predictor, routine_predictor, scene_detector, sequence_miner)
+                markov_chain, nilm_disaggregator, room_predictor, routine_predictor,
+                scene_detector, sequence_miner)
 from . import patterns as pattern_engine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -1216,6 +1217,12 @@ async def run(days_history: int, mode: str = "full") -> None:
                 except Exception as e:
                     log.warning("Appliance fingerprinting failed: %s", e)
 
+                log.info("Running NILM disaggregation...")
+                try:
+                    nilm_disaggregator.run_disaggregation(days=min(days_history, 7))
+                except Exception as e:
+                    log.warning("NILM disaggregation failed: %s", e)
+
                 log.info("Building smart automation suggestions...")
                 if os.path.exists(SUGGESTIONS_PATH):
                     with open(SUGGESTIONS_PATH) as _f:
@@ -1390,6 +1397,12 @@ async def run(days_history: int, mode: str = "full") -> None:
                 appliance_fingerprint.run_fingerprinting(days=min(days_history, 30))
             except Exception as e:
                 log.warning("Appliance fingerprinting failed: %s", e)
+
+            log.info("Running NILM disaggregation...")
+            try:
+                nilm_disaggregator.run_disaggregation(days=min(days_history, 7))
+            except Exception as e:
+                log.warning("NILM disaggregation failed: %s", e)
 
             log.info("Building smart automation suggestions...")
             if os.path.exists(SUGGESTIONS_PATH):

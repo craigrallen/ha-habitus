@@ -564,3 +564,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Smart Home tab: cleaner layout with forecast + drift + predictions + conflicts
 - Geek tab: ML models (HMM, PrefixSpan, Markov, Correlations) + Device Training + Feedback
+
+## [3.7.0] - 2026-03-03
+
+### Added
+- **NILM disaggregation** — decomposes aggregate power meter into per-appliance estimates
+  - Edge detection + ON/OFF pairing + KMeans clustering + signature matching
+  - 18 generic appliance signatures (fridge, kettle, oven, heat pump, shore charger, etc.)
+  - Custom user-trained signatures merged automatically
+  - Real-time power breakdown bar (coloured segments per appliance)
+  - 24h energy-by-appliance breakdown
+  - "Re-analyse" button for on-demand disaggregation
+  - Greedy subtraction decomposition for current breakdown
+  - No external NILM libraries — runs on numpy + sklearn (already installed)
+- New API endpoints: `/api/nilm`, `/api/nilm/run`
+- NILM section in Energy & Patterns tab

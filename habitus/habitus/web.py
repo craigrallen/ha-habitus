@@ -695,6 +695,16 @@ pre.raw {
 
 <!-- ENERGY & PATTERNS -->
 <div id="tab-energy" class="tab">
+  <!-- NILM Disaggregation -->
+  <div class="sec" id="nilm-section" style="display:none">
+    <div class="sec-header">
+      <h2>🔌 Power Disaggregation (NILM)</h2>
+      <button class="btn btn-accent" onclick="runNilm()" style="font-size:.75rem">⚡ Re-analyse</button>
+    </div>
+    <div id="nilm-current" style="margin-bottom:8px"></div>
+    <div id="nilm-appliances"></div>
+    <div id="nilm-energy" style="margin-top:8px"></div>
+  </div>
   <div class="two-col">
     <div class="sec">
       <div class="sec-header"><h2>Weekly Profile</h2></div>
@@ -1536,6 +1546,54 @@ async function load() {
     el.innerHTML = html;
   });
 
+  // ── NILM Disaggregation ──
+  fetch('api/nilm').then(r=>r.json()).catch(()=>({breakdown:[]})).then(n => {
+    const sec = document.getElementById('nilm-section');
+    if (!n.current_breakdown || n.current_breakdown.length === 0) {
+      if (n.discovered_appliances && n.discovered_appliances.length > 0) sec.style.display='';
+      else { sec.style.display='none'; return; }
+    }
+    sec.style.display='';
+
+    // Current breakdown (pie-like bar)
+    if (n.current_breakdown && n.current_breakdown.length > 0) {
+      const total = n.current_total_w || 0;
+      const colors = ['var(--accent)','var(--blue)','var(--amber)','var(--red)','#8b5cf6','#10b981','#f59e0b','#ef4444','#6366f1','#ec4899'];
+      document.getElementById('nilm-current').innerHTML = `
+        <div class="card" style="padding:12px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+            <b>Current: ${total}W</b>
+            <span style="font-size:.75rem;color:var(--text3)">${n.readings_count||0} readings · ${n.edges_detected||0} edges · ${n.events_paired||0} events</span>
+          </div>
+          <div style="display:flex;height:24px;border-radius:4px;overflow:hidden;margin-bottom:8px">
+            ${n.current_breakdown.map((b,i) => `<div style="width:${total>0?b.estimated_w/total*100:0}%;background:${colors[i%colors.length]}" title="${b.appliance}: ${b.estimated_w}W"></div>`).join('')}
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;font-size:.78rem">
+            ${n.current_breakdown.map((b,i) => `<span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${colors[i%colors.length]}"></span> ${b.icon} ${b.appliance}: ${b.estimated_w}W</span>`).join('')}
+          </div>
+        </div>`;
+    }
+
+    // Discovered appliances
+    if (n.discovered_appliances && n.discovered_appliances.length > 0) {
+      document.getElementById('nilm-appliances').innerHTML =
+        '<div style="font-size:.82rem;margin-bottom:4px"><b>Discovered Appliance Slots</b></div>' +
+        n.discovered_appliances.map(a => `
+          <div class="card" style="padding:8px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">
+            <div>${a.icon} <b>${a.appliance}</b> (~${a.centroid_w}W) ${a.source==='user_trained'?'<span style="font-size:.65rem;background:var(--accent);color:#000;padding:1px 4px;border-radius:3px">trained</span>':''}</div>
+            <div style="font-size:.75rem;color:var(--text3)">${a.event_count} events · ${a.avg_duration_min}min avg · ${a.total_kwh} kWh · ${a.match_confidence}% match</div>
+          </div>
+        `).join('');
+    }
+
+    // 24h energy breakdown
+    if (n.energy_24h && n.energy_24h.length > 0) {
+      document.getElementById('nilm-energy').innerHTML = `
+        <div style="font-size:.82rem;margin-bottom:4px"><b>Last 24h Energy by Appliance</b> (${n.total_kwh_24h} kWh total)</div>
+        ${n.energy_24h.map(e => `<div style="display:flex;justify-content:space-between;font-size:.8rem;padding:2px 0"><span>${e.appliance}</span><b>${e.kwh_24h} kWh</b></div>`).join('')}`;
+    }
+  });
+
   // ── Device Training ──
   fetch('api/power_sensors').then(r=>r.json()).catch(()=>({sensors:[]})).then(ps => {
     const sel = document.getElementById('train-power-entity');
@@ -1728,6 +1786,13 @@ async function load() {
     </div>`;
 }
 
+function runNilm(){
+  toast('Running NILM disaggregation...');
+  fetch('api/nilm/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({days:7})})
+    .then(r=>r.json()).then(d=>{
+      if(d.error){toast(d.error,'err');}else{toast(`NILM: ${d.appliance_slots} appliances found, ${d.current_total_w}W current`);location.reload();}
+    }).catch(()=>toast('NILM failed','err'));
+}
 function startTraining(){
   const entity = document.getElementById('train-power-entity').value;
   if(!entity){toast('Select a power sensor first','err');return;}
@@ -2143,6 +2208,22 @@ def api_smart_suggestions():
     """Return merged smart suggestions with confidence, YAML, and overlap info."""
     return jsonify(_read(SMART_SUGGESTIONS_PATH) or {"suggestions": [], "count": 0})
 
+
+@app.route("/api/nilm")
+@app.route("/ingress/api/nilm")
+def api_nilm():
+    return jsonify(_read(os.path.join(DATA_DIR, "nilm_disaggregation.json")) or {"breakdown": [], "discovered_appliances": []})
+
+@app.route("/api/nilm/run", methods=["POST"])
+@app.route("/ingress/api/nilm/run", methods=["POST"])
+def api_nilm_run():
+    from .nilm_disaggregator import run_disaggregation
+    data = request.get_json() or {}
+    result = run_disaggregation(
+        power_entity=data.get("power_entity", ""),
+        days=data.get("days", 7),
+    )
+    return jsonify(result)
 
 @app.route("/api/anomaly_feedback", methods=["POST"])
 @app.route("/ingress/api/anomaly_feedback", methods=["POST"])
