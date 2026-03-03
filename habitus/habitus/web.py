@@ -994,11 +994,11 @@ async function load() {
       ${sm[s]?'<span class="badge b-ok">Trained</span>':'<span class="badge b-muted">No data</span>'}
     </div>`).join('');
 
-  // Insights — Grid usage periods + phantom baseline (direct from kWh meter, no price math)
+  // Insights — Energy Dashboard stats (same data HA shows)
   const pd = phantomData && !Array.isArray(phantomData) ? phantomData : {};
-  const periods = pd.periods || {};
+  const months = pd.months || [];
   const phantom = pd.phantom || {};
-  const wowPct = pd.wow_pct;
+  const total12mo = pd.total_12mo_kwh || 0;
   const momPct = pd.mom_pct;
 
   function kwhBar(val, max) {
@@ -1007,46 +1007,49 @@ async function load() {
   }
 
   let phantomHtml = '';
-  if (phantom.phantom_kwh_year) {
-    // Phantom baseline card
+  
+  // 12-month total header
+  if (total12mo) {
     phantomHtml += `<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:14px">
-      <div style="font-size:.78rem;color:var(--text3);margin-bottom:6px">IDLE BASELINE (02:00–05:00)</div>
+      <div style="font-size:.78rem;color:var(--text3);margin-bottom:6px">LAST 12 MONTHS (from Energy Dashboard)</div>
       <div style="display:flex;align-items:baseline;gap:8px">
-        <span style="font-size:1.6rem;font-weight:700;color:var(--amber)">${phantom.avg_idle_kwh_per_hour}</span>
-        <span style="color:var(--text3)">kWh/hour</span>
-        <span style="margin-left:auto;font-size:.82rem;color:var(--text2)">~${Math.round(phantom.phantom_kwh_year)} kWh/year always-on</span>
+        <span style="font-size:1.6rem;font-weight:700;color:var(--text)">${total12mo.toLocaleString()}</span>
+        <span style="color:var(--text3)">kWh total grid consumption</span>
       </div>
-      <div style="font-size:.75rem;color:var(--text3);margin-top:4px">Sampled from ${phantom.idle_hours_sampled || '—'} idle-hour readings</div>
     </div>`;
   }
 
-  // Period comparison table
-  const maxPeriod = Math.max(periods.this_week||0, periods.last_week||0, periods.this_month||0, periods.last_month||0, 1);
-  if (Object.keys(periods).length) {
-    const rows = [
-      ['This week', periods.this_week, wowPct],
-      ['Last week', periods.last_week, null],
-      ['This month', periods.this_month, momPct],
-      ['Last month', periods.last_month, null],
-    ];
-    phantomHtml += `<table>
-      <thead><tr><th>Period</th><th>kWh</th><th>vs previous</th><th style="width:120px"></th></tr></thead>
-      <tbody>${rows.map(([label, val, pct]) => {
-        if (val == null) return '';
-        const arrow = pct == null ? '' : pct > 0
-          ? `<span style="color:var(--red)">↑ ${pct}%</span>`
-          : `<span style="color:var(--green)">↓ ${Math.abs(pct)}%</span>`;
-        return `<tr>
-          <td style="font-weight:500">${label}</td>
-          <td style="font-weight:600;color:var(--text)">${val} kWh</td>
-          <td>${arrow}</td>
-          <td>${kwhBar(val, maxPeriod)}</td>
-        </tr>`;
-      }).join('')}
+  // Phantom baseline card
+  if (phantom.phantom_kwh_year) {
+    const phantomPct = total12mo > 0 ? Math.round(100 * phantom.phantom_kwh_year / total12mo) : null;
+    phantomHtml += `<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:14px">
+      <div style="font-size:.78rem;color:var(--text3);margin-bottom:6px">IDLE BASELINE (02:00–05:00)</div>
+      <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
+        <span style="font-size:1.4rem;font-weight:700;color:var(--amber)">${phantom.avg_idle_kwh_per_hour}</span>
+        <span style="color:var(--text3)">kWh/hour</span>
+        <span style="color:var(--text2)">→ ${Math.round(phantom.phantom_kwh_year).toLocaleString()} kWh/year</span>
+        ${phantomPct ? `<span style="color:var(--amber)">(${phantomPct}% of usage)</span>` : ''}
+      </div>
+      <div style="font-size:.75rem;color:var(--text3);margin-top:4px">Always-on devices: fridge, router, standby, etc.</div>
+    </div>`;
+  }
+
+  // Monthly breakdown table
+  if (months.length) {
+    const maxMonth = Math.max(...months.map(m=>m.kwh), 1);
+    phantomHtml += `<div style="font-size:.82rem;font-weight:600;color:var(--text2);margin:12px 0 8px">Monthly Usage</div>
+    <table>
+      <thead><tr><th>Month</th><th>kWh</th><th style="width:150px"></th></tr></thead>
+      <tbody>${months.slice().reverse().map(m => `
+        <tr>
+          <td style="font-weight:500">${m.month}</td>
+          <td style="font-weight:600;color:var(--text)">${m.kwh}</td>
+          <td>${kwhBar(m.kwh, maxMonth)}</td>
+        </tr>`).join('')}
       </tbody>
     </table>`;
   } else if (!phantom.phantom_kwh_year) {
-    phantomHtml = '<div style="color:var(--text3);padding:12px">Not enough grid data yet — check back after a few days.</div>';
+    phantomHtml = '<div style="color:var(--text3);padding:12px">No Energy Dashboard stats available yet.</div>';
   }
   document.getElementById('phantom-list').innerHTML = phantomHtml;
 
