@@ -1255,6 +1255,25 @@ function schedulePoll() {
   _pollTimer = setTimeout(() => { load(); schedulePoll(); }, interval);
 }
 schedulePoll();
+
+// Theme toggle
+function toggleTheme() {
+  const html = document.documentElement;
+  const current = html.getAttribute('data-theme') || 'dark';
+  const next = current === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', next);
+  localStorage.setItem('habitus-theme', next);
+  document.getElementById('theme-toggle').textContent = next === 'dark' ? '🌙' : '☀️';
+}
+(function initTheme() {
+  const saved = localStorage.getItem('habitus-theme');
+  if (saved === 'light') document.documentElement.setAttribute('data-theme', 'light');
+  setTimeout(() => {
+    const btn = document.getElementById('theme-toggle');
+    if (btn) btn.textContent = (saved === 'light') ? '☀️' : '🌙';
+  }, 100);
+})();
+
 </script>
   <div id="train-banner" class="train-banner">
     <div class="spin"></div>
