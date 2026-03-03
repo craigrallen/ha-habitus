@@ -9,7 +9,7 @@ import os
 import numpy as np
 import pandas as pd
 
-from .sensor_classifier import ACCUMULATING, classify_sensor
+from .sensor_classifier import ACCUMULATING, BINARY, classify_sensor
 
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
@@ -50,6 +50,8 @@ def build_entity_baselines(df: pd.DataFrame):
 
         if sensor_type == ACCUMULATING:
             entity_bl = _build_rate_baseline(group)
+        elif sensor_type == BINARY:
+            entity_bl = _build_binary_baseline(group)
         else:
             for (h, d), g in group.groupby(["hour_of_day", "day_of_week"]):
                 vals = g["v"].values
@@ -135,6 +137,84 @@ def _build_rate_baseline(group: pd.DataFrame) -> dict:
     return entity_bl
 
 
+def _build_binary_baseline(group: pd.DataFrame) -> dict:
+    """Build timing & frequency baseline slots for a binary (0/1) sensor.
+
+    Computes per-slot ``on_fraction`` (fraction of hours the sensor is on),
+    Bernoulli ``std``, and ``avg_transitions`` (mean number of state-change
+    events entering that hour slot).  Also stores a global ``_binary_meta``
+    entry with ``avg_duration_on`` — the average run length of consecutive
+    'on' hours.
+
+    Args:
+        group: DataFrame slice for a single entity with columns ``ts`` and ``v``.
+
+    Returns:
+        Dict of slot keys (``"h_d"``) → binary baseline dicts, plus a
+        ``_binary_meta`` key.  Returns an empty dict when there is insufficient
+        data (fewer than 3 rows).
+    """
+    group = group.sort_values("ts").dropna(subset=["v"])
+    if len(group) < 3:
+        return {}
+
+    vals = group["v"].values.astype(float)
+    ts_arr = pd.to_datetime(group["ts"].values)
+    h_arr = ts_arr.hour
+    d_arr = ts_arr.dayofweek
+
+    # Count transitions arriving at each hour slot: 1 if value changed from previous
+    transition_counts: dict[str, list[float]] = {}
+    for i in range(1, len(vals)):
+        k = f"{int(h_arr[i])}_{int(d_arr[i])}"
+        if k not in transition_counts:
+            transition_counts[k] = []
+        transition_counts[k].append(float(vals[i] != vals[i - 1]))
+
+    df_slot = pd.DataFrame({"v": vals, "hour_of_day": h_arr, "day_of_week": d_arr})
+    entity_bl: dict = {}
+    for (h, d), g in df_slot.groupby(["hour_of_day", "day_of_week"]):
+        if len(g) < 3:
+            continue
+        on_frac = float(np.mean(g["v"].values))
+        bern_std = float(np.sqrt(max(on_frac * (1.0 - on_frac), 1e-4)))
+        k = f"{h}_{d}"
+        avg_trans = float(np.mean(transition_counts.get(k, [0.0])))
+        entity_bl[k] = {
+            "on_fraction": round(on_frac, 4),
+            "std": round(bern_std, 4),
+            "avg_transitions": round(avg_trans, 4),
+            "n": int(len(g)),
+            "baseline_type": "binary",
+        }
+
+    avg_dur = _compute_avg_on_duration(vals)
+    entity_bl["_binary_meta"] = {"avg_duration_on": round(avg_dur, 4)}
+    return entity_bl
+
+
+def _compute_avg_on_duration(vals: np.ndarray) -> float:
+    """Return the average run length (in steps/hours) of consecutive 'on' values.
+
+    Args:
+        vals: Ordered array of 0.0/1.0 values.
+
+    Returns:
+        Mean run length of '1' runs, or ``1.0`` when no 'on' run is found.
+    """
+    run_lengths: list[int] = []
+    run = 0
+    for v in vals:
+        if v >= 0.5:
+            run += 1
+        elif run > 0:
+            run_lengths.append(run)
+            run = 0
+    if run > 0:
+        run_lengths.append(run)
+    return float(np.mean(run_lengths)) if run_lengths else 1.0
+
+
 def score_entities(current_states: dict | None = None) -> list:
     """Score each entity's current value against its baseline.
 
@@ -175,6 +255,11 @@ def score_entities(current_states: dict | None = None) -> list:
     acc_state_updated: dict = dict(acc_state)
     acc_state_changed = False
 
+    # Load per-entity binary state (tracks transitions and on-duration)
+    bin_state: dict = baselines.get("_binary_state", {})
+    bin_state_updated: dict = dict(bin_state)
+    bin_state_changed = False
+
     anomalies = []
     for eid, bl in baselines.items():
         if eid.startswith("_"):
@@ -182,8 +267,11 @@ def score_entities(current_states: dict | None = None) -> list:
         if key not in bl:
             continue
         b = bl[key]
-        if b["std"] < 0.01:
-            continue  # constant sensor, skip
+        baseline_type = b.get("baseline_type", "absolute")
+
+        # Constant sensor guard (Bernoulli std near 0 ≡ always-off binary sensor)
+        if b.get("std", 1.0) < 0.01:
+            continue
 
         current = current_states.get(eid)
         if current is None:
@@ -193,8 +281,101 @@ def score_entities(current_states: dict | None = None) -> list:
         except (TypeError, ValueError):
             continue
 
-        baseline_type = b.get("baseline_type", "absolute")
+        # ── Binary sensor: timing & frequency scoring ──────────────────────────
+        if baseline_type == "binary":
+            bin_state_changed = True
+            current_val = 1 if val >= 0.5 else 0
+            b_info = bin_state.get(eid, {})
+            prev_raw = b_info.get("current_value")
+            prev_bin: int | None = (
+                None if prev_raw is None else (1 if float(prev_raw) >= 0.5 else 0)
+            )
 
+            is_transition = prev_bin is not None and prev_bin != current_val
+            prev_h = b_info.get("hour")
+            trans_count = 0 if prev_h != h else int(b_info.get("transitions_this_hour", 0))
+            if is_transition:
+                trans_count += 1
+
+            state_start: str | None
+            if current_val == 1:
+                state_start = (
+                    now.isoformat()
+                    if (prev_bin is None or prev_bin == 0)
+                    else b_info.get("state_start_ts", now.isoformat())
+                )
+            else:
+                state_start = None
+
+            bin_state_updated[eid] = {
+                "current_value": float(current_val),
+                "hour": h,
+                "transitions_this_hour": trans_count,
+                "state_start_ts": state_start,
+            }
+
+            on_frac = b.get("on_fraction", 0.5)
+            bern_std = max(b.get("std", 0.5), 0.01)
+
+            # Expected-state score: how unusual is being ON right now?
+            z_expected = (1.0 - on_frac) / bern_std if current_val == 1 else 0.0
+
+            # Transition-frequency score: flag if >3× baseline frequency
+            avg_trans = b.get("avg_transitions", 0.0)
+            z_freq = (
+                trans_count / max(avg_trans, 0.1)
+                if (avg_trans > 0 and trans_count > 3 * avg_trans)
+                else 0.0
+            )
+
+            # Duration score: flag if on-duration >2× baseline
+            avg_dur = float(bl.get("_binary_meta", {}).get("avg_duration_on", 1.0))
+            z_dur = 0.0
+            if current_val == 1 and state_start:
+                start_dt = datetime.datetime.fromisoformat(state_start)
+                dur_h = (now - start_dt).total_seconds() / 3600.0
+                if dur_h > 2.0 * avg_dur:
+                    z_dur = (dur_h - avg_dur) / max(avg_dur, 0.1)
+
+            z = max(z_expected, z_freq, z_dur)
+            if z < 0.5:
+                continue
+
+            name = eid.split(".")[-1].replace("_", " ").title()
+            if z_freq > 0 and z_freq >= max(z_expected, z_dur):
+                description = (
+                    f"{name} has {trans_count} transitions this hour — "
+                    f"baseline is {avg_trans:.1f}/h"
+                )
+            elif z_dur > 0 and z_dur >= z_expected and state_start:
+                start_dt2 = datetime.datetime.fromisoformat(state_start)
+                dur_h2 = (now - start_dt2).total_seconds() / 3600.0
+                description = (
+                    f"{name} has been on for {dur_h2:.1f}h — "
+                    f"typical on-duration is {avg_dur:.1f}h"
+                )
+            else:
+                description = (
+                    f"{name} is active — baseline {_day(d)} {h:02d}:00 "
+                    f"on-rate is {on_frac * 100:.0f}%"
+                )
+
+            anomalies.append(
+                {
+                    "entity_id": eid,
+                    "name": name,
+                    "current_value": float(current_val),
+                    "baseline_mean": round(on_frac, 4),
+                    "baseline_std": round(bern_std, 4),
+                    "z_score": round(z, 2),
+                    "unit": "",
+                    "description": description,
+                    "direction": "high",
+                }
+            )
+            continue  # binary handled; skip gauge/rate logic below
+
+        # ── Accumulating & absolute sensors: standard z-score scoring ──────────
         if baseline_type == "rate":
             prev_info = acc_state.get(eid)
             # Determine first_delta_ts — set on first encounter, preserved thereafter
@@ -265,9 +446,12 @@ def score_entities(current_states: dict | None = None) -> list:
             }
         )
 
-    # Persist updated accumulating state back to entity_baselines.json
-    if acc_state_changed:
-        baselines["_accumulating_state"] = acc_state_updated
+    # Persist updated state back to entity_baselines.json
+    if acc_state_changed or bin_state_changed:
+        if acc_state_changed:
+            baselines["_accumulating_state"] = acc_state_updated
+        if bin_state_changed:
+            baselines["_binary_state"] = bin_state_updated
         with open(ENTITY_BASELINES_PATH, "w") as f:
             json.dump(baselines, f, indent=2)
 
