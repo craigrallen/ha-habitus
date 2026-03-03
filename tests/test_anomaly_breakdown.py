@@ -1,6 +1,7 @@
 """Tests for per-entity anomaly scoring."""
 from __future__ import annotations
 
+import datetime
 import json
 from pathlib import Path
 
@@ -16,8 +17,11 @@ from habitus.habitus.anomaly_breakdown import (
     _guess_unit,
     _fmt,
     _day,
+    COLD_START_DAYS,
+    LOW_SAMPLE_THRESHOLD,
     ENTITY_BASELINES_PATH,
     ENTITY_ANOMALIES_PATH,
+    ENTITY_LIFECYCLE_PATH,
 )
 
 
@@ -190,6 +194,7 @@ class TestScoreEntities:
 
         ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
         ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
+        ab.ENTITY_LIFECYCLE_PATH = str(tmp_data_dir / "entity_lifecycle.json")
         build_entity_baselines(sample_df)
         # No matching entity in current_states
         result = score_entities({"sensor.nonexistent_entity": 100.0})
@@ -637,3 +642,299 @@ class TestBinaryScoring:
             data = json.load(f)
         assert "_binary_state" in data
         assert "binary_sensor.test_motion" in data["_binary_state"]
+
+
+class TestColdStartProtection:
+    """Tests for TASK-018: Per-Entity Cold Start Protection."""
+
+    def _write_baselines_with_age(
+        self,
+        tmp_data_dir,
+        days_old: float,
+        n_slot_samples: int = 30,
+        on_fraction: float | None = None,
+    ) -> None:
+        """Write a minimal baselines file for sensor.test_entity with a given age."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
+        ab.ENTITY_LIFECYCLE_PATH = str(tmp_data_dir / "entity_lifecycle.json")
+
+        now = datetime.datetime.now()
+        h, d = now.hour, now.weekday()
+        first_seen = (now - datetime.timedelta(days=days_old)).isoformat()
+
+        if on_fraction is not None:
+            # Binary sensor
+            bern_std = float(np.sqrt(max(on_fraction * (1.0 - on_fraction), 1e-4)))
+            slot = {
+                "on_fraction": on_fraction,
+                "std": bern_std,
+                "avg_transitions": 0.0,
+                "n": n_slot_samples,
+                "baseline_type": "binary",
+            }
+            entity_data = {
+                f"{h}_{d}": slot,
+                "_binary_meta": {"avg_duration_on": 1.0},
+                "_meta": {"sensor_type": "binary", "first_seen": first_seen, "n_samples": 100},
+            }
+        else:
+            # Absolute sensor with a known mean/std
+            slot = {
+                "mean": 100.0,
+                "std": 10.0,
+                "n": n_slot_samples,
+                "baseline_type": "absolute",
+            }
+            entity_data = {
+                f"{h}_{d}": slot,
+                "_meta": {
+                    "sensor_type": "gauge",
+                    "first_seen": first_seen,
+                    "n_samples": 100,
+                },
+            }
+
+        baselines = {"sensor.test_entity": entity_data}
+        with open(tmp_data_dir / "entity_baselines.json", "w") as f:
+            json.dump(baselines, f)
+
+    def test_first_seen_stored_in_meta(self, sample_df, tmp_data_dir):
+        """build_entity_baselines must store first_seen in each entity's _meta."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        build_entity_baselines(sample_df)
+        with open(tmp_data_dir / "entity_baselines.json") as f:
+            data = json.load(f)
+        for eid, entity in data.items():
+            if eid.startswith("_"):
+                continue
+            assert "_meta" in entity
+            assert "first_seen" in entity["_meta"], f"No first_seen in _meta for {eid}"
+            # Verify it parses as a valid ISO datetime
+            datetime.datetime.fromisoformat(entity["_meta"]["first_seen"])
+
+    def test_n_samples_stored_in_meta(self, sample_df, tmp_data_dir):
+        """build_entity_baselines must store n_samples in each entity's _meta."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        build_entity_baselines(sample_df)
+        with open(tmp_data_dir / "entity_baselines.json") as f:
+            data = json.load(f)
+        for eid, entity in data.items():
+            if eid.startswith("_"):
+                continue
+            assert "n_samples" in entity["_meta"], f"No n_samples in _meta for {eid}"
+            assert isinstance(entity["_meta"]["n_samples"], int)
+            assert entity["_meta"]["n_samples"] > 0
+
+    def test_first_seen_preserved_across_retrain(self, sample_df, tmp_data_dir):
+        """Re-running build_entity_baselines must not overwrite an earlier first_seen."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        build_entity_baselines(sample_df)
+        with open(tmp_data_dir / "entity_baselines.json") as f:
+            data1 = json.load(f)
+        # Inject an earlier first_seen into one entity
+        eid = next(k for k in data1 if not k.startswith("_"))
+        early_ts = "2000-01-01T00:00:00"
+        data1[eid]["_meta"]["first_seen"] = early_ts
+        with open(tmp_data_dir / "entity_baselines.json", "w") as f:
+            json.dump(data1, f)
+        # Re-run — should preserve the earlier timestamp
+        build_entity_baselines(sample_df)
+        with open(tmp_data_dir / "entity_baselines.json") as f:
+            data2 = json.load(f)
+        assert data2[eid]["_meta"]["first_seen"] == early_ts, (
+            "first_seen was overwritten on retrain"
+        )
+
+    def test_entity_in_learning_not_scored(self, tmp_data_dir):
+        """Entity younger than COLD_START_DAYS must not appear in score_entities result."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        # Entity is only 1 day old — should be in learning phase
+        self._write_baselines_with_age(tmp_data_dir, days_old=1.0)
+        result = score_entities({"sensor.test_entity": 999999.0})
+        ids = [r["entity_id"] for r in result]
+        assert "sensor.test_entity" not in ids
+
+    def test_entity_past_learning_is_scored(self, tmp_data_dir):
+        """Entity older than COLD_START_DAYS must be scored normally."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        # Entity is 10 days old — cold start period over
+        self._write_baselines_with_age(tmp_data_dir, days_old=10.0)
+        result = score_entities({"sensor.test_entity": 999999.0})
+        ids = [r["entity_id"] for r in result]
+        assert "sensor.test_entity" in ids
+
+    def test_learning_entities_written_to_baselines(self, tmp_data_dir):
+        """score_entities must write _learning_entities to entity_baselines.json."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        self._write_baselines_with_age(tmp_data_dir, days_old=1.0)
+        score_entities({"sensor.test_entity": 50.0})
+        with open(tmp_data_dir / "entity_baselines.json") as f:
+            data = json.load(f)
+        assert "_learning_entities" in data
+        entities = data["_learning_entities"]
+        assert isinstance(entities, list)
+        assert any(e["entity_id"] == "sensor.test_entity" for e in entities)
+
+    def test_learning_entity_has_status_learning(self, tmp_data_dir):
+        """Entities in cold start must appear with status='learning' in _learning_entities."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        self._write_baselines_with_age(tmp_data_dir, days_old=2.0)
+        score_entities({"sensor.test_entity": 50.0})
+        with open(tmp_data_dir / "entity_baselines.json") as f:
+            data = json.load(f)
+        learning = data.get("_learning_entities", [])
+        test_entry = next(
+            (e for e in learning if e["entity_id"] == "sensor.test_entity"), None
+        )
+        assert test_entry is not None
+        assert test_entry["status"] == "learning"
+        assert "first_seen" in test_entry
+        assert "days_old" in test_entry
+
+    def test_low_sample_slot_halves_zscore(self, tmp_data_dir):
+        """Slot with n < LOW_SAMPLE_THRESHOLD must produce a halved z-score."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        # Create two identical baselines: one with n=5 (low), one with n=30 (normal)
+        now = datetime.datetime.now()
+        h, d = now.hour, now.weekday()
+        old_first_seen = (now - datetime.timedelta(days=30)).isoformat()
+
+        def make_baselines(n_samples: int) -> dict:
+            return {
+                "sensor.test_entity": {
+                    f"{h}_{d}": {
+                        "mean": 100.0,
+                        "std": 10.0,
+                        "n": n_samples,
+                        "baseline_type": "absolute",
+                    },
+                    "_meta": {
+                        "sensor_type": "gauge",
+                        "first_seen": old_first_seen,
+                        "n_samples": n_samples * 7,
+                    },
+                }
+            }
+
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
+        ab.ENTITY_LIFECYCLE_PATH = str(tmp_data_dir / "entity_lifecycle.json")
+
+        # Score with normal (high) sample count
+        with open(tmp_data_dir / "entity_baselines.json", "w") as f:
+            json.dump(make_baselines(30), f)
+        result_normal = score_entities({"sensor.test_entity": 200.0})
+
+        # Score with low sample count
+        with open(tmp_data_dir / "entity_baselines.json", "w") as f:
+            json.dump(make_baselines(5), f)
+        result_low = score_entities({"sensor.test_entity": 200.0})
+
+        assert result_normal, "Expected anomaly with normal sample count"
+        assert result_low, "Expected anomaly with low sample count (just halved)"
+        z_normal = result_normal[0]["z_score"]
+        z_low = result_low[0]["z_score"]
+        assert z_low == pytest.approx(z_normal * 0.5, rel=1e-3), (
+            f"Low-sample z={z_low} should be half of normal z={z_normal}"
+        )
+
+    def test_new_entity_not_in_baselines_not_scored(self, tmp_data_dir):
+        """Entity in current_states but absent from baselines must not be scored."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        # Write baselines for a different entity
+        now = datetime.datetime.now()
+        h, d = now.hour, now.weekday()
+        old_first_seen = (now - datetime.timedelta(days=30)).isoformat()
+        baselines = {
+            "sensor.known_entity": {
+                f"{h}_{d}": {"mean": 50.0, "std": 5.0, "n": 30, "baseline_type": "absolute"},
+                "_meta": {"sensor_type": "gauge", "first_seen": old_first_seen, "n_samples": 100},
+            }
+        }
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
+        ab.ENTITY_LIFECYCLE_PATH = str(tmp_data_dir / "entity_lifecycle.json")
+        with open(tmp_data_dir / "entity_baselines.json", "w") as f:
+            json.dump(baselines, f)
+
+        # Pass a brand-new entity not in baselines
+        result = score_entities({"sensor.brand_new_entity": 9999.0})
+        ids = [r["entity_id"] for r in result]
+        assert "sensor.brand_new_entity" not in ids
+
+    def test_new_entity_written_to_lifecycle(self, tmp_data_dir):
+        """Entity in current_states but absent from baselines must be in entity_lifecycle.json."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        now = datetime.datetime.now()
+        h, d = now.hour, now.weekday()
+        old_first_seen = (now - datetime.timedelta(days=30)).isoformat()
+        baselines = {
+            "sensor.known_entity": {
+                f"{h}_{d}": {"mean": 50.0, "std": 5.0, "n": 30, "baseline_type": "absolute"},
+                "_meta": {"sensor_type": "gauge", "first_seen": old_first_seen, "n_samples": 100},
+            }
+        }
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
+        ab.ENTITY_LIFECYCLE_PATH = str(tmp_data_dir / "entity_lifecycle.json")
+        with open(tmp_data_dir / "entity_baselines.json", "w") as f:
+            json.dump(baselines, f)
+
+        score_entities({"sensor.brand_new_entity": 9999.0})
+        assert (tmp_data_dir / "entity_lifecycle.json").exists()
+        with open(tmp_data_dir / "entity_lifecycle.json") as f:
+            lifecycle = json.load(f)
+        assert "sensor.brand_new_entity" in lifecycle
+        entry = lifecycle["sensor.brand_new_entity"]
+        assert entry["status"] == "new"
+        assert "first_seen" in entry
+        assert "last_seen" in entry
+
+    def test_compute_breakdown_includes_learning_entities(self, tmp_data_dir):
+        """compute_breakdown must include learning_entities in _z_score_run."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        self._write_baselines_with_age(tmp_data_dir, days_old=1.0)
+        compute_breakdown(80.0, {"sensor.test_entity": 9999.0})
+        with open(tmp_data_dir / "entity_baselines.json") as f:
+            data = json.load(f)
+        assert "_z_score_run" in data
+        run = data["_z_score_run"]
+        assert "learning_entities" in run
+        assert isinstance(run["learning_entities"], list)
+
+    def test_runtime_state_preserved_across_retrain(self, sample_df, tmp_data_dir):
+        """build_entity_baselines must carry over _binary_state and _z_score_run."""
+        import habitus.habitus.anomaly_breakdown as ab
+
+        ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
+        build_entity_baselines(sample_df)
+        # Inject fake state keys into the baselines file
+        with open(tmp_data_dir / "entity_baselines.json") as f:
+            data = json.load(f)
+        data["_binary_state"] = {"binary_sensor.front_door": {"current_value": 0.0}}
+        data["_z_score_run"] = {"timestamp": "2026-01-01T00:00:00", "anomaly_score": 55, "top5": []}
+        with open(tmp_data_dir / "entity_baselines.json", "w") as f:
+            json.dump(data, f)
+        # Re-run build — state keys should be preserved
+        build_entity_baselines(sample_df)
+        with open(tmp_data_dir / "entity_baselines.json") as f:
+            data2 = json.load(f)
+        assert "_binary_state" in data2
+        assert "_z_score_run" in data2
