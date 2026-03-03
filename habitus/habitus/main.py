@@ -65,8 +65,10 @@ FEATURE_COLS = [
     # Grid energy delta — kWh proxy, cross-validates watt sensors
     "grid_kwh_w",
     # Water — usage proxy + leak detection
-    "water_pump_w",  # pump watts running = water flowing
-    "water_leak",  # binary leak sensor active
+    "water_l_per_h",  # pump watts running = water flowing
+    "water_leak",        # binary leak sensor
+    # Gas — smart meter m³/h
+    "gas_m3_per_h",eak sensor active
 ]
 
 # Domains that produce useful behavioral time-series data
@@ -349,7 +351,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         water_pump["v"] = pd.to_numeric(water_pump["mean"], errors="coerce").clip(
             lower=0, upper=5000
         )
-        wp_series = water_pump.groupby("hour")["v"].max().rename("water_pump_w")
+        wp_series = water_pump.groupby("hour")["v"].max().rename("water_l_per_h")
         features = features.join(wp_series, how="left")
 
     # Water leak sensors — 1 if any leak detected in that hour
@@ -725,6 +727,12 @@ async def run(days_history: int, mode: str = "full") -> None:
             log.info("Using Energy Dashboard grid entity: %s", energy["grid_kwh"])
         if energy.get("device_rates"):
             os.environ["HABITUS_ENERGY_RATES"] = ",".join(energy["device_rates"])
+        if energy.get("gas"):
+            os.environ["HABITUS_GAS_ENTITIES"] = ",".join(energy["gas"])
+            log.info("Gas meters: %s", energy["gas"])
+        if energy.get("water"):
+            os.environ["HABITUS_WATER_ENTITIES"] = ",".join(energy["water"])
+            log.info("Water meters: %s", energy["water"])
 
     stat_ids = await get_stat_ids()
     if not stat_ids:
