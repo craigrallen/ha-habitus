@@ -1,230 +1,168 @@
-"""Phantom Load Hunter — identify devices drawing power 24/7 unnecessarily."""
+"""Phantom Load Hunter — uses grid kWh meter to identify baseline idle consumption.
+
+Approach:
+  - Pull hourly grid kWh deltas from the meter (no W sensors needed)
+  - Quiet hours (02:00–05:00) = minimum baseline = phantom drain floor
+  - Compare week-over-week / month-over-month periods (no price math)
+  - Per-device phantom = device's kWh during those same quiet hours
+"""
 
 import json
 import logging
 import os
-import re
+import datetime
+
+import requests as req
 
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 PHANTOM_PATH = os.path.join(DATA_DIR, "phantom_loads.json")
-ENTITY_BASELINES_PATH = os.path.join(DATA_DIR, "entity_baselines.json")
-WATT_ENTITIES_PATH = os.path.join(DATA_DIR, "watt_entities.json")
 
-# Patterns that indicate a REAL instantaneous watt sensor (unit_of_measurement = W)
-# Must end in _power, _w, or _watts — and not be a rate/speed/flow sensor
-_WATT_SUFFIX = re.compile(
-    r"(^|_)(power|watt|watts|active_power|apparent_power|reactive_power|current_power|"
-    r"consumed_w|consumption_w|output_power|input_power|solar_power|load_power)$"
-)
-
-# Entity ID fragments that are definitely NOT power sensors despite containing keywords
-_EXCLUDE_FRAGMENTS = (
-    "write_rate", "read_rate", "transfer", "throughput",
-    "kvah", "kvarh", "kvar",          # reactive/apparent energy
-    "kwh", "kWh",                      # cumulative energy (not instantaneous)
-    "energy", "consumed_energy",       # cumulative
-    "cost", "price", "tariff",
-    "speed", "rate", "bytes",
-    "voltage", "_v_", "_v$",
-    "current_a", "_a_", "ampere",
-    "frequency", "_hz",
-    "humidity", "temperature", "pressure",
-    "battery", "rssi", "signal",
-)
-
-# Max realistic phantom load for a single device (anything above = sensor error)
-MAX_PHANTOM_W = 500.0
+# Hours considered "idle" — everyone asleep, no active usage
+IDLE_HOURS = {2, 3, 4}
 
 
-def _is_watt_sensor(eid: str, units_map: dict) -> bool:
-    """Return True only if this entity is confirmed to report watts."""
-    # 1. Prefer unit_of_measurement from HA if available
-    uom = units_map.get(eid, "")
-    if uom:
-        return uom == "W"
-    # 2. Fallback: strict suffix matching on entity ID
-    name = eid.split(".")[-1].lower()
-    if any(frag in name for frag in _EXCLUDE_FRAGMENTS):
-        return False
-    return bool(_WATT_SUFFIX.search(name))
-
-
-def cache_watt_entities(states: list) -> None:
-    """Call this at startup with HA states to build a unit_of_measurement cache."""
-    units = {
-        s["entity_id"]: s.get("attributes", {}).get("unit_of_measurement", "")
-        for s in states
-        if s["entity_id"].startswith("sensor.")
-    }
-    try:
-        with open(WATT_ENTITIES_PATH, "w") as f:
-            json.dump(units, f)
-    except Exception as e:
-        log.warning("Could not cache watt entities: %s", e)
-
-
-def _load_units_map() -> dict:
-    try:
-        with open(WATT_ENTITIES_PATH) as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def find_phantom_loads(entity_baselines: dict = None, threshold_w: float = 2.0) -> list:
-    """Find watt sensors that never drop to zero across all 24 hours."""
-    if entity_baselines is None:
-        if not os.path.exists(ENTITY_BASELINES_PATH):
-            return []
-        with open(ENTITY_BASELINES_PATH) as f:
-            entity_baselines = json.load(f)
-    if not entity_baselines:
-        return []
-
-    kwh_price = float(os.environ.get("HABITUS_KWH_PRICE", "0.20"))
-    currency = os.environ.get("HABITUS_CURRENCY", "€")
-    units_map = _load_units_map()
-    results = []
-
-    for eid, bl in entity_baselines.items():
-        if not _is_watt_sensor(eid, units_map):
-            continue
-
-        # Collect mean power per hour
-        hourly_means: dict[int, list[float]] = {}
-        for key, val in bl.items():
-            parts = key.split("_")
-            if len(parts) < 2:
-                continue
-            try:
-                h = int(parts[0])
-            except ValueError:
-                continue
-            mean_val = val.get("mean", 0) if isinstance(val, dict) else float(val)
-            hourly_means.setdefault(h, []).append(float(mean_val))
-
-        if len(hourly_means) < 24:
-            continue
-
-        hour_avgs = {}
-        for h in range(24):
-            vals = hourly_means.get(h, [])
-            if not vals:
-                break
-            hour_avgs[h] = sum(vals) / len(vals)
-
-        if len(hour_avgs) < 24:
-            continue
-
-        min_power = min(hour_avgs.values())
-        avg_power = sum(hour_avgs.values()) / 24
-
-        # Skip: not always-on, or absurdly high (sensor error)
-        if min_power < threshold_w:
-            continue
-        if avg_power > MAX_PHANTOM_W:
-            log.debug("Skipping %s: avg %.1fW exceeds MAX_PHANTOM_W cap", eid, avg_power)
-            continue
-
-        kwh_year = avg_power * 8760 / 1000
-        cost_year = round(kwh_year * kwh_price, 2)
-        name = eid.split(".")[-1].replace("_", " ").title()
-
-        results.append({
-            "entity": eid,
-            "name": name,
-            "avg_phantom_w": round(avg_power, 1),
-            "min_hourly_w": round(min_power, 1),
-            "kwh_year": round(kwh_year, 1),
-            "cost_year": cost_year,
-            "currency": currency,
-        })
-
-    results.sort(key=lambda x: -x["avg_phantom_w"])
-    return results
-
-
-def _get_grid_annual_kwh() -> float | None:
-    """Fetch actual annual grid consumption from HA long-term stats."""
-    import requests as req
-    import datetime, json as _json
-
-    grid_entity = os.environ.get("HABITUS_ENERGY_GRID", "")
+def _fetch_hourly_kwh(entity_id: str, days: int = 60) -> list[dict]:
+    """Return list of {hour: datetime, kwh_delta: float} from HA long-term stats."""
     ha_url = os.environ.get("HA_URL", "http://supervisor/core")
     token = os.environ.get("SUPERVISOR_TOKEN", os.environ.get("HABITUS_HA_TOKEN", ""))
-    if not grid_entity or not token:
-        return None
+    if not entity_id or not token:
+        return []
+    end = datetime.datetime.now(datetime.timezone.utc)
+    start = end - datetime.timedelta(days=days)
     try:
-        end = datetime.datetime.now(datetime.timezone.utc)
-        start = end - datetime.timedelta(days=365)
         r = req.get(
             f"{ha_url}/api/history/period/{start.isoformat()}",
-            params={"filter_entity_id": grid_entity, "end_time": end.isoformat(), "minimal_response": "true"},
+            params={"filter_entity_id": entity_id, "end_time": end.isoformat(), "minimal_response": "true"},
             headers={"Authorization": f"Bearer {token}"},
-            timeout=15,
+            timeout=20,
         )
         if r.status_code != 200:
-            return None
+            log.warning("Grid history fetch failed: %s", r.status_code)
+            return []
         data = r.json()
         if not data or not data[0]:
-            return None
-        states = [s for s in data[0] if s.get("state") not in ("unavailable", "unknown")]
-        if len(states) < 2:
-            return None
-        first = float(states[0]["state"])
-        last = float(states[-1]["state"])
-        return max(0.0, last - first)
+            return []
+        states = [
+            s for s in data[0]
+            if s.get("state") not in ("unavailable", "unknown", None)
+        ]
+        # Build hourly deltas from cumulative kWh
+        rows = []
+        for i in range(1, len(states)):
+            try:
+                prev_v = float(states[i-1]["state"])
+                curr_v = float(states[i]["state"])
+                delta = curr_v - prev_v
+                if delta < 0 or delta > 1000:  # skip resets or wild values
+                    continue
+                ts = states[i].get("last_changed") or states[i].get("last_updated", "")
+                dt = datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                rows.append({"dt": dt, "kwh_delta": round(delta, 4)})
+            except Exception:
+                continue
+        return rows
     except Exception as e:
-        log.debug("Grid annual kWh lookup failed: %s", e)
-        return None
+        log.warning("Grid kWh fetch error: %s", e)
+        return []
 
 
-def save(results: list) -> None:
-    total_w = sum(r["avg_phantom_w"] for r in results)
-    total_kwh = sum(r["kwh_year"] for r in results)
-    kwh_price = float(os.environ.get("HABITUS_KWH_PRICE", "3.0"))
-    currency = os.environ.get("HABITUS_CURRENCY", "kr")
-    total_cost = round(total_kwh * kwh_price, 2)
+def _period_totals(rows: list[dict]) -> dict:
+    """Return kWh totals for: this_week, last_week, this_month, last_month."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    week_start = now - datetime.timedelta(days=now.weekday(), hours=now.hour)
+    last_week_start = week_start - datetime.timedelta(weeks=1)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    last_month_end = month_start
+    last_month_start = (month_start - datetime.timedelta(days=1)).replace(day=1)
 
-    # Validate against actual grid consumption from Energy Dashboard
-    grid_annual_kwh = _get_grid_annual_kwh()
-    grid_annual_cost = round(grid_annual_kwh * kwh_price, 2) if grid_annual_kwh else None
-    phantom_pct = round(100 * total_kwh / grid_annual_kwh, 1) if grid_annual_kwh and grid_annual_kwh > 0 else None
-
-    # Sanity: if phantom total > grid total, something is wrong — cap and warn
-    if grid_annual_kwh and total_kwh > grid_annual_kwh:
-        log.warning(
-            "Phantom kWh (%.0f) exceeds grid total (%.0f) — likely bad sensor data, capping",
-            total_kwh, grid_annual_kwh,
-        )
-        # Rescale results proportionally
-        scale = grid_annual_kwh * 0.5 / total_kwh  # assume max 50% could be phantom
-        for r in results:
-            r["kwh_year"] = round(r["kwh_year"] * scale, 1)
-            r["cost_year"] = round(r["kwh_year"] * kwh_price, 2)
-        total_kwh = sum(r["kwh_year"] for r in results)
-        total_cost = round(total_kwh * kwh_price, 2)
-        phantom_pct = round(100 * total_kwh / grid_annual_kwh, 1) if grid_annual_kwh else None
-
-    payload = {
-        "phantom_loads": results,
-        "total_phantom_w": round(total_w, 1),
-        "total_kwh_year": round(total_kwh, 1),
-        "total_cost_year": total_cost,
-        "currency": currency,
-        "count": len(results),
-        "grid_annual_kwh": round(grid_annual_kwh, 0) if grid_annual_kwh else None,
-        "grid_annual_cost": grid_annual_cost,
-        "phantom_pct_of_bill": phantom_pct,
+    buckets = {
+        "this_week": (week_start, now),
+        "last_week": (last_week_start, week_start),
+        "this_month": (month_start, now),
+        "last_month": (last_month_start, last_month_end),
     }
+    totals = {}
+    for label, (s, e) in buckets.items():
+        total = sum(r["kwh_delta"] for r in rows if s <= r["dt"] < e)
+        totals[label] = round(total, 2)
+    return totals
+
+
+def _phantom_baseline(rows: list[dict]) -> dict:
+    """Phantom = average kWh/hour during idle hours (02-05).
+    
+    Returns avg idle kWh/hour and extrapolated annual kWh.
+    """
+    idle_rows = [r for r in rows if r["dt"].hour in IDLE_HOURS]
+    if not idle_rows:
+        return {"avg_idle_kwh_per_hour": None, "phantom_kwh_year": None}
+    avg = sum(r["kwh_delta"] for r in idle_rows) / len(idle_rows)
+    annual = avg * 8760
+    return {
+        "avg_idle_kwh_per_hour": round(avg, 3),
+        "phantom_kwh_year": round(annual, 1),
+        "idle_hours_sampled": len(idle_rows),
+    }
+
+
+def run() -> dict:
+    """Main entry point — fetch grid kWh, compute periods + phantom baseline."""
+    grid_entity = os.environ.get("HABITUS_ENERGY_GRID", "")
+    if not grid_entity:
+        log.info("No grid entity configured — skipping phantom analysis")
+        return {}
+
+    log.info("Phantom: fetching grid kWh from %s", grid_entity)
+    rows = _fetch_hourly_kwh(grid_entity, days=60)
+    if len(rows) < 48:
+        log.info("Not enough grid data (%d rows) for phantom analysis", len(rows))
+        return {"reason": "insufficient_data", "rows": len(rows)}
+
+    periods = _period_totals(rows)
+    phantom = _phantom_baseline(rows)
+
+    # Week-over-week change
+    wow_delta = None
+    wow_pct = None
+    if periods.get("this_week") is not None and periods.get("last_week"):
+        wow_delta = round(periods["this_week"] - periods["last_week"], 2)
+        wow_pct = round(100 * wow_delta / periods["last_week"], 1) if periods["last_week"] else None
+
+    # Month-over-month change
+    mom_delta = None
+    mom_pct = None
+    if periods.get("this_month") is not None and periods.get("last_month"):
+        mom_delta = round(periods["this_month"] - periods["last_month"], 2)
+        mom_pct = round(100 * mom_delta / periods["last_month"], 1) if periods["last_month"] else None
+
+    result = {
+        "grid_entity": grid_entity,
+        "periods": periods,
+        "wow_delta_kwh": wow_delta,
+        "wow_pct": wow_pct,
+        "mom_delta_kwh": mom_delta,
+        "mom_pct": mom_pct,
+        "phantom": phantom,
+        "idle_hours": sorted(IDLE_HOURS),
+        "data_points": len(rows),
+        "analysed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    return result
+
+
+def save(result: dict) -> None:
     try:
         with open(PHANTOM_PATH, "w") as f:
-            json.dump(payload, f, indent=2)
-        log.info("Phantom loads saved: %d devices found", len(results))
+            json.dump(result, f, indent=2)
+        if result.get("phantom", {}).get("phantom_kwh_year"):
+            log.info(
+                "Phantom baseline: %.3f kWh/idle-hour → %.0f kWh/year",
+                result["phantom"]["avg_idle_kwh_per_hour"],
+                result["phantom"]["phantom_kwh_year"],
+            )
     except Exception as e:
-        log.warning("Could not save phantom loads: %s", e)
-    return payload
+        log.warning("Could not save phantom data: %s", e)
 
 
 def load() -> dict:
@@ -233,3 +171,12 @@ def load() -> dict:
             return json.load(f)
     except Exception:
         return {}
+
+
+# Legacy compat shim
+def find_phantom_loads(*args, **kwargs) -> list:
+    return []
+
+
+def cache_watt_entities(*args, **kwargs) -> None:
+    pass

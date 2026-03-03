@@ -994,44 +994,59 @@ async function load() {
       ${sm[s]?'<span class="badge b-ok">Trained</span>':'<span class="badge b-muted">No data</span>'}
     </div>`).join('');
 
-  // Insights — Phantom Loads
-  const phantomPayload = phantomData && !Array.isArray(phantomData) ? phantomData : {phantom_loads: phantomData || []};
-  const phantomList = phantomPayload.phantom_loads || [];
-  const gridKwh = phantomPayload.grid_annual_kwh;
-  const gridCost = phantomPayload.grid_annual_cost;
-  const phantomPct = phantomPayload.phantom_pct_of_bill;
-  const currency = phantomPayload.currency || 'kr';
+  // Insights — Grid usage periods + phantom baseline (direct from kWh meter, no price math)
+  const pd = phantomData && !Array.isArray(phantomData) ? phantomData : {};
+  const periods = pd.periods || {};
+  const phantom = pd.phantom || {};
+  const wowPct = pd.wow_pct;
+  const momPct = pd.mom_pct;
+
+  function kwhBar(val, max) {
+    const pct = max > 0 ? Math.round(val/max*100) : 0;
+    return `<div class="bar-wrap" style="flex:1"><div class="bar accent" style="width:${pct}%"></div></div>`;
+  }
 
   let phantomHtml = '';
-  if (gridKwh) {
-    phantomHtml += `<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:.8rem;color:var(--text2)">
-      📊 Grid (Energy Dashboard): <strong style="color:var(--text)">${Math.round(gridKwh).toLocaleString()} kWh/year</strong>
-      ${gridCost ? `≈ <strong style="color:var(--text)">${Math.round(gridCost).toLocaleString()} ${currency}</strong>` : ''}
-      ${phantomPct != null ? `· Phantom waste: <strong style="color:var(--amber)">${phantomPct}% of bill</strong>` : ''}
+  if (phantom.phantom_kwh_year) {
+    // Phantom baseline card
+    phantomHtml += `<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:14px">
+      <div style="font-size:.78rem;color:var(--text3);margin-bottom:6px">IDLE BASELINE (02:00–05:00)</div>
+      <div style="display:flex;align-items:baseline;gap:8px">
+        <span style="font-size:1.6rem;font-weight:700;color:var(--amber)">${phantom.avg_idle_kwh_per_hour}</span>
+        <span style="color:var(--text3)">kWh/hour</span>
+        <span style="margin-left:auto;font-size:.82rem;color:var(--text2)">~${Math.round(phantom.phantom_kwh_year)} kWh/year always-on</span>
+      </div>
+      <div style="font-size:.75rem;color:var(--text3);margin-top:4px">Sampled from ${phantom.idle_hours_sampled || '—'} idle-hour readings</div>
     </div>`;
   }
 
-  if (phantomList.length) {
-    const maxKwh = Math.max(...phantomList.map(p=>p.kwh_year), 1);
-    const totalCost = phantomPayload.total_cost_year || phantomList.reduce((s,p)=>s+(p.cost_year||0),0);
-    phantomHtml += `
-      <div style="margin-bottom:14px;font-size:.82rem;color:var(--text2)">
-        ${phantomList.length} always-on devices · <strong style="color:var(--amber)">${Math.round(totalCost).toLocaleString()} ${currency}/year</strong> wasted
-      </div>
-      <table>
-        <thead><tr><th>Device</th><th>Phantom W</th><th>kWh/yr</th><th>${currency}/yr</th><th style="width:100px"></th></tr></thead>
-        <tbody>${phantomList.map(p=>`
-          <tr>
-            <td><div style="font-weight:500">${p.name}</div><div style="font-size:.7rem;color:var(--text3)">${p.entity}</div></td>
-            <td style="font-weight:600;color:var(--amber)">${p.avg_phantom_w}W</td>
-            <td>${p.kwh_year}</td>
-            <td style="color:var(--red)">${Math.round(p.cost_year||0)}</td>
-            <td><div class="bar-wrap"><div class="bar amber" style="width:${Math.round(p.kwh_year/maxKwh*100)}%"></div></div></td>
-          </tr>`).join('')}
-        </tbody>
-      </table>`;
-  } else {
-    phantomHtml += '<div style="color:var(--text3);padding:12px">No phantom loads detected — great! 🎉</div>';
+  // Period comparison table
+  const maxPeriod = Math.max(periods.this_week||0, periods.last_week||0, periods.this_month||0, periods.last_month||0, 1);
+  if (Object.keys(periods).length) {
+    const rows = [
+      ['This week', periods.this_week, wowPct],
+      ['Last week', periods.last_week, null],
+      ['This month', periods.this_month, momPct],
+      ['Last month', periods.last_month, null],
+    ];
+    phantomHtml += `<table>
+      <thead><tr><th>Period</th><th>kWh</th><th>vs previous</th><th style="width:120px"></th></tr></thead>
+      <tbody>${rows.map(([label, val, pct]) => {
+        if (val == null) return '';
+        const arrow = pct == null ? '' : pct > 0
+          ? `<span style="color:var(--red)">↑ ${pct}%</span>`
+          : `<span style="color:var(--green)">↓ ${Math.abs(pct)}%</span>`;
+        return `<tr>
+          <td style="font-weight:500">${label}</td>
+          <td style="font-weight:600;color:var(--text)">${val} kWh</td>
+          <td>${arrow}</td>
+          <td>${kwhBar(val, maxPeriod)}</td>
+        </tr>`;
+      }).join('')}
+      </tbody>
+    </table>`;
+  } else if (!phantom.phantom_kwh_year) {
+    phantomHtml = '<div style="color:var(--text3);padding:12px">Not enough grid data yet — check back after a few days.</div>';
   }
   document.getElementById('phantom-list').innerHTML = phantomHtml;
 
