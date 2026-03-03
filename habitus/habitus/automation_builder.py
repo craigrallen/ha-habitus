@@ -293,8 +293,10 @@ def generate_smart_suggestions(
     # lights/switches/media, generate a motion-triggered automation
     for scene in scenes:
         trigger_entities = [e for e in scene.get("entities", [])
-                          if e.startswith("binary_sensor.") and
-                          any(kw in e.lower() for kw in ("motion", "occupancy", "presence", "pir", "door", "window", "contact", "opening"))]
+                          if (e.startswith("binary_sensor.") and
+                          any(kw in e.lower() for kw in ("motion", "occupancy", "presence", "pir", "door", "window", "contact", "opening")))
+                          or (e.startswith("climate.") and
+                          any(kw in e.lower() for kw in ("heater", "radiator", "thermostat", "heating", "hvac")))]
         action_entities = [e for e in scene.get("entities", [])
                          if not e.startswith(("binary_sensor.", "person.", "device_tracker."))]
         if trigger_entities and action_entities:
@@ -320,6 +322,45 @@ def generate_smart_suggestions(
                     "applicable": True,
                     "entities": action_entities,
                     "trigger": trigger,
+                    "time_pattern": tp,
+                    "yaml": yaml,
+                    "overlap_automation": overlap,
+                    "source": "scene_detector",
+                })
+
+    # ── Heater/climate as presence indicator ──
+    # When someone adjusts a heater/thermostat, it implies they're in that room.
+    # Suggest: "When bedroom heater turns on → turn on bedroom lights"
+    for scene in scenes:
+        climate_triggers = [e for e in scene.get("entities", [])
+                           if e.startswith("climate.") and
+                           any(kw in e.lower() for kw in ("heater", "radiator", "thermostat", "heating", "hvac"))]
+        action_entities = [e for e in scene.get("entities", [])
+                         if e.startswith(("light.", "switch.", "media_player.", "fan."))
+                         and e not in climate_triggers]
+        if climate_triggers and action_entities:
+            tp = scene.get("time_pattern", {})
+            for clim in climate_triggers:
+                clim_name = clim.split(".")[1].replace("_", " ").title()
+                alias = f"Habitus — {clim_name} On → {scene['name']}"
+                yaml = build_motion_automation_yaml(
+                    alias=alias,
+                    description=f"When {clim_name} is adjusted (someone in room), activate {scene['name']}",
+                    trigger_entity=clim,
+                    action_entities=action_entities,
+                    hour_start=tp.get("peak_hour", 16) - 2 if tp.get("peak_hour") else None,
+                    hour_end=tp.get("peak_hour", 23) + 1 if tp.get("peak_hour") else None,
+                )
+                overlap = _entities_overlap(action_entities, ha_automations)
+                suggestions.append({
+                    "id": f"smart_climate_{scene['id']}_{clim.split('.')[-1]}",
+                    "title": f"When {clim_name} activates: set up {scene['name']}",
+                    "description": f"Heater/thermostat change implies presence — auto-activate room scene",
+                    "confidence": min(scene.get("confidence", 50) + 5, 100),
+                    "category": "presence",
+                    "applicable": True,
+                    "entities": action_entities,
+                    "trigger": clim,
                     "time_pattern": tp,
                     "yaml": yaml,
                     "overlap_automation": overlap,

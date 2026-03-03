@@ -31,6 +31,9 @@ MIN_CONFIDENCE = 40
 SCENE_DOMAINS = ("light", "switch", "media_player", "fan", "cover", "climate", "input_boolean")
 # Trigger domains — entities that indicate user presence/activity (used as automation triggers)
 TRIGGER_DOMAINS = ("binary_sensor", "person", "device_tracker")
+# Presence-inferring keywords — state changes on these entities imply someone is in the room
+# (e.g. heater turned up/on → person in that room)
+PRESENCE_HINT_KEYWORDS = ("heater", "radiator", "thermostat", "heating", "climate", "hvac")
 
 
 def _get_state_changes(days: int = 30) -> list[dict[str, Any]]:

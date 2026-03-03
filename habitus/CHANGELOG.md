@@ -50,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Scene detector now mines motion sensors, presence detection, person entities, and device trackers alongside lights/switches/media
 - Motion/presence-triggered automations generated when binary_sensor co-occurs with lights in a scene
+- Heater/thermostat state changes as implicit presence signal — "someone adjusted the bedroom heater → they are in the bedroom"
+- Climate-triggered automations: "when heater turns on, activate room scene"
+- Presence-inferring keywords: heater, radiator, thermostat, heating, climate, hvac
 - Room detection from entity names — matches 30+ room keywords (kitchen, bedroom, wheelhouse, salon, etc.)
 - Boat-specific room keywords (wheelhouse, engine room, salon, cabin, cockpit, foredeck)
 - Fallback room detection via common prefix extraction when no keyword matches
