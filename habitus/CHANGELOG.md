@@ -633,3 +633,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added playful docs easter-egg note (70s/80s/90s references side quest)
 - UI header tagline added: "Built in Europe. Your data stays home."
 
+
+## [3.7.9] - 2026-03-03
+
+### Fixed
+- Full training endpoint now respects Settings → History depth (`days_history`) instead of hardcoded 365 days
+- Training notification now reports the actual selected history window
+- Saving history depth now updates runtime `HABITUS_DAYS`
+

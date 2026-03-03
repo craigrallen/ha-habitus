@@ -2085,18 +2085,29 @@ def api_sensor_health():
 @app.route("/api/full_train", methods=["POST"])
 @app.route("/ingress/api/full_train", methods=["POST"])
 def api_full_train():
-    """Trigger a full 365-day training run without progressive steps."""
+    """Trigger a full training run using configured history depth."""
     import asyncio
     from concurrent.futures import ThreadPoolExecutor
 
     from habitus.main import run
 
+    # Resolve days from user settings first, then env default
+    days = int(os.environ.get("HABITUS_DAYS", "365"))
+    try:
+        st = _read(STATE_PATH) or {}
+        us = st.get("user_settings", {}) if isinstance(st, dict) else {}
+        cfg_days = int(us.get("days_history", days))
+        if 7 <= cfg_days <= 3650:
+            days = cfg_days
+    except Exception:
+        pass
+
     def do_train():
-        asyncio.run(run(days_history=365, mode="full"))
+        asyncio.run(run(days_history=days, mode="full"))
 
     with ThreadPoolExecutor() as pool:
         pool.submit(do_train)
-    return jsonify({"ok": True, "message": "Full 365d training started"})
+    return jsonify({"ok": True, "message": f"Full {days}d training started"})
 
 
 def api_rescan():
@@ -2184,6 +2195,7 @@ def api_settings():
                 days = int(data["days_history"])
                 if 7 <= days <= 3650:
                     settings["days_history"] = days
+                    os.environ["HABITUS_DAYS"] = str(days)
             except (ValueError, TypeError):
                 pass
         if "anonymous_sharing" in data:
