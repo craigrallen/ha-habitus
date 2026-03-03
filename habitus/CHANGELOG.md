@@ -50,6 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Scene detector now mines motion sensors, presence detection, person entities, and device trackers alongside lights/switches/media
 - Motion/presence-triggered automations generated when binary_sensor co-occurs with lights in a scene
+- Appliance fingerprinting (NILM) — detects oven, hob, kettle, washing machine, etc. from power spike signatures
+- Power step detection reads directly from HA SQLite database for speed
+- 12 known appliance signatures with power range, duration, and icon
+- Appliance Detection section in Smart Home tab with event grid and recent events table
 - Door/window sensor triggers — "when front door opens, turn on hallway lights"
 - Person home/away automations — "when Craig leaves, turn everything off" / "when Craig arrives, welcome scene"
 - Door, window, contact, and opening sensor keywords detected as triggers

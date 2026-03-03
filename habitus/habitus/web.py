@@ -641,6 +641,10 @@ pre.raw {
 
   <!-- Insights (moved from old tab) -->
   <div class="sec" style="margin-top:16px">
+    <div class="sec-header"><h2>🔌 Appliance Detection</h2><span class="sec-sub">Devices identified by power signature</span></div>
+    <div id="appliance-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+  </div>
+  <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>📊 Phantom Loads</h2><span class="sec-sub">Devices drawing power 24/7</span></div>
     <div id="phantom-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
   </div>
@@ -1224,6 +1228,40 @@ async function load() {
   }
   document.getElementById('phantom-list').innerHTML = phantomHtml;
 
+  // ── Appliance Fingerprints ──
+  fetch('api/appliance_fingerprints').then(r=>r.json()).catch(()=>({appliances:[],recent_events:[],total_events:0})).then(fp => {
+    const el = document.getElementById('appliance-list');
+    if (!fp.appliances || fp.appliances.length === 0) {
+      el.innerHTML = '<div style="color:var(--text3);padding:12px">No appliance signatures detected yet. Runs after next training cycle.</div>';
+      return;
+    }
+    let html = `<div style="color:var(--text3);font-size:.78rem;margin-bottom:8px">${fp.total_events} power events detected, ${fp.identification_rate}% identified from ${fp.entities_scanned} sensors</div>`;
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px">';
+    fp.appliances.forEach(a => {
+      const peakStr = a.peak_hours ? a.peak_hours.map(h=>`${h}:00`).join(', ') : '—';
+      html += `<div class="card" style="padding:12px">
+        <div style="font-size:1.3rem;margin-bottom:4px">${a.icon} ${a.appliance.replace(/_/g,' ')}</div>
+        <div style="font-size:.82rem;color:var(--text3)">
+          <div><b>${a.avg_power_w}W</b> avg · ${a.event_count} events</div>
+          <div>~${a.avg_duration_min} min each · ${a.daily_avg}/day</div>
+          <div>~${a.est_monthly_kwh} kWh/month</div>
+          <div style="margin-top:4px">Peak: ${peakStr}</div>
+        </div>
+      </div>`;
+    });
+    html += '</div>';
+    if (fp.recent_events && fp.recent_events.length > 0) {
+      html += '<details style="margin-top:12px"><summary style="cursor:pointer;color:var(--accent);font-size:.85rem">Recent events (' + fp.recent_events.length + ')</summary>';
+      html += '<div class="table-wrap"><table><thead><tr><th>Time</th><th>Appliance</th><th>Power</th><th>Duration</th><th>Confidence</th></tr></thead><tbody>';
+      fp.recent_events.slice(0,15).forEach(e => {
+        const t = new Date(e.start).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+        html += `<tr><td>${t}</td><td>${e.icon||'❓'} ${(e.appliance||'unknown').replace(/_/g,' ')}</td><td>${e.power_w}W</td><td>${e.duration_min}min</td><td>${e.confidence||0}%</td></tr>`;
+      });
+      html += '</tbody></table></div></details>';
+    }
+    el.innerHTML = html;
+  });
+
   // Insights — Routine Drift
   if (driftData && driftData.drifts && driftData.drifts.length) {
     const sig = driftData.drifts.filter(d=>d.significant);
@@ -1717,6 +1755,14 @@ def api_ha_automations():
 def api_smart_suggestions():
     """Return merged smart suggestions with confidence, YAML, and overlap info."""
     return jsonify(_read(SMART_SUGGESTIONS_PATH) or {"suggestions": [], "count": 0})
+
+
+@app.route("/api/appliance_fingerprints")
+@app.route("/ingress/api/appliance_fingerprints")
+def api_appliance_fingerprints():
+    """Return detected appliance power signatures."""
+    fp_path = os.path.join(DATA_DIR, "appliance_fingerprints.json")
+    return jsonify(_read(fp_path) or {"appliances": [], "recent_events": [], "total_events": 0})
 
 
 @app.route("/api/entities")
