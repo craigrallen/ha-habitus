@@ -286,6 +286,10 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
             features = features.join(act_features, how="left")
     except Exception as e:
         log.warning("Activity feature extraction failed: %s", e)
+    # Ensure all FEATURE_COLS exist (pad with zeros if activity extraction failed)
+    for col in FEATURE_COLS:
+        if col not in features.columns:
+            features[col] = 0.0
     return features.fillna(0).reset_index()
 
 
