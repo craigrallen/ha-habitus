@@ -50,6 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Scene detector now mines motion sensors, presence detection, person entities, and device trackers alongside lights/switches/media
 - Motion/presence-triggered automations generated when binary_sensor co-occurs with lights in a scene
+- Room detection from entity names — matches 30+ room keywords (kitchen, bedroom, wheelhouse, salon, etc.)
+- Boat-specific room keywords (wheelhouse, engine room, salon, cabin, cockpit, foredeck)
+- Fallback room detection via common prefix extraction when no keyword matches
+- Each scene now includes a `rooms` field for UI grouping
 - Appliance fingerprinting (NILM) — detects oven, hob, kettle, washing machine, etc. from power spike signatures
 - Power step detection reads directly from HA SQLite database for speed
 - 12 known appliance signatures with power range, duration, and icon

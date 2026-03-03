@@ -372,34 +372,96 @@ def _analyze_time_patterns(
     }
 
 
-def _name_scene(entities: set[str], time_info: dict[str, Any]) -> str:
-    """Auto-generate a human-readable scene name from entities and time pattern."""
-    # Extract room names from entity_ids
+# Known room keywords — matched against entity IDs, friendly names, and HA areas
+ROOM_KEYWORDS = [
+    "living_room", "living room", "lounge", "family_room",
+    "bedroom", "master_bedroom", "guest_bedroom", "kids_room",
+    "kitchen", "galley",
+    "bathroom", "bath", "shower", "ensuite",
+    "hallway", "hall", "corridor", "entry", "foyer", "entrance",
+    "office", "study", "den", "workspace",
+    "dining", "dining_room",
+    "garage", "workshop",
+    "garden", "patio", "deck", "terrace", "balcony",
+    "laundry", "utility",
+    "nursery", "playroom",
+    # Boat-specific
+    "wheelhouse", "engine_room", "salon", "saloon", "cabin", "cockpit",
+    "foredeck", "aft_deck", "anchor", "helm",
+]
+
+
+def _extract_room(entity_id: str) -> str | None:
+    """Extract room name from an entity ID using keyword matching.
+
+    Checks the entity name part (after the dot) for known room keywords.
+    Returns the matched room name in title case, or None.
+    """
+    name_part = entity_id.split(".")[-1].lower()
+
+    # Try longest match first (e.g. "living_room" before "room")
+    sorted_keywords = sorted(ROOM_KEYWORDS, key=len, reverse=True)
+    for kw in sorted_keywords:
+        kw_underscore = kw.replace(" ", "_")
+        if kw_underscore in name_part or kw in name_part:
+            return kw.replace("_", " ").title()
+    return None
+
+
+def _extract_rooms_from_entities(entities: set[str]) -> list[str]:
+    """Extract unique room names from a set of entity IDs.
+
+    Uses keyword matching, then falls back to common prefix extraction
+    for entities that don't match any known room.
+    """
     rooms: list[str] = []
-    for eid in entities:
-        # e.g. light.living_room_main -> living room
-        parts = eid.split(".")[1] if "." in eid else eid
-        # Strip common suffixes
-        for suffix in ("_light", "_lamp", "_main", "_ceiling", "_switch", "_plug",
-                       "_media_player", "_fan", "_cover", "_strip", "_dimmer",
-                       "_1", "_2", "_3", "_left", "_right"):
-            parts = parts.replace(suffix, "")
-        room = parts.replace("_", " ").strip()
-        if room and room not in rooms:
+    seen: set[str] = set()
+
+    # Pass 1: keyword matching
+    for eid in sorted(entities):
+        room = _extract_room(eid)
+        if room and room.lower() not in seen:
+            seen.add(room.lower())
             rooms.append(room)
 
-    # Deduplicate rooms (take first 2)
-    unique_rooms = []
-    seen: set[str] = set()
-    for r in rooms:
-        key = r.lower()
-        if key not in seen:
-            seen.add(key)
-            unique_rooms.append(r.title())
-    unique_rooms = unique_rooms[:2]
+    # Pass 2: if no rooms found, try extracting the device/area name
+    # by finding the common prefix among entity name parts
+    if not rooms:
+        name_parts = []
+        for eid in entities:
+            part = eid.split(".")[-1]
+            # Remove numeric suffixes and common generic suffixes
+            for suffix in ("_light", "_lamp", "_main", "_ceiling", "_switch", "_plug",
+                           "_media_player", "_fan", "_cover", "_strip", "_dimmer",
+                           "_sensor", "_motion", "_door", "_window", "_contact",
+                           "_power", "_energy", "_temperature", "_humidity",
+                           "_1", "_2", "_3", "_left", "_right", "_on", "_off"):
+                part = part.removesuffix(suffix)
+            if part:
+                name_parts.append(part)
+
+        if name_parts:
+            # Find most common prefix token
+            from collections import Counter
+            tokens = []
+            for p in name_parts:
+                tokens.extend(p.split("_")[:2])  # first 2 tokens
+            if tokens:
+                common = Counter(tokens).most_common(1)
+                if common and common[0][1] >= 2:
+                    room = common[0][0].replace("_", " ").title()
+                    if room.lower() not in seen and len(room) > 2:
+                        rooms.append(room)
+
+    return rooms[:3]  # Max 3 rooms
+
+
+def _name_scene(entities: set[str], time_info: dict[str, Any]) -> str:
+    """Auto-generate a human-readable scene name from entities and time pattern."""
+    rooms = _extract_rooms_from_entities(entities)
 
     time_label = time_info.get("time_label", "")
-    room_str = " & ".join(unique_rooms) if unique_rooms else "Home"
+    room_str = " & ".join(rooms) if rooms else "Home"
 
     if time_label:
         return f"{time_label} {room_str}"
@@ -474,9 +536,11 @@ def detect_scenes(days: int = 30) -> list[dict[str, Any]]:
             elif domain == "climate":
                 entity_states[eid] = "auto"
 
+        rooms = _extract_rooms_from_entities(set(sorted_entities))
         scene = {
             "id": f"scene_{idx}",
             "name": name,
+            "rooms": rooms,
             "entities": sorted_entities,
             "entity_states": entity_states,
             "confidence": confidence,
