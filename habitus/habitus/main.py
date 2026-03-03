@@ -622,7 +622,7 @@ async def run(days_history: int, mode: str = "full") -> None:
     state.update(
         {
             "last_run": now_iso,
-            "version": os.environ.get("BUILD_VERSION", "?"),
+            "version": os.environ.get("HABITUS_VERSION", os.environ.get("BUILD_VERSION", "?")),
             "data_to": now_iso,
             "training_days": training_days,
             "entity_count": entity_count,

@@ -26,6 +26,7 @@ export HABITUS_DAYS="${DAYS}"
 RESCAN_FLAG="/data/.rescan_requested"
 STATE_FILE="/data/run_state.json"
 
+export HABITUS_VERSION=$(bashio::addon.version 2>/dev/null || echo "?")
 bashio::log.info "Habitus v2.27.0 | Schedule: ${SCHEDULE} | Train: ${TRAIN_TIME} | Scan: ${SCAN}h | Days: ${DAYS}"
 
 cd /app && python3 -u -c "
