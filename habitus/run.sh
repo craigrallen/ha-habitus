@@ -2,6 +2,7 @@
 
 SCAN=$(bashio::config 'scan_interval_hours')
 DAYS=$(bashio::config 'days_history')
+DAYS=$(( DAYS > 365 ? 365 : DAYS ))  # safety cap — prevent OOM on devices with <4GB RAM
 PORT=$(bashio::addon.ingress_port)
 NOTIFY=$(bashio::config 'notify_service')
 NOTIFY_ON=$(bashio::config 'notify_on_anomaly')
@@ -77,35 +78,4 @@ start_web(int(os.environ.get('INGRESS_PORT','8099')))
 
     if [ "$FIRST_RUN" = "true" ]; then
         FIRST_RUN=false
-        bashio::log.info "Progressive training: 30d → 60d → 90d → 180d → ${DAYS}d"
-        python3 -u -c "
-import sys; sys.path.insert(0,'/app')
-from habitus.progressive import start_progressive
-import time
-start_progressive(max_days=int('${DAYS}'))
-# Wait for progressive thread to finish
-from habitus import progressive as p
-while p.is_expanding():
-    time.sleep(5)
-" || bashio::log.warning "Progressive training failed"
-    elif [ "$SCHEDULE" = "overnight" ]; then
-        if is_train_time; then
-            bashio::log.info "Overnight training window"
-            python3 -u -m habitus.main --days "$DAYS" --mode full \
-                || bashio::log.warning "Overnight training failed"
-        else
-            bashio::log.info "Score-only (daytime)"
-            python3 -u -m habitus.main --days "$DAYS" --mode score \
-                || bashio::log.warning "Score run failed"
-        fi
-    else
-        python3 -u -m habitus.main --days "$DAYS" --mode full \
-            || bashio::log.warning "Continuous run failed"
-    fi
-
-    bashio::log.info "Next check in ${SCAN}h"
-    for i in $(seq 1 $(( SCAN * 12 ))); do
-        sleep 300
-        [ -f "$RESCAN_FLAG" ] && break
-    done
-done
+        done
