@@ -15,6 +15,10 @@ log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 ENTITY_BASELINES_PATH = os.path.join(DATA_DIR, "entity_baselines.json")
 ENTITY_ANOMALIES_PATH = os.path.join(DATA_DIR, "entity_anomalies.json")
+ENTITY_LIFECYCLE_PATH = os.path.join(DATA_DIR, "entity_lifecycle.json")
+
+COLD_START_DAYS = 7  # Entities younger than this are exempt from scoring ("learning" phase)
+LOW_SAMPLE_THRESHOLD = 10  # Slots with fewer samples get a widened CI (0.5× z-score weight)
 
 
 def build_entity_baselines(df: pd.DataFrame):
@@ -28,8 +32,15 @@ def build_entity_baselines(df: pd.DataFrame):
     - ``"rate"`` — accumulating sensors; slot mean/std are over hourly deltas.
     - ``"absolute"`` — all other sensors; slot mean/std are over raw values.
 
-    Existing ``_accumulating_state`` (previous readings for delta computation) is
-    preserved across retraining cycles so scoring continuity is not disrupted.
+    Each entity's ``_meta`` block includes:
+    - ``sensor_type``: Classified sensor type (accumulating, binary, gauge, event, setpoint).
+    - ``first_seen``: ISO timestamp of the earliest data point for this entity.  Preserved
+      across retraining cycles so the cold-start window is not reset on every retrain.
+    - ``n_samples``: Total number of data rows used to build this entity's baseline.
+
+    All persisted runtime state keys (``_accumulating_state``, ``_binary_state``,
+    ``_z_score_run``, ``_learning_entities``) are carried over from the existing file so
+    scoring continuity is maintained across retraining cycles.
     """
     if df.empty:
         return
@@ -39,6 +50,13 @@ def build_entity_baselines(df: pd.DataFrame):
     df["hour_of_day"] = df["ts"].dt.hour
     df["day_of_week"] = df["ts"].dt.dayofweek
     df = df.dropna(subset=["v"])
+
+    # Load existing baselines to (a) preserve first_seen timestamps and
+    # (b) carry over all persisted runtime state keys across retraining cycles.
+    existing: dict = {}
+    if os.path.exists(ENTITY_BASELINES_PATH):
+        with contextlib.suppress(json.JSONDecodeError, OSError), open(ENTITY_BASELINES_PATH) as f:
+            existing = json.load(f)
 
     baselines: dict = {}
     for eid, group in df.groupby("entity_id"):
@@ -65,17 +83,25 @@ def build_entity_baselines(df: pd.DataFrame):
                 }
 
         if entity_bl:
-            entity_bl["_meta"] = {"sensor_type": sensor_type}
+            # Derive first_seen from history; preserve an earlier existing timestamp so the
+            # cold-start window is not reset when data is re-fetched over a longer window.
+            first_seen_ts = group["ts"].min().isoformat()
+            existing_meta = existing.get(eid, {}).get("_meta", {})
+            existing_first_seen = existing_meta.get("first_seen", "")
+            if existing_first_seen and existing_first_seen < first_seen_ts:
+                first_seen_ts = existing_first_seen
+
+            entity_bl["_meta"] = {
+                "sensor_type": sensor_type,
+                "first_seen": first_seen_ts,
+                "n_samples": int(len(group)),
+            }
             baselines[eid] = entity_bl
 
-    # Preserve accumulating state from any existing baselines file so that
-    # scoring continuity is maintained across retraining cycles.
-    if os.path.exists(ENTITY_BASELINES_PATH):
-        with contextlib.suppress(json.JSONDecodeError, OSError):
-            with open(ENTITY_BASELINES_PATH) as f:
-                existing = json.load(f)
-            if "_accumulating_state" in existing:
-                baselines["_accumulating_state"] = existing["_accumulating_state"]
+    # Carry over all runtime state keys so they survive a retraining cycle.
+    for state_key in ("_accumulating_state", "_binary_state", "_z_score_run", "_learning_entities"):
+        if state_key in existing:
+            baselines[state_key] = existing[state_key]
 
     with open(ENTITY_BASELINES_PATH, "w") as f:
         json.dump(baselines, f)
@@ -250,6 +276,15 @@ def score_entities(current_states: dict | None = None) -> list:
         entity_ids = [k for k in baselines if not k.startswith("_")]
         current_states = _fetch_current_states(entity_ids)
 
+    # Detect entities present in current HA states but absent from baselines.
+    # These are new entities — record them in entity_lifecycle.json and skip scoring.
+    learning_entities: list[dict] = []
+    new_entity_ids = [
+        eid for eid in current_states if not eid.startswith("_") and eid not in baselines
+    ]
+    if new_entity_ids:
+        _update_entity_lifecycle(new_entity_ids, now)
+
     # Load per-entity accumulating state (stores prev readings for delta computation)
     acc_state: dict = baselines.get("_accumulating_state", {})
     acc_state_updated: dict = dict(acc_state)
@@ -264,6 +299,28 @@ def score_entities(current_states: dict | None = None) -> list:
     for eid, bl in baselines.items():
         if eid.startswith("_"):
             continue  # skip metadata keys (_z_score_run, _accumulating_state, …)
+
+        # Per-entity cold start protection: entities younger than COLD_START_DAYS are
+        # in the "learning" phase and exempt from scoring to avoid false positives.
+        meta = bl.get("_meta", {})
+        first_seen_str = meta.get("first_seen", "")
+        if first_seen_str:
+            with contextlib.suppress(ValueError):
+                first_seen_dt = datetime.datetime.fromisoformat(first_seen_str)
+                if first_seen_dt.tzinfo is not None:
+                    first_seen_dt = first_seen_dt.replace(tzinfo=None)
+                days_old = (now - first_seen_dt).total_seconds() / 86400.0
+                if days_old < COLD_START_DAYS:
+                    learning_entities.append(
+                        {
+                            "entity_id": eid,
+                            "status": "learning",
+                            "first_seen": first_seen_str,
+                            "days_old": round(days_old, 1),
+                        }
+                    )
+                    continue  # Exempt from scoring
+
         if key not in bl:
             continue
         b = bl[key]
@@ -338,6 +395,9 @@ def score_entities(current_states: dict | None = None) -> list:
                     z_dur = (dur_h - avg_dur) / max(avg_dur, 0.1)
 
             z = max(z_expected, z_freq, z_dur)
+            # Low-sample slot: widen CI by halving the z-score weight.
+            if b.get("n", LOW_SAMPLE_THRESHOLD) < LOW_SAMPLE_THRESHOLD:
+                z *= 0.5
             if z < 0.5:
                 continue
 
@@ -414,6 +474,9 @@ def score_entities(current_states: dict | None = None) -> list:
             score_val = val
 
         z = abs(score_val - b["mean"]) / max(b["std"], 0.01)
+        # Low-sample slot: widen CI by halving the z-score weight.
+        if b.get("n", LOW_SAMPLE_THRESHOLD) < LOW_SAMPLE_THRESHOLD:
+            z *= 0.5
         if z < 0.5:
             continue  # not interesting
 
@@ -446,14 +509,16 @@ def score_entities(current_states: dict | None = None) -> list:
             }
         )
 
-    # Persist updated state back to entity_baselines.json
-    if acc_state_changed or bin_state_changed:
-        if acc_state_changed:
-            baselines["_accumulating_state"] = acc_state_updated
-        if bin_state_changed:
-            baselines["_binary_state"] = bin_state_updated
-        with open(ENTITY_BASELINES_PATH, "w") as f:
-            json.dump(baselines, f, indent=2)
+    # Persist updated state back to entity_baselines.json.
+    # Always write to capture the latest learning entity list even when
+    # acc/binary state did not change.
+    baselines["_learning_entities"] = learning_entities
+    if acc_state_changed:
+        baselines["_accumulating_state"] = acc_state_updated
+    if bin_state_changed:
+        baselines["_binary_state"] = bin_state_updated
+    with open(ENTITY_BASELINES_PATH, "w") as f:
+        json.dump(baselines, f, indent=2)
 
     anomalies.sort(key=lambda x: x["z_score"], reverse=True)
     top = anomalies[:20]
@@ -498,12 +563,44 @@ def compute_breakdown(anomaly_score: float, current_states: dict | None = None) 
         "timestamp": datetime.datetime.now().isoformat(),
         "anomaly_score": anomaly_score,
         "top5": top5,
+        "learning_entities": baselines.get("_learning_entities", []),
     }
     with open(ENTITY_BASELINES_PATH, "w") as f:
         json.dump(baselines, f, indent=2)
 
     log.info(f"Anomaly breakdown computed: score={anomaly_score}, top5={len(top5)} entities")
     return top5
+
+
+def _update_entity_lifecycle(new_entity_ids: list[str], now: datetime.datetime) -> None:
+    """Write newly discovered entities to entity_lifecycle.json with status ``"new"``.
+
+    Does not overwrite existing lifecycle entries so previously classified entities
+    retain their state across restarts.  Updates ``last_seen`` for known entities.
+
+    Args:
+        new_entity_ids: Entity IDs present in current HA states but absent from baselines.
+        now: Current datetime used to set ``first_seen`` / ``last_seen`` timestamps.
+    """
+    lifecycle: dict = {}
+    if os.path.exists(ENTITY_LIFECYCLE_PATH):
+        with contextlib.suppress(json.JSONDecodeError, OSError), open(ENTITY_LIFECYCLE_PATH) as f:
+            lifecycle = json.load(f)
+
+    now_iso = now.isoformat()
+    for eid in new_entity_ids:
+        if eid not in lifecycle:
+            lifecycle[eid] = {
+                "status": "new",
+                "first_seen": now_iso,
+                "last_seen": now_iso,
+            }
+        else:
+            lifecycle[eid]["last_seen"] = now_iso
+
+    with open(ENTITY_LIFECYCLE_PATH, "w") as f:
+        json.dump(lifecycle, f, indent=2)
+    log.info(f"Entity lifecycle updated: {len(new_entity_ids)} new entities recorded")
 
 
 def _fetch_current_states(entity_ids: list) -> dict:
