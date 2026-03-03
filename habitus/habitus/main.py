@@ -1040,6 +1040,10 @@ def _publish_sensors(
         training_days: Days of history the model was trained on.
         entity_count: Number of behavioral sensors being tracked.
     """
+    # Respect warmup — never publish a high score during learning
+    if anomaly_score > 0 and training_days < MIN_SCORING_DAYS:
+        anomaly_score = 0
+        is_anomalous = False
     publish(
         "sensor.habitus_anomaly_score",
         anomaly_score,

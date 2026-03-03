@@ -9,15 +9,20 @@ import pandas as pd
 
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
-FEATURE_COLS = [
-    "hour_of_day",
-    "day_of_week",
-    "is_weekend",
-    "month",
-    "total_power_w",
-    "avg_temp_c",
-    "sensor_changes",
-]
+# Import feature columns from main module at runtime to stay in sync
+def _get_feature_cols():
+    try:
+        from habitus.main import FEATURE_COLS as _FC
+        return _FC
+    except ImportError:
+        return [
+            "hour_of_day", "day_of_week", "is_weekend", "month",
+            "total_power_w", "avg_temp_c", "sensor_changes",
+            "lights_on", "motion_events", "presence_count",
+            "people_home_pct", "media_active", "door_events",
+            "outdoor_temp_c", "activity_diversity", "grid_kwh_w",
+            "water_l_per_h", "water_leak", "gas_m3_per_h",
+        ]
 
 SEASONS = {
     "winter": [12, 1, 2],
@@ -42,22 +47,40 @@ def train_seasonal_models(features: pd.DataFrame):
     saved = []
     for season, months in SEASONS.items():
         subset = features[features["month"].isin(months)]
-        if len(subset) < 72:
+        if len(subset) < 48:  # ~2 days minimum per season
             log.info(f"Season {season}: only {len(subset)}h data — skipping")
             continue
-        X = subset[FEATURE_COLS].values
+        X = subset[_get_feature_cols()].values
         scaler = StandardScaler()
         Xs = scaler.fit_transform(X)
         model = IsolationForest(contamination=0.05, random_state=42, n_jobs=-1)
         model.fit(Xs)
-        path = os.path.join(DATA_DIR, f"model_{season}.pkl")
+        mpath = os.path.join(DATA_DIR, f"model_{season}.pkl")
         spath = os.path.join(DATA_DIR, f"scaler_{season}.pkl")
-        with open(path, "wb") as f:
-            pickle.dump(model, f)
-        with open(spath, "wb") as f:
-            pickle.dump(scaler, f)
-        saved.append(season)
-        log.info(f"Season {season}: trained on {len(subset)}h ({len(subset)//24}d)")
+        meta_path = os.path.join(DATA_DIR, f"meta_{season}.json")
+        
+        # Only overwrite if we have MORE data than existing model (extend, don't regress)
+        existing_hours = 0
+        try:
+            import json as _json
+            with open(meta_path) as _mf:
+                existing_hours = _json.load(_mf).get("hours", 0)
+        except Exception:
+            pass
+        
+        if len(subset) >= existing_hours:
+            with open(mpath, "wb") as f:
+                pickle.dump(model, f)
+            with open(spath, "wb") as f:
+                pickle.dump(scaler, f)
+            import json as _json
+            with open(meta_path, "w") as _mf:
+                _json.dump({"hours": len(subset), "days": len(subset) // 24}, _mf)
+            saved.append(season)
+            log.info(f"Season {season}: trained on {len(subset)}h ({len(subset)//24}d)")
+        else:
+            log.info(f"Season {season}: keeping existing model ({existing_hours}h > {len(subset)}h new)")
+            saved.append(season)
     return saved
 
 
@@ -81,7 +104,7 @@ def score_with_best_model(X_raw):
             with open(fallback_s, "rb") as f:
                 scaler = pickle.load(f)
             used = "main"
-        Xs = scaler.transform(X_raw)
+        Xs = scaler.transform(X_raw[:, :len(scaler.mean_)])
         raw = model.score_samples(Xs)[0]
         score = int(max(0, min(100, (-raw + 0.5) * 100)))
         return score, used
