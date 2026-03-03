@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh search repos \"habitus\" --limit 10)",
+      "Bash(gh search repos \"habitus\" --owner craigrallen --limit 10)",
+      "Bash(gh repo view craigrallen/ha-habitus)",
+      "Bash(gh api repos/craigrallen/ha-habitus/contents/ --jq '.[].name')",
+      "Bash(gh api repos/craigrallen/ha-habitus/git/trees/main?recursive=1 --jq '.tree[].path')",
+      "Bash(gh repo clone craigrallen/ha-habitus .)",
+      "Bash(claude --version)",
+      "Bash(ls /c/Users/Widemind/AppData/Local/claude-cli-nodejs/node_modules/.bin/claude*)",
+      "Bash(npx claude --version)",
+      "Bash(pnpm list -g)",
+      "Bash(echo $PATH)",
+      "Bash(npm install -g @anthropic-ai/claude-code)",
+      "Bash(chmod +x \"C:/Users/Widemind/OneDrive/Documents/Claude Code/Habitus/ralph.sh\")",
+      "Bash(pip install -e \".[dev]\" -q)",
+      "Bash(pip install setuptools --upgrade -q)",
+      "Bash(pip install ruff black mypy pytest pytest-cov pytest-asyncio pytest-mock responses freezegun -q)",
+      "Bash(SCRIPTS=\"/c/Users/Widemind/AppData/Local/Python/pythoncore-3.14-64/Scripts\")",
+      "Bash(\"$SCRIPTS/ruff\" --version)",
+      "Bash(\"$SCRIPTS/black\" --version)",
+      "Bash(\"$SCRIPTS/mypy\" --version)",
+      "Bash(\"$SCRIPTS/pytest\" --version)",
+      "Bash(bash ralph.sh 5)",
+      "Bash(export PATH=\"/c/Users/Widemind/AppData/Local/Python/pythoncore-3.14-64/Scripts:$PATH\")",
+      "Bash(pytest --co -q)",
+      "Bash(python -c \"import habitus.habitus.main as m; print\\([c for c in dir\\(m\\) if not c.startswith\\(''_''\\)]\\)\")",
+      "Bash(bash ralph.sh 10)",
+      "Bash(python -c \"import sys; lines=sys.stdin.readlines\\(\\); [print\\(l.strip\\(\\)\\) for l in lines if ''TASK-'' in l]\")",
+      "Bash(python -c \"import sys; lines=sys.stdin.readlines\\(\\); [print\\(l.strip\\(\\)\\) for l in lines if ''collected'' in l]\")",
+      "Bash(unset CLAUDECODE)",
+      "Bash(claude --dangerously-skip-permissions -p \"Say ''hello world'' and nothing else.\")",
+      "Bash(git add .gitignore AGENTS.md CLAUDE.md PRD.md progress.txt ralph.sh .claude/)"
+    ]
+  }
+}

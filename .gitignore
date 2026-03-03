@@ -1,1 +1,6 @@
 habitus/habitus/__pycache__/
+tests/__pycache__/
+.coverage
+*.pyc
+__pycache__/
+
