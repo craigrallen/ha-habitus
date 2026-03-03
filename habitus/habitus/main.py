@@ -249,7 +249,7 @@ def set_progress(phase, done=0, total=0, rows=0, elapsed=0.0, eta=0.0):
                     "total": total,
                     "pct": pct,
                     "rows": rows,
-                    "elapsed_min": round(elapsed / 60, 1, default=str),
+                    "elapsed_min": round(elapsed / 60, 1),
                     "eta_min": round(eta / 60, 1),
                 },
                 f,
