@@ -519,6 +519,7 @@ pre.raw {
   <button onclick="gotoTab('smarthome',this)">Smart Home</button>
   <button onclick="gotoTab('energy',this)">Energy & Patterns</button>
   <button onclick="gotoTab('settings',this)">Settings</button>
+  <button onclick="gotoTab('geek',this)">🔬 Geek</button>
 </nav>
 
 <!-- OVERVIEW -->
@@ -595,13 +596,6 @@ pre.raw {
     <div id="conflicts-list"></div>
   </div>
 
-  <!-- Activity States (HMM) -->
-  <div class="sec" id="hmm-section" style="display:none">
-    <div class="sec-header"><h2>🧩 Activity States</h2><span class="sec-sub">What the home is "doing" right now (HMM)</span></div>
-    <div id="hmm-current" style="margin-bottom:8px"></div>
-    <div id="hmm-states"></div>
-  </div>
-
   <!-- Energy Forecast -->
   <div class="sec" id="forecast-section" style="display:none">
     <div class="sec-header"><h2>⚡ Energy Forecast</h2><span class="sec-sub">Weather-aware 7-day prediction</span></div>
@@ -613,25 +607,6 @@ pre.raw {
   <div class="sec" id="drift-section" style="display:none">
     <div class="sec-header"><h2>📈 Behaviour Drift</h2><span class="sec-sub">Your habits are shifting</span></div>
     <div id="drift-list"></div>
-  </div>
-
-  <!-- Routine Sequences -->
-  <div class="sec" id="sequences-section" style="display:none">
-    <div class="sec-header"><h2>🔄 Routine Sequences</h2><span class="sec-sub">Ordered flows discovered by PrefixSpan</span></div>
-    <div id="sequences-list"></div>
-  </div>
-
-  <!-- Next-Action Predictions (Markov) -->
-  <div class="sec" id="markov-section" style="display:none">
-    <div class="sec-header"><h2>🎯 Next-Action Predictions</h2><span class="sec-sub">What you probably do next (Markov chain)</span></div>
-    <div id="markov-list"></div>
-  </div>
-
-  <!-- Deep Correlations -->
-  <div class="sec" id="correlations-section" style="display:none">
-    <div class="sec-header"><h2>🔗 Discovered Correlations</h2><span class="sec-sub">Patterns mined from all sensor data</span></div>
-    <div id="corr-stats" style="font-size:.8rem;color:var(--text3);margin-bottom:8px"></div>
-    <div id="correlations-list"></div>
   </div>
 
   <!-- Room Predictions -->
@@ -838,6 +813,94 @@ pre.raw {
         <span class="al-icon">☕</span>
         <div><div style="font-weight:600;color:var(--amber)">Buy Me a Coffee</div><div style="font-size:.72rem;color:var(--text3)">If Habitus is useful, consider supporting it</div></div>
       </a>
+    </div>
+  </div>
+</div>
+
+<!-- GEEK TAB -->
+<div id="tab-geek" class="tab">
+  <!-- Activity States (HMM) -->
+  <div class="sec" id="hmm-section" style="display:none">
+    <div class="sec-header"><h2>🧩 Activity States (HMM)</h2><span class="sec-sub">Hidden Markov Model — what the home is "doing"</span></div>
+    <div id="hmm-current" style="margin-bottom:8px"></div>
+    <div id="hmm-states"></div>
+  </div>
+
+  <!-- Routine Sequences -->
+  <div class="sec" id="sequences-section" style="display:none">
+    <div class="sec-header"><h2>🔄 Routine Sequences (PrefixSpan)</h2><span class="sec-sub">Ordered event flows mined from history</span></div>
+    <div id="sequences-list"></div>
+  </div>
+
+  <!-- Next-Action Predictions (Markov) -->
+  <div class="sec" id="markov-section" style="display:none">
+    <div class="sec-header"><h2>🎯 Next-Action Predictions (Markov)</h2><span class="sec-sub">Transition probabilities between actions</span></div>
+    <div id="markov-list"></div>
+  </div>
+
+  <!-- Deep Correlations -->
+  <div class="sec" id="correlations-section" style="display:none">
+    <div class="sec-header"><h2>🔗 Deep Correlations</h2><span class="sec-sub">Statistically significant entity relationships</span></div>
+    <div id="corr-stats" style="font-size:.8rem;color:var(--text3);margin-bottom:8px"></div>
+    <div id="correlations-list"></div>
+  </div>
+
+  <!-- Device Training Mode -->
+  <div class="sec">
+    <div class="sec-header"><h2>🎓 Device Training</h2><span class="sec-sub">Teach Habitus your appliances by turning them on</span></div>
+    <div id="training-ui">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+        <select id="train-power-entity" style="flex:1;min-width:200px;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:.85rem">
+          <option value="">Select power sensor...</option>
+        </select>
+      </div>
+      <div id="train-idle">
+        <p style="font-size:.82rem;color:var(--text3);margin:0 0 8px">1. Select your main power sensor<br>2. Click Start → turn on ONE device → Click Stop<br>3. Name it → fingerprint saved</p>
+        <button class="btn btn-accent" onclick="startTraining()">▶️ Start Recording</button>
+      </div>
+      <div id="train-recording" style="display:none">
+        <div class="card" style="padding:12px;border-left:3px solid var(--amber);margin-bottom:8px">
+          <b>🔴 Recording...</b> Turn on your device now.
+          <div style="font-size:.8rem;color:var(--text3)" id="train-baseline">Baseline: --</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="text" id="train-device-name" placeholder="Device name (e.g., Hob Ring 1)" style="flex:1;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:.85rem">
+          <button class="btn btn-accent" onclick="stopTraining()">⏹ Stop & Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Custom signatures list -->
+    <div id="custom-sigs" style="margin-top:12px"></div>
+  </div>
+
+  <!-- Anomaly Feedback Stats -->
+  <div class="sec">
+    <div class="sec-header"><h2>📊 Anomaly Feedback</h2><span class="sec-sub">Your confirmations improve the model</span></div>
+    <div id="feedback-stats"></div>
+    <div style="margin-top:8px">
+      <label style="font-size:.82rem;color:var(--text3);cursor:pointer">
+        <input type="checkbox" id="sharing-toggle" onchange="toggleSharing(this.checked)">
+        Share anonymised anomaly data to improve Habitus for everyone
+      </label>
+      <div style="font-size:.72rem;color:var(--text3);margin-top:4px">Only entity domains, scores, and feedback actions are shared. No names, IPs, or identifying info.</div>
+    </div>
+  </div>
+
+  <!-- History Depth -->
+  <div class="sec">
+    <div class="sec-header"><h2>📅 Analysis History Depth</h2></div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <select id="history-depth" style="background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:.85rem" onchange="saveHistoryDepth()">
+        <option value="30">30 days</option>
+        <option value="90">90 days</option>
+        <option value="180">6 months</option>
+        <option value="365">1 year</option>
+        <option value="730">2 years</option>
+        <option value="1095">3 years</option>
+        <option value="3650">All history (max 10 years)</option>
+      </select>
+      <span style="font-size:.78rem;color:var(--text3)">More history = longer training but richer patterns</span>
     </div>
   </div>
 </div>
@@ -1473,6 +1536,44 @@ async function load() {
     el.innerHTML = html;
   });
 
+  // ── Device Training ──
+  fetch('api/power_sensors').then(r=>r.json()).catch(()=>({sensors:[]})).then(ps => {
+    const sel = document.getElementById('train-power-entity');
+    if (ps.sensors) ps.sensors.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.entity_id || s;
+      opt.textContent = s.entity_id || s;
+      sel.appendChild(opt);
+    });
+  });
+  fetch('api/custom_signatures').then(r=>r.json()).catch(()=>({signatures:[]})).then(cs => {
+    const el = document.getElementById('custom-sigs');
+    if (!cs.signatures || cs.signatures.length === 0) { el.innerHTML='<div style="color:var(--text3);font-size:.8rem">No custom signatures yet. Train your first device above.</div>'; return; }
+    el.innerHTML = '<div style="font-size:.85rem;margin-bottom:6px"><b>Trained Devices</b></div>' + cs.signatures.map(s => `
+      <div class="card" style="padding:8px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">
+        <div><b>${s.name}</b> — ${s.peak_delta_w}W peak, ${s.avg_delta_w}W avg, ${s.shape}, ${s.duration_min}min</div>
+        <button class="btn" style="font-size:.7rem;padding:2px 6px" onclick="deleteSignature('${s.name}')">🗑</button>
+      </div>
+    `).join('');
+  });
+
+  // ── Anomaly Feedback Stats ──
+  fetch('api/feedback_stats').then(r=>r.json()).catch(()=>({stats:{}})).then(fb => {
+    const el = document.getElementById('feedback-stats');
+    const s = fb.stats || {};
+    el.innerHTML = `<div class="card" style="padding:10px">
+      Confirmed: <b>${s.confirmed||0}</b> · Dismissed: <b>${s.dismissed||0}</b> · Total: ${s.total||0}
+      ${fb.false_positive_entities && fb.false_positive_entities.length ? '<br><span style="font-size:.78rem;color:var(--amber)">Auto-widened bands for: ' + fb.false_positive_entities.join(', ') + '</span>' : ''}
+    </div>`;
+    if (fb.sharing_enabled) document.getElementById('sharing-toggle').checked = true;
+  });
+
+  // ── History Depth ──
+  fetch('api/settings').then(r=>r.json()).catch(()=>({settings:{}})).then(s => {
+    const d = (s.settings||{}).days_history || 30;
+    document.getElementById('history-depth').value = String(d);
+  });
+
   // ── Predicted Routines ──
   fetch('api/routines').then(r=>r.json()).catch(()=>({routines:[]})).then(rd => {
     const el = document.getElementById('routines-list');
@@ -1627,6 +1728,48 @@ async function load() {
     </div>`;
 }
 
+function startTraining(){
+  const entity = document.getElementById('train-power-entity').value;
+  if(!entity){toast('Select a power sensor first','err');return;}
+  fetch('api/training/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({power_entity:entity})})
+    .then(r=>r.json()).then(d=>{
+      document.getElementById('train-idle').style.display='none';
+      document.getElementById('train-recording').style.display='';
+      document.getElementById('train-baseline').textContent='Baseline: '+(d.baseline_w||0).toFixed(0)+'W';
+      toast('Recording started — turn on your device now');
+    }).catch(()=>toast('Failed to start training','err'));
+}
+function stopTraining(){
+  const name = document.getElementById('train-device-name').value;
+  if(!name){toast('Enter a device name','err');return;}
+  fetch('api/training/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_name:name})})
+    .then(r=>r.json()).then(d=>{
+      document.getElementById('train-idle').style.display='';
+      document.getElementById('train-recording').style.display='none';
+      if(d.error){toast(d.error,'err');}else{toast(`Saved: ${d.name} — ${d.peak_delta_w}W peak, ${d.shape} shape`);}
+    }).catch(()=>toast('Failed to save','err'));
+}
+function deleteSignature(name){
+  fetch('api/custom_signatures/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})})
+    .then(r=>r.json()).then(()=>{toast('Deleted');location.reload();});
+}
+function toggleSharing(enabled){
+  fetch('api/sharing',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})})
+    .then(()=>toast(enabled?'Anonymous sharing enabled':'Sharing disabled'));
+}
+function saveHistoryDepth(){
+  const days = parseInt(document.getElementById('history-depth').value);
+  fetch('api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({days_history:days})})
+    .then(()=>toast(`History depth set to ${days} days. Retrain to apply.`));
+}
+function anomalyFeedback(id, action, entityId, score){
+  fetch('api/anomaly_feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({anomaly_id:id,action,entity_id:entityId,score})})
+    .then(r=>r.json()).then(d=>{
+      toast(action==='confirmed'?'✅ Confirmed — model will learn':'❌ Dismissed — widening normal band');
+      const btn = document.getElementById('fb-'+id);
+      if(btn) btn.innerHTML='<span style="color:var(--text3)">'+( action==='confirmed'?'✅':'❌')+'</span>';
+    });
+}
 function doRefresh(){load();toast('Refreshed ✓');}
 
 function confirmRescan(){
@@ -1895,6 +2038,15 @@ def api_settings():
         if "power_entity" in data:
             settings["power_entity"] = data["power_entity"]
             os.environ["HABITUS_POWER_ENTITY"] = data["power_entity"]
+        if "days_history" in data:
+            try:
+                days = int(data["days_history"])
+                if 7 <= days <= 3650:
+                    settings["days_history"] = days
+            except (ValueError, TypeError):
+                pass
+        if "anonymous_sharing" in data:
+            settings["anonymous_sharing"] = bool(data["anonymous_sharing"])
         state["user_settings"] = settings
         try:
             with open(state_path, "w") as f:
@@ -1991,6 +2143,84 @@ def api_smart_suggestions():
     """Return merged smart suggestions with confidence, YAML, and overlap info."""
     return jsonify(_read(SMART_SUGGESTIONS_PATH) or {"suggestions": [], "count": 0})
 
+
+@app.route("/api/anomaly_feedback", methods=["POST"])
+@app.route("/ingress/api/anomaly_feedback", methods=["POST"])
+def api_anomaly_feedback():
+    """Record user feedback on an anomaly."""
+    from .feedback import record_feedback, get_feedback_stats
+    data = request.get_json() or {}
+    action = data.get("action", "dismissed")
+    entry = record_feedback(
+        anomaly_id=data.get("anomaly_id", ""),
+        action=action,
+        entity_id=data.get("entity_id", ""),
+        score=data.get("score", 0),
+        details=data.get("details", ""),
+    )
+    return jsonify({"ok": True, "entry": entry, "stats": get_feedback_stats()["stats"]})
+
+@app.route("/api/feedback_stats")
+@app.route("/ingress/api/feedback_stats")
+def api_feedback_stats():
+    from .feedback import get_feedback_stats
+    return jsonify(get_feedback_stats())
+
+@app.route("/api/anonymous_export")
+@app.route("/ingress/api/anonymous_export")
+def api_anonymous_export():
+    from .feedback import get_anonymous_export
+    data = get_anonymous_export()
+    if data is None:
+        return jsonify({"error": "Anonymous sharing is disabled"}), 403
+    return jsonify(data)
+
+@app.route("/api/sharing", methods=["POST"])
+@app.route("/ingress/api/sharing", methods=["POST"])
+def api_sharing():
+    from .feedback import set_sharing
+    data = request.get_json() or {}
+    set_sharing(data.get("enabled", False))
+    return jsonify({"ok": True})
+
+@app.route("/api/training/start", methods=["POST"])
+@app.route("/ingress/api/training/start", methods=["POST"])
+def api_training_start():
+    from .device_trainer import start_training_session
+    data = request.get_json() or {}
+    entity = data.get("power_entity", "")
+    if not entity:
+        return jsonify({"error": "power_entity required"}), 400
+    return jsonify(start_training_session(entity))
+
+@app.route("/api/training/stop", methods=["POST"])
+@app.route("/ingress/api/training/stop", methods=["POST"])
+def api_training_stop():
+    from .device_trainer import stop_training_session
+    data = request.get_json() or {}
+    name = data.get("device_name", "Unknown Device")
+    category = data.get("category", "custom")
+    return jsonify(stop_training_session(name, category))
+
+@app.route("/api/training/status")
+@app.route("/ingress/api/training/status")
+def api_training_status():
+    from .device_trainer import get_training_status
+    return jsonify(get_training_status())
+
+@app.route("/api/custom_signatures")
+@app.route("/ingress/api/custom_signatures")
+def api_custom_signatures():
+    from .device_trainer import list_custom_signatures
+    return jsonify({"signatures": list_custom_signatures()})
+
+@app.route("/api/custom_signatures/delete", methods=["POST"])
+@app.route("/ingress/api/custom_signatures/delete", methods=["POST"])
+def api_delete_signature():
+    from .device_trainer import delete_signature
+    data = request.get_json() or {}
+    ok = delete_signature(data.get("name", ""))
+    return jsonify({"ok": ok})
 
 @app.route("/api/sequences")
 @app.route("/ingress/api/sequences")

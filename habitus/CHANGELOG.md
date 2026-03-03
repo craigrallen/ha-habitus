@@ -542,3 +542,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New API endpoints: `/api/sequences`, `/api/markov`, `/api/activity_states`, `/api/energy_forecast`, `/api/dynamic`
 - UI: Activity States, Energy Forecast, Behaviour Drift, Routine Sequences, Next-Action Predictions sections
 - New dependencies: `prefixspan`, `hmmlearn`, `ruptures`
+
+## [3.6.0] - 2026-03-03
+
+### Added
+- **Geek tab** — advanced ML analysis moved here (HMM, PrefixSpan, Markov, Correlations)
+- **Anomaly feedback system** — confirm/dismiss anomalies to train the model
+  - Confirmed anomalies tighten detection; dismissed widen the "normal" band
+  - Per-entity stats: frequently dismissed entities auto-widen thresholds
+- **Anonymous data sharing** (opt-in) — share anonymised anomaly data to improve for everyone
+  - Only entity domains, scores, and feedback actions; no names/IPs/identifying info
+- **Device training mode** — teach Habitus your specific appliances
+  - Select power sensor → Start recording → Turn on device → Stop → Name it
+  - Captures power profile, shape, peak/avg watts, inrush detection
+  - Custom signatures saved alongside generic fingerprints
+- **Configurable history depth** — settings option to go back across ALL HA database history
+  - Options: 30d / 90d / 6mo / 1yr / 2yr / 3yr / all (max 10 years)
+  - More history = richer patterns but longer training
+- Energy Forecast and Behaviour Drift sections moved to Smart Home tab (user-facing)
+
+### Changed
+- Smart Home tab: cleaner layout with forecast + drift + predictions + conflicts
+- Geek tab: ML models (HMM, PrefixSpan, Markov, Correlations) + Device Training + Feedback
