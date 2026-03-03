@@ -624,6 +624,74 @@ pre.raw {
     <pre class="raw" id="raw-state">Loading...</pre>
   </div>
   <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>Power Source</h2></div>
+    <p style="color:var(--text3);font-size:.8rem;margin:0 0 12px">Habitus auto-detects your main power sensor. Override it here if the wrong one was selected.</p>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <select id="power-sensor-select" style="flex:1;min-width:200px;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:.85rem">
+        <option value="">Loading sensors…</option>
+      </select>
+      <button class="btn btn-accent" onclick="savePowerSensor()" style="white-space:nowrap">Save &amp; Retrain</button>
+    </div>
+    <div id="power-sensor-status" style="margin-top:8px;font-size:.78rem;color:var(--text3)"></div>
+  </div>
+
+  <script>
+  (function(){
+    async function loadPowerSensors(){
+      const sel = document.getElementById('power-sensor-select');
+      const status = document.getElementById('power-sensor-status');
+      try {
+        const r = await fetch('api/power_sensors');
+        const d = await r.json();
+        sel.innerHTML = '';
+        if (d.sensors.length === 0) {
+          sel.innerHTML = '<option value="">No watt sensors found</option>';
+          return;
+        }
+        d.sensors.forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = s.entity_id;
+          opt.textContent = `${s.name} (${s.current_w}W)`;
+          if (s.entity_id === d.selected) opt.selected = true;
+          sel.appendChild(opt);
+        });
+        if (d.selected) {
+          status.textContent = `Auto-detected: ${d.selected}`;
+        }
+      } catch(e) {
+        sel.innerHTML = '<option value="">Error loading sensors</option>';
+      }
+    }
+    window.savePowerSensor = async function(){
+      const sel = document.getElementById('power-sensor-select');
+      const status = document.getElementById('power-sensor-status');
+      const eid = sel.value;
+      if (!eid) return;
+      status.textContent = 'Saving…';
+      try {
+        const r = await fetch('api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({power_entity: eid})});
+        const d = await r.json();
+        if (d.ok) {
+          status.textContent = `✓ Saved: ${eid} — triggering retrain…`;
+          status.style.color = 'var(--green)';
+          setTimeout(async () => {
+            await fetch('api/rescan', {method:'POST'});
+            status.textContent = `✓ Saved: ${eid} — retraining started`;
+          }, 500);
+        } else {
+          status.textContent = `Error: ${d.error}`;
+          status.style.color = 'var(--red)';
+        }
+      } catch(e) {
+        status.textContent = `Error: ${e}`;
+        status.style.color = 'var(--red)';
+      }
+    };
+    loadPowerSensors();
+  })();
+  </script>
+
+  <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>About</h2></div>
     <div class="about-links">
       <a class="about-link" href="https://github.com/craigrallen/ha-habitus" target="_blank">
@@ -1196,6 +1264,60 @@ def api_rescan():
 def api_training_status():
     return jsonify({"running": _trainer.is_running()})
 
+
+
+@app.route("/api/power_sensors")
+@app.route("/ingress/api/power_sensors")
+def api_power_sensors():
+    """Return all watt sensors from HA, plus current selection."""
+    import requests as req
+    ha_url = os.environ.get("HA_URL", "http://supervisor/core")
+    token = os.environ.get("SUPERVISOR_TOKEN", os.environ.get("HABITUS_HA_TOKEN", ""))
+    current = os.environ.get("HABITUS_POWER_ENTITY", "")
+    try:
+        r = req.get(f"{ha_url}/api/states", headers={"Authorization": f"Bearer {token}"}, timeout=8)
+        sensors = []
+        for s in r.json():
+            eid = s["entity_id"]
+            uom = s["attributes"].get("unit_of_measurement", "")
+            if uom == "W" and eid.startswith("sensor."):
+                try:
+                    val = float(s["state"])
+                    sensors.append({"entity_id": eid, "name": s["attributes"].get("friendly_name", eid), "current_w": round(val, 1)})
+                except Exception:
+                    pass
+        sensors.sort(key=lambda x: -x["current_w"])
+        return jsonify({"sensors": sensors, "selected": current, "auto_detected": current})
+    except Exception as e:
+        return jsonify({"error": str(e), "sensors": [], "selected": current})
+
+
+@app.route("/api/settings", methods=["GET", "POST"])
+@app.route("/ingress/api/settings", methods=["GET", "POST"])
+def api_settings():
+    """Get or update user-overridable settings (persisted to state.json)."""
+    state_path = os.path.join(os.environ.get("DATA_DIR", "/data"), "state.json")
+    try:
+        with open(state_path) as f:
+            state = json.load(f)
+    except Exception:
+        state = {}
+    settings = state.get("user_settings", {})
+
+    if request.method == "POST":
+        data = request.get_json() or {}
+        if "power_entity" in data:
+            settings["power_entity"] = data["power_entity"]
+            os.environ["HABITUS_POWER_ENTITY"] = data["power_entity"]
+        state["user_settings"] = settings
+        try:
+            with open(state_path, "w") as f:
+                json.dump(state, f)
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+        return jsonify({"ok": True, "settings": settings})
+
+    return jsonify({"settings": settings})
 
 @app.route("/api/add_automation", methods=["POST"])
 @app.route("/ingress/api/add_automation", methods=["POST"])

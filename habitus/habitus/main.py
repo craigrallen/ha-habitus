@@ -722,6 +722,17 @@ async def run(days_history: int, mode: str = "full") -> None:
             await _register_lovelace_card()
             return
 
+    # Load user-overridden settings from state.json (persist across restarts)
+    _state_path = os.path.join(DATA_DIR, "state.json")
+    try:
+        with open(_state_path) as _sf:
+            _saved = json.load(_sf).get("user_settings", {})
+        if _saved.get("power_entity") and not os.environ.get("HABITUS_POWER_ENTITY"):
+            os.environ["HABITUS_POWER_ENTITY"] = _saved["power_entity"]
+            log.info("Loaded saved power entity from settings: %s", _saved["power_entity"])
+    except Exception:
+        pass
+
     # Auto-detect energy entities from HA Energy Dashboard
     if not os.environ.get("HABITUS_POWER_ENTITY") and not os.environ.get("HABITUS_ENERGY_GRID"):
         energy = await get_energy_entities()
