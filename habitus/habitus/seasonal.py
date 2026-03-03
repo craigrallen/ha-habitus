@@ -140,7 +140,7 @@ def train_seasonal_models(features: pd.DataFrame) -> list[str]:
             with open(spath, "wb") as f:
                 pickle.dump(scaler, f)
             with open(meta_path, "w") as _mf:
-                json.dump({"hours": len(subset), "days": len(subset) // 24}, _mf)
+                json.dump({"hours": len(subset, default=str), "days": len(subset) // 24}, _mf)
             bundle_models[season] = model
             bundle_scalers[season] = scaler
             log.info(f"Season {season}: trained on {len(subset)}h ({len(subset) // 24}d)")

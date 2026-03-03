@@ -533,7 +533,7 @@ def save(result):
     """Save gap analysis to disk."""
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(GAP_PATH, "w") as f:
-        json.dump(result, f, indent=2)
+        json.dump(result, f, indent=2, default=str)
     log.info(
         "automation_gap: saved %d gaps — %s",
         len(result.get("gaps", [])),

@@ -234,7 +234,7 @@ def load_state():
 def save_state(state):
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(STATE_PATH, "w") as f:
-        json.dump(state, f, indent=2)
+        json.dump(state, f, indent=2, default=str)
 
 
 def set_progress(phase, done=0, total=0, rows=0, elapsed=0.0, eta=0.0):
@@ -249,7 +249,7 @@ def set_progress(phase, done=0, total=0, rows=0, elapsed=0.0, eta=0.0):
                     "total": total,
                     "pct": pct,
                     "rows": rows,
-                    "elapsed_min": round(elapsed / 60, 1),
+                    "elapsed_min": round(elapsed / 60, 1, default=str),
                     "eta_min": round(eta / 60, 1),
                 },
                 f,
@@ -498,7 +498,7 @@ def save_artifacts(model, scaler, features):
             "n_samples": len(g),
         }
     with open(BASELINE_PATH, "w") as f:
-        json.dump(baseline, f)
+        json.dump(baseline, f, default=str)
     log.info(f"Artifacts saved ({os.path.getsize(MODEL_PATH)//1024}KB model)")
 
 

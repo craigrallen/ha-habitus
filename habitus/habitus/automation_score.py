@@ -199,7 +199,7 @@ def save(results: list) -> None:
     """Save automation scores to disk."""
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(SCORES_PATH, "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(results, f, indent=2, default=str)
     log.info("Automation scores saved: %d automations scored", len(results))
 
 

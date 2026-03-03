@@ -243,7 +243,7 @@ def _persist_data_quality(issues: list[dict]) -> None:
         existing[issue["entity_id"]] = issue
 
     with open(dq_path, "w") as f:
-        json.dump(list(existing.values()), f, indent=2)
+        json.dump(list(existing.values(, default=str)), f, indent=2)
     log.info("Data quality report updated: %d issue(s)", len(existing))
 
 
@@ -380,7 +380,7 @@ def build_entity_baselines(df: pd.DataFrame):
             baselines[state_key] = existing[state_key]
 
     with open(ENTITY_BASELINES_PATH, "w") as f:
-        json.dump(baselines, f)
+        json.dump(baselines, f, default=str)
     log.info(f"Entity baselines saved for {len(baselines)} entities")
 
 
@@ -853,7 +853,7 @@ def score_entities(current_states: dict | None = None) -> list:
     if bin_state_changed:
         baselines["_binary_state"] = bin_state_updated
     with open(ENTITY_BASELINES_PATH, "w") as f:
-        json.dump(baselines, f, indent=2)
+        json.dump(baselines, f, indent=2, default=str)
 
     anomalies.sort(key=lambda x: x["z_score"], reverse=True)
     top = anomalies[:20]
@@ -861,7 +861,7 @@ def score_entities(current_states: dict | None = None) -> list:
     weighted_score = compute_weighted_score(top)
     with open(ENTITY_ANOMALIES_PATH, "w") as f:
         json.dump(
-            {"timestamp": now.isoformat(), "weighted_score": weighted_score, "anomalies": top},
+            {"timestamp": now.isoformat(, default=str), "weighted_score": weighted_score, "anomalies": top},
             f,
             indent=2,
         )
@@ -906,7 +906,7 @@ def compute_breakdown(anomaly_score: float, current_states: dict | None = None) 
         "learning_entities": baselines.get("_learning_entities", []),
     }
     with open(ENTITY_BASELINES_PATH, "w") as f:
-        json.dump(baselines, f, indent=2)
+        json.dump(baselines, f, indent=2, default=str)
 
     log.info(f"Anomaly breakdown computed: score={anomaly_score}, top5={len(top5)} entities")
     return top5
@@ -939,7 +939,7 @@ def _update_entity_lifecycle(new_entity_ids: list[str], now: datetime.datetime) 
             lifecycle[eid]["last_seen"] = now_iso
 
     with open(ENTITY_LIFECYCLE_PATH, "w") as f:
-        json.dump(lifecycle, f, indent=2)
+        json.dump(lifecycle, f, indent=2, default=str)
     log.info(f"Entity lifecycle updated: {len(new_entity_ids)} new entities recorded")
 
 

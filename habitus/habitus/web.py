@@ -1479,7 +1479,7 @@ def api_settings():
         state["user_settings"] = settings
         try:
             with open(state_path, "w") as f:
-                json.dump(state, f)
+                json.dump(state, f, default=str)
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
         return jsonify({"ok": True, "settings": settings})

@@ -313,7 +313,7 @@ def build_activity_baseline(activity_features: pd.DataFrame) -> dict[str, Any]:
             baseline[key] = slot
 
     with open(ACTIVITY_BASELINE_PATH, "w") as f:
-        json.dump(baseline, f, indent=2)
+        json.dump(baseline, f, indent=2, default=str)
 
     log.info(
         "Activity baseline saved — %d time slots, %d feature types",
@@ -397,7 +397,7 @@ def score_activity_anomalies(current_states: dict[str, float] | None = None) -> 
     }
 
     with open(ACTIVITY_ANOMALIES_PATH, "w") as f:
-        json.dump(result, f, indent=2)
+        json.dump(result, f, indent=2, default=str)
 
     return result
 

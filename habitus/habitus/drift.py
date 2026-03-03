@@ -151,7 +151,7 @@ def save(data: dict) -> None:
     """Save drift results to disk."""
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(DRIFT_PATH, "w") as f:
-        json.dump(data, f, indent=2)
+        json.dump(data, f, indent=2, default=str)
     log.info("Drift analysis saved: %s", data.get("summary", ""))
 
 

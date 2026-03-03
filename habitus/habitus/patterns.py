@@ -771,9 +771,9 @@ def run(
     patterns = discover_patterns(features)
     suggestions = generate_suggestions(patterns, features, stat_ids)
     with open(PATTERNS_PATH, "w") as f:
-        json.dump(patterns, f, indent=2)
+        json.dump(patterns, f, indent=2, default=str)
     with open(SUGGESTIONS_PATH, "w") as f:
-        json.dump(suggestions, f, indent=2)
+        json.dump(suggestions, f, indent=2, default=str)
     log.info(
         f"Patterns saved — {len(suggestions)} suggestions ({sum(1 for s in suggestions if s['applicable'])} applicable)"
     )
