@@ -1316,7 +1316,10 @@ def index():
 @app.route("/api/state")
 @app.route("/ingress/api/state")
 def api_state():
-    return jsonify(_read(STATE_PATH) or {})
+    import os
+    data = _read(STATE_PATH) or {}
+    data["version"] = os.environ.get("HABITUS_VERSION", "?")
+    return jsonify(data)
 
 
 @app.route("/api/baseline")
