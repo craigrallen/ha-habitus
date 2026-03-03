@@ -19,7 +19,9 @@ import websockets
 
 from . import activity as activity_engine
 from . import anomaly_breakdown, automation_gap, automation_score, drift, phantom, seasonal
-from . import appliance_fingerprint, automation_builder, conflict_detector, correlation_engine, ha_areas, room_predictor, routine_predictor, scene_detector
+from . import (activity_hmm, appliance_fingerprint, automation_builder, conflict_detector,
+                correlation_engine, dynamic_automations, energy_forecast, ha_areas,
+                markov_chain, room_predictor, routine_predictor, scene_detector, sequence_miner)
 from . import patterns as pattern_engine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -1170,6 +1172,44 @@ async def run(days_history: int, mode: str = "full") -> None:
                 except Exception as e:
                     log.warning("Correlation analysis failed: %s", e)
 
+                log.info("Running sequence mining (PrefixSpan)...")
+                try:
+                    area_data3 = ha_areas._load_cache()
+                    e2a3 = area_data3.get("entity_to_area", {})
+                    sequence_miner.mine_sequences(e2a3, days=min(days_history, 30))
+                except Exception as e:
+                    log.warning("Sequence mining failed: %s", e)
+
+                log.info("Running Markov chain next-action model...")
+                try:
+                    area_data4 = ha_areas._load_cache()
+                    e2a4 = area_data4.get("entity_to_area", {})
+                    markov_chain.build_markov_model(e2a4, days=min(days_history, 30))
+                except Exception as e:
+                    log.warning("Markov chain failed: %s", e)
+
+                log.info("Running HMM activity state model...")
+                try:
+                    area_data5 = ha_areas._load_cache()
+                    e2a5 = area_data5.get("entity_to_area", {})
+                    activity_hmm.train_activity_model(e2a5, days=min(days_history, 30))
+                except Exception as e:
+                    log.warning("HMM activity model failed: %s", e)
+
+                log.info("Running energy forecast...")
+                try:
+                    energy_forecast.run_energy_forecast(days_history=min(days_history, 90))
+                except Exception as e:
+                    log.warning("Energy forecast failed: %s", e)
+
+                log.info("Running dynamic automation analysis...")
+                try:
+                    area_data6 = ha_areas._load_cache()
+                    e2a6 = area_data6.get("entity_to_area", {})
+                    dynamic_automations.run_dynamic_analysis(e2a6, days=min(days_history, 30))
+                except Exception as e:
+                    log.warning("Dynamic automation analysis failed: %s", e)
+
                 log.info("Running appliance fingerprinting...")
                 try:
                     appliance_fingerprint.run_fingerprinting(days=min(days_history, 30))
@@ -1310,6 +1350,40 @@ async def run(days_history: int, mode: str = "full") -> None:
                 correlation_engine.run_correlation_analysis(e2a2, days=min(days_history, 30))
             except Exception as e:
                 log.warning("Correlation analysis failed: %s", e)
+
+            log.info("Running sequence mining (PrefixSpan)...")
+            try:
+                e2a_sm = ha_areas._load_cache().get("entity_to_area", {})
+                sequence_miner.mine_sequences(e2a_sm, days=min(days_history, 30))
+            except Exception as e:
+                log.warning("Sequence mining failed: %s", e)
+
+            log.info("Running Markov chain next-action model...")
+            try:
+                e2a_mk = ha_areas._load_cache().get("entity_to_area", {})
+                markov_chain.build_markov_model(e2a_mk, days=min(days_history, 30))
+            except Exception as e:
+                log.warning("Markov chain failed: %s", e)
+
+            log.info("Running HMM activity state model...")
+            try:
+                e2a_hm = ha_areas._load_cache().get("entity_to_area", {})
+                activity_hmm.train_activity_model(e2a_hm, days=min(days_history, 30))
+            except Exception as e:
+                log.warning("HMM activity model failed: %s", e)
+
+            log.info("Running energy forecast...")
+            try:
+                energy_forecast.run_energy_forecast(days_history=min(days_history, 90))
+            except Exception as e:
+                log.warning("Energy forecast failed: %s", e)
+
+            log.info("Running dynamic automation analysis...")
+            try:
+                e2a_da = ha_areas._load_cache().get("entity_to_area", {})
+                dynamic_automations.run_dynamic_analysis(e2a_da, days=min(days_history, 30))
+            except Exception as e:
+                log.warning("Dynamic automation analysis failed: %s", e)
 
             log.info("Running appliance fingerprinting...")
             try:

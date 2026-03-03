@@ -7,3 +7,6 @@ flask
 pyyaml
 aiohttp
 mlxtend
+prefixspan
+hmmlearn
+ruptures

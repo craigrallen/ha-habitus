@@ -595,6 +595,38 @@ pre.raw {
     <div id="conflicts-list"></div>
   </div>
 
+  <!-- Activity States (HMM) -->
+  <div class="sec" id="hmm-section" style="display:none">
+    <div class="sec-header"><h2>🧩 Activity States</h2><span class="sec-sub">What the home is "doing" right now (HMM)</span></div>
+    <div id="hmm-current" style="margin-bottom:8px"></div>
+    <div id="hmm-states"></div>
+  </div>
+
+  <!-- Energy Forecast -->
+  <div class="sec" id="forecast-section" style="display:none">
+    <div class="sec-header"><h2>⚡ Energy Forecast</h2><span class="sec-sub">Weather-aware 7-day prediction</span></div>
+    <div id="forecast-summary" style="margin-bottom:8px"></div>
+    <div id="forecast-days"></div>
+  </div>
+
+  <!-- Behaviour Drift -->
+  <div class="sec" id="drift-section" style="display:none">
+    <div class="sec-header"><h2>📈 Behaviour Drift</h2><span class="sec-sub">Your habits are shifting</span></div>
+    <div id="drift-list"></div>
+  </div>
+
+  <!-- Routine Sequences -->
+  <div class="sec" id="sequences-section" style="display:none">
+    <div class="sec-header"><h2>🔄 Routine Sequences</h2><span class="sec-sub">Ordered flows discovered by PrefixSpan</span></div>
+    <div id="sequences-list"></div>
+  </div>
+
+  <!-- Next-Action Predictions (Markov) -->
+  <div class="sec" id="markov-section" style="display:none">
+    <div class="sec-header"><h2>🎯 Next-Action Predictions</h2><span class="sec-sub">What you probably do next (Markov chain)</span></div>
+    <div id="markov-list"></div>
+  </div>
+
   <!-- Deep Correlations -->
   <div class="sec" id="correlations-section" style="display:none">
     <div class="sec-header"><h2>🔗 Discovered Correlations</h2><span class="sec-sub">Patterns mined from all sensor data</span></div>
@@ -1080,6 +1112,93 @@ async function load() {
     ? smartSuggestions.suggestions : suggestions;
   allSuggestions = smartSugList;
   renderSuggestions();
+
+  // ── Activity States (HMM) ──
+  fetch('api/activity_states').then(r=>r.json()).catch(()=>({states:[]})).then(h => {
+    const sec = document.getElementById('hmm-section');
+    if (!h.states || h.states.length === 0) { sec.style.display='none'; return; }
+    sec.style.display='';
+    const icons = {sleeping:'😴',away:'🚶',cooking:'🍳',working:'💻',relaxing:'📺',morning_routine:'☀️',active:'🏃',idle:'🏠'};
+    document.getElementById('hmm-current').innerHTML = `<div class="card" style="padding:12px;border-left:3px solid var(--accent)">
+      <b>Current state:</b> ${icons[h.current_state]||'❓'} <b>${(h.current_state||'unknown').replace('_',' ')}</b>
+      (${h.method}) · ${h.total_windows} hourly windows analysed
+      ${h.next_state_predictions ? '<br>Next likely: ' + h.next_state_predictions.slice(0,3).map(p => `${icons[p.state]||''} ${p.state} (${Math.round(p.probability*100)}%)`).join(', ') : ''}
+    </div>`;
+    document.getElementById('hmm-states').innerHTML = h.states.map(s => `
+      <div class="card" style="padding:8px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">
+        <div>${icons[s.label]||'❓'} <b>${s.label.replace('_',' ')}</b></div>
+        <div style="font-size:.8rem;color:var(--text3)">${s.percentage}% of time · peaks: ${s.peak_hours.map(h=>h+':00').join(', ')} · ${s.avg_motion.toFixed(0)} motion · ${s.avg_lights.toFixed(0)} lights</div>
+      </div>
+    `).join('');
+  });
+
+  // ── Energy Forecast ──
+  fetch('api/energy_forecast').then(r=>r.json()).catch(()=>({forecast:[]})).then(ef => {
+    const sec = document.getElementById('forecast-section');
+    if (!ef.forecast || ef.forecast.length === 0) { sec.style.display='none'; return; }
+    sec.style.display='';
+    const trendIcon = ef.trend === 'up' ? '📈' : ef.trend === 'down' ? '📉' : '➡️';
+    const tc = ef.temperature_correlation;
+    document.getElementById('forecast-summary').innerHTML = `<div class="card" style="padding:12px">
+      ${trendIcon} Weekly forecast: <b>${ef.weekly_total_kwh} kWh</b> (recent avg: ${ef.recent_weekly_avg_kwh} kWh)
+      · Model: ${ef.model_type} · ${ef.training_days} days training
+      ${tc ? `<br>🌡️ Temp correlation: ${tc.coefficient} (${tc.interpretation})` : ''}
+    </div>`;
+    document.getElementById('forecast-days').innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px">
+      ${ef.forecast.map(d => `<div class="card" style="padding:8px;text-align:center">
+        <div style="font-size:.75rem;color:var(--text3)">${d.day_name}</div>
+        <div style="font-size:1.2rem;font-weight:bold">${d.predicted_kwh}</div>
+        <div style="font-size:.7rem;color:var(--text3)">±${d.uncertainty_kwh} kWh</div>
+        <div style="font-size:.65rem;color:var(--text3)">${d.low_kwh}–${d.high_kwh}</div>
+      </div>`).join('')}
+    </div>`;
+  });
+
+  // ── Behaviour Drift ──
+  fetch('api/dynamic').then(r=>r.json()).catch(()=>({drifts:[]})).then(da => {
+    const sec = document.getElementById('drift-section');
+    if (!da.drifts || da.drifts.length === 0) { sec.style.display='none'; return; }
+    sec.style.display='';
+    document.getElementById('drift-list').innerHTML = da.drifts.slice(0,10).map(d => `
+      <div class="card" style="padding:10px;margin-bottom:6px;border-left:3px solid ${d.shift_minutes>0?'var(--accent)':'var(--blue)'}">
+        <div style="display:flex;justify-content:space-between">
+          <b>${d.name}</b> <span style="font-size:.75rem">${d.room||''}</span>
+        </div>
+        <div style="font-size:.82rem;color:var(--text3)">${d.description}</div>
+        <div style="font-size:.72rem;color:var(--accent);margin-top:2px">${d.confidence}% confident · suggestion: shift to ${d.recent_avg_time}</div>
+      </div>
+    `).join('');
+  });
+
+  // ── Routine Sequences ──
+  fetch('api/sequences').then(r=>r.json()).catch(()=>({sequences:[]})).then(sq => {
+    const sec = document.getElementById('sequences-section');
+    if (!sq.sequences || sq.sequences.length === 0) { sec.style.display='none'; return; }
+    sec.style.display='';
+    document.getElementById('sequences-list').innerHTML = sq.sequences.slice(0,15).map(s => `
+      <div class="card" style="padding:10px;margin-bottom:6px">
+        <div style="display:flex;justify-content:space-between">
+          <div style="font-size:.85rem"><b>${s.description}</b></div>
+          <span style="font-size:.72rem;color:var(--accent)">${s.support}× (${s.frequency_pct}%)</span>
+        </div>
+        <div style="font-size:.72rem;color:var(--text3);margin-top:2px">${s.rooms.join(', ')} · ${s.length} steps · ${s.category}</div>
+      </div>
+    `).join('');
+  });
+
+  // ── Markov Predictions ──
+  fetch('api/markov').then(r=>r.json()).catch(()=>({predictions:[]})).then(mk => {
+    const sec = document.getElementById('markov-section');
+    if (!mk.predictions || mk.predictions.length === 0) { sec.style.display='none'; return; }
+    sec.style.display='';
+    document.getElementById('markov-list').innerHTML = mk.predictions.slice(0,15).map(p => `
+      <div class="card" style="padding:10px;margin-bottom:6px">
+        <div style="font-size:.85rem">${p.description}</div>
+        <div style="font-size:.78rem;color:var(--accent);margin-top:4px">💬 "${p.suggestion}"</div>
+        <div style="font-size:.7rem;color:var(--text3);margin-top:2px">${p.total_observations} observations · ${Math.round(p.probability*100)}% probability</div>
+      </div>
+    `).join('');
+  });
 
   // ── Deep Correlations ──
   fetch('api/correlations').then(r=>r.json()).catch(()=>({suggestions:[]})).then(cd => {
@@ -1872,6 +1991,31 @@ def api_smart_suggestions():
     """Return merged smart suggestions with confidence, YAML, and overlap info."""
     return jsonify(_read(SMART_SUGGESTIONS_PATH) or {"suggestions": [], "count": 0})
 
+
+@app.route("/api/sequences")
+@app.route("/ingress/api/sequences")
+def api_sequences():
+    return jsonify(_read(os.path.join(DATA_DIR, "sequences.json")) or {"sequences": []})
+
+@app.route("/api/markov")
+@app.route("/ingress/api/markov")
+def api_markov():
+    return jsonify(_read(os.path.join(DATA_DIR, "markov_model.json")) or {"predictions": []})
+
+@app.route("/api/activity_states")
+@app.route("/ingress/api/activity_states")
+def api_activity_states():
+    return jsonify(_read(os.path.join(DATA_DIR, "activity_states.json")) or {"states": []})
+
+@app.route("/api/energy_forecast")
+@app.route("/ingress/api/energy_forecast")
+def api_energy_forecast():
+    return jsonify(_read(os.path.join(DATA_DIR, "energy_forecast.json")) or {"forecast": []})
+
+@app.route("/api/dynamic")
+@app.route("/ingress/api/dynamic")
+def api_dynamic():
+    return jsonify(_read(os.path.join(DATA_DIR, "dynamic_automations.json")) or {"drifts": []})
 
 @app.route("/api/correlations")
 @app.route("/ingress/api/correlations")

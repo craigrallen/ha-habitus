@@ -527,3 +527,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - IsolationForest anomaly detection on hourly behavioral snapshots
 - HA add-on with ingress web UI
 - MIT license
+
+## [3.5.0] - 2026-03-03
+
+### Added
+- **PrefixSpan sequence mining** — discovers ordered routines (hallway → kitchen → kettle → coffee)
+- **Markov chain next-action prediction** — "you just turned on X, want me to do Y?" (pure Python)
+- **Hidden Markov Model activity states** — home knows it's "sleeping", "cooking", "relaxing" etc (hmmlearn)
+- **Weather-aware energy forecasting** — 7-day kWh prediction with Gaussian Process uncertainty bands
+- **Dynamic automations** — detects timing drift ("evening routine shifted 30 min later"), calendar-aware
+- **Behaviour drift detection** — z-score based, shows when habits are shifting
+- **Calendar integration** — reads HA calendar entities to predict schedule impacts
+- **Temperature-energy correlation analysis** — "colder days = more energy" quantified
+- New API endpoints: `/api/sequences`, `/api/markov`, `/api/activity_states`, `/api/energy_forecast`, `/api/dynamic`
+- UI: Activity States, Energy Forecast, Behaviour Drift, Routine Sequences, Next-Action Predictions sections
+- New dependencies: `prefixspan`, `hmmlearn`, `ruptures`
