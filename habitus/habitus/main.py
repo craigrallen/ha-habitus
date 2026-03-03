@@ -400,6 +400,102 @@ def publish(entity_id, state, attributes=None):
         log.error(f"Publish {entity_id}: {e}")
 
 
+def persistent_notification(notif_id: str, title: str, message: str) -> None:
+    """Create or update a HA persistent notification (appears in bell icon everywhere)."""
+    headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
+    try:
+        # Clear old notification first
+        requests.post(
+            f"{HA_URL}/api/services/persistent_notification/dismiss",
+            headers=headers,
+            json={"notification_id": notif_id},
+            timeout=5,
+        )
+        requests.post(
+            f"{HA_URL}/api/services/persistent_notification/create",
+            headers=headers,
+            json={
+                "notification_id": notif_id,
+                "title": title,
+                "message": message,
+            },
+            timeout=5,
+        )
+        log.info(f"Persistent notification updated: {notif_id}")
+    except Exception as e:
+        log.warning(f"Persistent notification failed: {e}")
+
+
+def publish_dashboard_entities(
+    anomaly_score: int,
+    entity_anomalies: list,
+    suggestions: list,
+) -> None:
+    """Publish text sensors + persistent notifications so anomalies/suggestions
+    surface automatically on any HA dashboard without user interaction."""
+    # 1. Text sensors (usable in markdown/entities cards)
+    top_anomaly = entity_anomalies[0]["description"] if entity_anomalies else "None detected"
+    publish(
+        "sensor.habitus_top_anomaly",
+        top_anomaly[:255],
+        {"friendly_name": "Habitus Top Anomaly", "icon": "mdi:alert-circle-outline"},
+    )
+    for i, s in enumerate(suggestions[:3], 1):
+        publish(
+            f"sensor.habitus_suggestion_{i}",
+            s.get("title", "")[:255],
+            {
+                "friendly_name": f"Habitus Suggestion {i}",
+                "description": s.get("description", ""),
+                "icon": "mdi:lightbulb-outline",
+            },
+        )
+
+    # 2. Persistent notification — always visible in HA bell icon
+    if anomaly_score >= 40:
+        lines = [f"**Score: {anomaly_score}/100**"]
+        if entity_anomalies:
+            lines.append("\n**Anomalies:**")
+            for a in entity_anomalies[:3]:
+                lines.append(f"- {a['description']}")
+        if suggestions:
+            lines.append("\n**Suggested automations:**")
+            for s in suggestions[:3]:
+                lines.append(f"- {s.get('title','')}")
+        lines.append("\n[Open Habitus](/hassio/ingress/57582523_habitus)")
+        persistent_notification(
+            "habitus_anomaly",
+            "🧠 Habitus — Unusual Activity",
+            "\n".join(lines),
+        )
+    else:
+        # Score normal — clear any previous anomaly notification
+        headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
+        try:
+            requests.post(
+                f"{HA_URL}/api/services/persistent_notification/dismiss",
+                headers=headers,
+                json={"notification_id": "habitus_anomaly"},
+                timeout=5,
+            )
+        except Exception:
+            pass
+
+    # 3. Always update suggestions notification so user sees new ideas
+    if suggestions:
+        lines = ["**Habitus found automation opportunities:**\n"]
+        for s in suggestions[:5]:
+            lines.append(f"**{s.get('title','')}**")
+            lines.append(s.get("description", ""))
+            lines.append("")
+        lines.append("[Review in Habitus](/hassio/ingress/57582523_habitus)")
+        persistent_notification(
+            "habitus_suggestions",
+            "💡 Habitus — Automation Ideas",
+            "\n".join(lines),
+        )
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 async def run(days_history: int, mode: str = "full") -> None:
     """Main Habitus run loop — fetch, train (if needed), score, publish.
@@ -650,6 +746,16 @@ async def run(days_history: int, mode: str = "full") -> None:
         send_notification("🧠 Habitus — Unusual Activity", "\n".join(msg_parts))
 
     _publish_sensors(anomaly_score, is_anomalous, training_days, entity_count)
+
+    # Surface anomalies and suggestions on the HA dashboard automatically
+    try:
+        suggestions = (
+            json.loads(open(SUGGESTIONS_PATH).read()) if os.path.exists(SUGGESTIONS_PATH) else []
+        )
+    except Exception:
+        suggestions = []
+    publish_dashboard_entities(anomaly_score, entity_anomalies, suggestions)
+
     log.info("Done.")
 
 
