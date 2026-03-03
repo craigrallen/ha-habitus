@@ -32,6 +32,7 @@ THRESHOLD = int(os.environ.get("HABITUS_ANOMALY_THRESHOLD", "70"))
 
 MODEL_PATH = os.path.join(DATA_DIR, "model.pkl")
 SCALER_PATH = os.path.join(DATA_DIR, "scaler.pkl")
+SUGGESTIONS_PATH = os.path.join(DATA_DIR, "suggestions.json")
 BASELINE_PATH = os.path.join(DATA_DIR, "baseline.json")
 STATE_PATH = os.path.join(DATA_DIR, "run_state.json")
 PROGRESS_PATH = os.path.join(DATA_DIR, "progress.json")
