@@ -282,9 +282,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     power = df[
         df["entity_id"].str.contains("consumed_w|watt|power|inverter|load", case=False, na=False)
     ].copy()
-    power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(
-        upper=1_000_000
-    )  # cap at 1MW — filters bad sensors
+    power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(lower=0, upper=25_000)  # cap 25kW max
     total_power = power.groupby("hour")["v"].sum().rename("total_power_w")
     temp = df[df["entity_id"].str.contains("temperature", case=False, na=False)].copy()
     temp["v"] = pd.to_numeric(temp["mean"], errors="coerce")
