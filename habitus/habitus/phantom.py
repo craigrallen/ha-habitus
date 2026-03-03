@@ -143,8 +143,8 @@ async def _run_async() -> dict:
     this_month_kwh = next((m["kwh"] for m in months_data if m["month"] == current_month), 0)
     last_month_kwh = next((m["kwh"] for m in months_data if m["month"] == last_month), 0)
     
-    # Get hourly data for phantom baseline calculation
-    hourly = await _fetch_hourly_statistics(grid_entity, 60)
+    # Get hourly data for overnight baseline (last 30 days only — recent behavior)
+    hourly = await _fetch_hourly_statistics(grid_entity, 30)
     phantom_info = {}
     if hourly:
         # Filter to idle hours and calculate average
@@ -160,10 +160,10 @@ async def _run_async() -> dict:
             avg_idle = sum(idle_changes) / len(idle_changes)
             phantom_info = {
                 "avg_idle_kwh_per_hour": round(avg_idle, 3),
-                "phantom_kwh_year": round(avg_idle * 8760, 0),
+                "overnight_kwh_year": round(avg_idle * 8760, 0),
                 "idle_hours_sampled": len(idle_changes),
             }
-            log.info("Phantom baseline: %.3f kWh/idle-hour → %.0f kWh/year", avg_idle, avg_idle * 8760)
+            log.info("Overnight baseline: %.3f kWh/idle-hour → %.0f kWh/year", avg_idle, avg_idle * 8760)
     
     result = {
         "grid_entity": grid_entity,
@@ -173,7 +173,7 @@ async def _run_async() -> dict:
         "last_month_kwh": last_month_kwh,
         "mom_delta_kwh": round(this_month_kwh - last_month_kwh, 1) if last_month_kwh else None,
         "mom_pct": round(100 * (this_month_kwh - last_month_kwh) / last_month_kwh, 1) if last_month_kwh else None,
-        "phantom": phantom_info,
+        "overnight_baseline": phantom_info,
         "idle_hours": sorted(IDLE_HOURS),
         "analysed_at": now.isoformat(),
     }

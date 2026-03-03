@@ -997,7 +997,7 @@ async function load() {
   // Insights — Energy Dashboard stats (same data HA shows)
   const pd = phantomData && !Array.isArray(phantomData) ? phantomData : {};
   const months = pd.months || [];
-  const phantom = pd.phantom || {};
+  const phantom = pd.overnight_baseline || {};
   const total12mo = pd.total_12mo_kwh || 0;
   const momPct = pd.mom_pct;
 
@@ -1020,17 +1020,17 @@ async function load() {
   }
 
   // Phantom baseline card
-  if (phantom.phantom_kwh_year) {
-    const phantomPct = total12mo > 0 ? Math.round(100 * phantom.phantom_kwh_year / total12mo) : null;
+  if (phantom.overnight_kwh_year) {
+    const phantomPct = total12mo > 0 ? Math.round(100 * phantom.overnight_kwh_year / total12mo) : null;
     phantomHtml += `<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:14px">
-      <div style="font-size:.78rem;color:var(--text3);margin-bottom:6px">IDLE BASELINE (02:00–05:00)</div>
+      <div style="font-size:.78rem;color:var(--text3);margin-bottom:6px">OVERNIGHT BASELINE (02:00–05:00)</div>
       <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
         <span style="font-size:1.4rem;font-weight:700;color:var(--amber)">${phantom.avg_idle_kwh_per_hour}</span>
         <span style="color:var(--text3)">kWh/hour</span>
-        <span style="color:var(--text2)">→ ${Math.round(phantom.phantom_kwh_year).toLocaleString()} kWh/year</span>
+        <span style="color:var(--text2)">→ ${Math.round(phantom.overnight_kwh_year).toLocaleString()} kWh/year</span>
         ${phantomPct ? `<span style="color:var(--amber)">(${phantomPct}% of usage)</span>` : ''}
       </div>
-      <div style="font-size:.75rem;color:var(--text3);margin-top:4px">Always-on devices: fridge, router, standby, etc.</div>
+      <div style="font-size:.75rem;color:var(--text3);margin-top:4px">Typical overnight draw when on shore power</div>
     </div>`;
   }
 
@@ -1048,7 +1048,7 @@ async function load() {
         </tr>`).join('')}
       </tbody>
     </table>`;
-  } else if (!phantom.phantom_kwh_year) {
+  } else if (!phantom.overnight_kwh_year) {
     phantomHtml = '<div style="color:var(--text3);padding:12px">No Energy Dashboard stats available yet.</div>';
   }
   document.getElementById('phantom-list').innerHTML = phantomHtml;
