@@ -243,7 +243,7 @@ def _persist_data_quality(issues: list[dict]) -> None:
         existing[issue["entity_id"]] = issue
 
     with open(dq_path, "w") as f:
-        json.dump(list(existing.values(, default=str)), f, indent=2)
+        json.dump(list(existing.values()), f, indent=2, default=str)
     log.info("Data quality report updated: %d issue(s)", len(existing))
 
 
