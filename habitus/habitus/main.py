@@ -24,6 +24,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("habitus")
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
+HA_WS_URL = (
+    os.environ.get("HABITUS_HA_URL", "http://supervisor/core")
+    .replace("http://", "ws://")
+    .replace("https://", "wss://") + "/api/websocket"
+)
 HA_URL = os.environ.get("HA_URL", "http://supervisor/core")
 HA_WS = os.environ.get("HA_WS", "ws://supervisor/core/api/websocket")
 HA_TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
@@ -287,6 +292,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     _energy_grid = os.environ.get("HABITUS_ENERGY_GRID", "").strip()
     _energy_rates = [e for e in os.environ.get("HABITUS_ENERGY_RATES", "").split(",") if e]
 
+    grid_kwh_w = pd.Series(dtype=float, name="grid_kwh_w")  # init before branches
     if _power_entity:
         # Explicit override — use as-is (watts)
         power = df[df["entity_id"] == _power_entity].copy()
