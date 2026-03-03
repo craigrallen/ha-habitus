@@ -709,17 +709,14 @@ pre.raw {
 <!-- PROGRESS OVERLAY -->
 <div id="prog-overlay" class="prog-overlay" style="display:none">
   <div class="prog-box">
-    <div class="prog-icon" id="prog-icon">📡</div>
-    <div class="prog-title" id="prog-title">Training in progress</div>
-    <div class="prog-desc" id="prog-desc">Fetching sensor history from Home Assistant</div>
-    <div class="prog-bar-wrap"><div class="prog-bar" id="prog-bar" style="width:0%"></div></div>
-    <div class="prog-meta" id="prog-meta"></div>
-    <div class="prog-steps">
-      <div class="prog-step" id="ps-fetching">📡 Fetch</div>
-      <div class="prog-step" id="ps-building_baselines">🗄️ Baselines</div>
-      <div class="prog-step" id="ps-training">🧠 Train</div>
-      <div class="prog-step" id="ps-seasonal_training">🌱 Seasonal</div>
-      <div class="prog-step" id="ps-pattern_analysis">🔍 Patterns</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <span id="prog-icon">📡</span>
+      <span id="prog-title" style="font-weight:600">Training</span>
+      <button onclick="document.getElementById('prog-overlay').style.display='none'" style="margin-left:auto;background:none;border:none;color:var(--text3);cursor:pointer;font-size:1.1rem">×</button>
+    </div>
+    <div id="prog-desc" style="color:var(--text2);font-size:.78rem;margin-bottom:6px">Fetching...</div>
+    <div class="prog-bar-wrap" style="height:4px;background:var(--card2);border-radius:2px;overflow:hidden">
+      <div class="prog-bar" id="prog-bar" style="width:0%;height:100%;background:var(--accent);transition:width .3s"></div>
     </div>
   </div>
 </div>
