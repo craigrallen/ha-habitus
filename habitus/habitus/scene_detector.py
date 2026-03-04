@@ -120,14 +120,13 @@ def _get_state_changes(days: int = 30) -> list[dict[str, Any]]:
 
 def _find_co_occurrences(
     changes: list[dict[str, Any]], window_s: int = CO_OCCURRENCE_WINDOW
-) -> dict[tuple[str, ...], list[dict[str, Any]]]:
+) -> dict[tuple[str, str], list[float]]:
     """Find groups of entities that change state within the same time window.
 
-    Uses a sliding window approach: for each state change, find all other
-    changes within window_s seconds.
+    Uses a two-pointer sliding window to avoid rescanning the full tail of
+    activations for every event.
 
-    Returns dict mapping frozenset of entity_ids to list of occurrence dicts
-    with timestamp and states.
+    Returns dict mapping entity pairs to occurrence timestamps.
     """
     if not changes:
         return {}
@@ -139,25 +138,32 @@ def _find_co_occurrences(
     if len(activations) < 2:
         return {}
 
-    # Build time-bucketed groups
     pair_occurrences: dict[tuple[str, str], list[float]] = defaultdict(list)
 
-    # Sliding window: for each activation, look ahead within window
+    # Track current window [i, end) with monotonically increasing end pointer.
+    entity_counts: dict[str, int] = defaultdict(int)
+    end = 0
     n = len(activations)
-    for i in range(n):
-        group_entities = {activations[i]["entity_id"]}
-        group_ts = activations[i]["timestamp"]
-        j = i + 1
-        while j < n and (activations[j]["timestamp"] - group_ts) <= window_s:
-            if activations[j]["entity_id"] != activations[i]["entity_id"]:
-                group_entities.add(activations[j]["entity_id"])
-            j += 1
 
-        # Record all pairs from this group
-        if len(group_entities) >= 2:
-            sorted_entities = sorted(group_entities)
+    for i in range(n):
+        group_ts = activations[i]["timestamp"]
+
+        if end < i:
+            end = i
+
+        while end < n and (activations[end]["timestamp"] - group_ts) <= window_s:
+            entity_counts[activations[end]["entity_id"]] += 1
+            end += 1
+
+        if len(entity_counts) >= 2:
+            sorted_entities = sorted(entity_counts)
             for a, b in combinations(sorted_entities, 2):
                 pair_occurrences[(a, b)].append(group_ts)
+
+        current_entity = activations[i]["entity_id"]
+        entity_counts[current_entity] -= 1
+        if entity_counts[current_entity] <= 0:
+            del entity_counts[current_entity]
 
     return pair_occurrences
 
