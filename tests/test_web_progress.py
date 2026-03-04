@@ -55,3 +55,76 @@ def test_api_progress_stale_recovery_preserves_recent_metrics_and_adds_last_run(
 def test_training_log_js_uses_last_run_complete_state() -> None:
     assert "statusEl.textContent = 'Last run complete';" in web.PAGE
     assert "`[${stamp}] idle`" not in web.PAGE
+
+
+def test_api_progress_normalizes_idle_payload_from_state_when_file_missing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    progress_path = tmp_path / "progress.json"
+    state_path = tmp_path / "run_state.json"
+
+    state_path.write_text(
+        json.dumps(
+            {
+                "last_run": "2026-03-04T23:58:00+00:00",
+                "last_completed_progress": {
+                    "phase": "training",
+                    "completed_at": "2026-03-04T23:57:00+00:00",
+                    "rows": 1234,
+                },
+            }
+        )
+    )
+
+    monkeypatch.setattr(web, "PROGRESS_PATH", str(progress_path))
+    monkeypatch.setattr(web, "STATE_PATH", str(state_path))
+
+    payload = web.app.test_client().get("/api/progress").get_json()
+
+    assert payload["running"] is False
+    assert payload["phase"] == "idle"
+    assert payload["pct"] == 100
+    assert payload["done"] == 0
+    assert payload["total"] == 0
+    assert payload["rows"] == 0
+    assert payload["last_run"] == "2026-03-04T23:58:00+00:00"
+    assert payload["last_completed_progress"]["phase"] == "training"
+
+
+def test_api_progress_normalizes_running_payload_and_clamps_metrics(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    progress_path = tmp_path / "progress.json"
+    state_path = tmp_path / "run_state.json"
+
+    progress_path.write_text(
+        json.dumps(
+            {
+                "running": True,
+                "phase": "idle",
+                "pct": 170,
+                "done": "3",
+                "total": "2",
+                "rows": "-8",
+                "elapsed_min": "1.5",
+                "eta_min": "oops",
+            }
+        )
+    )
+    state_path.write_text("{}")
+
+    monkeypatch.setattr(web, "PROGRESS_PATH", str(progress_path))
+    monkeypatch.setattr(web, "STATE_PATH", str(state_path))
+
+    payload = web.app.test_client().get("/api/progress").get_json()
+
+    assert payload["running"] is True
+    assert payload["phase"] == "fetching"
+    assert payload["pct"] == 100
+    assert payload["done"] == 2
+    assert payload["total"] == 2
+    assert payload["rows"] == 0
+    assert payload["elapsed_min"] == 1.5
+    assert payload["eta_min"] == 0.0

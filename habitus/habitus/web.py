@@ -39,6 +39,79 @@ def _read(path, default=None):
     return default
 
 
+_ACTIVE_PROGRESS_PHASES = {
+    "fetching",
+    "building_baselines",
+    "training",
+    "seasonal_training",
+    "pattern_analysis",
+    "scoring",
+}
+
+
+def _int_or_default(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _float_or_default(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _normalize_progress_payload(progress: dict | None, state: dict | None) -> dict:
+    p = dict(progress or {})
+    st = state if isinstance(state, dict) else {}
+
+    running = bool(p.get("running"))
+    phase = str(p.get("phase") or "").strip()
+    if running:
+        if phase not in _ACTIVE_PROGRESS_PHASES:
+            phase = "fetching"
+    elif phase in _ACTIVE_PROGRESS_PHASES or not phase:
+        phase = "idle"
+
+    done = max(0, _int_or_default(p.get("done"), 0))
+    total = max(0, _int_or_default(p.get("total"), 0))
+    if total > 0 and done > total:
+        done = total
+    rows = max(0, _int_or_default(p.get("rows"), 0))
+
+    has_recent = bool(st.get("last_run")) or rows > 0 or done > 0 or total > 0
+    default_pct = 0 if running else (100 if has_recent else 0)
+    pct = max(0, min(100, _int_or_default(p.get("pct"), default_pct)))
+
+    payload = {
+        "running": running,
+        "phase": phase,
+        "done": done,
+        "total": total,
+        "pct": pct,
+        "rows": rows,
+        "elapsed_min": max(0.0, _float_or_default(p.get("elapsed_min"), 0.0)),
+        "eta_min": max(0.0, _float_or_default(p.get("eta_min"), 0.0)),
+    }
+
+    if p.get("stale_recovered"):
+        payload["stale_recovered"] = True
+    if "stale_age_sec" in p:
+        payload["stale_age_sec"] = max(0, _int_or_default(p.get("stale_age_sec"), 0))
+
+    last_run = p.get("last_run") or st.get("last_run")
+    if last_run:
+        payload["last_run"] = last_run
+
+    last_completed = p.get("last_completed_progress") or st.get("last_completed_progress")
+    if isinstance(last_completed, dict) and last_completed:
+        payload["last_completed_progress"] = last_completed
+
+    return payload
+
+
 PAGE = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2327,11 +2400,9 @@ def api_progress():
     except Exception:
         pass
 
-    # Enrich with last-run metadata so UI can present a useful idle summary.
+    # Enrich and normalize to a stable progress contract for the UI.
     st = _read(STATE_PATH) or {}
-    if st.get("last_run") and not p.get("last_run"):
-        p["last_run"] = st.get("last_run")
-    return jsonify(p)
+    return jsonify(_normalize_progress_payload(p, st))
 
 
 @app.route("/api/patterns")
