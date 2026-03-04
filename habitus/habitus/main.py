@@ -280,7 +280,7 @@ async def ws_connect():
     return ws
 
 
-async def get_stat_ids():
+async def get_stat_ids() -> tuple[list[str], int]:
     ws = await ws_connect()
     await ws.send(json.dumps({"id": 1, "type": "recorder/list_statistic_ids"}))
     result = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
@@ -288,7 +288,20 @@ async def get_stat_ids():
     all_ids = [s["statistic_id"] for s in result.get("result", [])]
     behavioral = [e for e in all_ids if is_behavioral(e)]
     log.info(f"Found {len(behavioral)} behavioral sensors (from {len(all_ids)} total)")
-    return behavioral
+    return behavioral, len(all_ids)
+
+
+def get_ha_entity_count() -> int:
+    """Return total number of HA entities currently exposed by /api/states."""
+    try:
+        headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
+        r = requests.get(f"{HA_URL}/api/states", headers=headers, timeout=10)
+        if r.status_code != 200:
+            return 0
+        data = r.json()
+        return len(data) if isinstance(data, list) else 0
+    except Exception:
+        return 0
 
 
 async def fetch_stats(entity_ids, start_iso, end_iso=None):
@@ -936,6 +949,7 @@ async def run(days_history: int, mode: str = "full") -> None:
                     "last_score": now_iso,
                     "anomaly_score": anomaly_score,
                     "mode": "score",
+                    "requested_days": days_history,
                 }
             )
             save_state(state)
@@ -1018,10 +1032,11 @@ async def run(days_history: int, mode: str = "full") -> None:
             os.environ["HABITUS_WATER_ENTITIES"] = ",".join(energy["water"])
             log.info("Water meters: %s", energy["water"])
 
-    stat_ids = await get_stat_ids()
+    stat_ids, total_stat_ids = await get_stat_ids()
     if not stat_ids:
         log.error("No behavioral sensors found")
         return
+    total_entities = get_ha_entity_count()
 
     if state.get("data_to") and os.path.exists(MODEL_PATH):
         # Incremental
@@ -1449,7 +1464,10 @@ async def run(days_history: int, mode: str = "full") -> None:
             "max_power_kw": int(os.environ.get("HABITUS_MAX_POWER_KW", "25")),
             "data_to": now_iso,
             "training_days": training_days,
+            "requested_days": days_history,
             "entity_count": entity_count,
+            "total_stat_ids": total_stat_ids,
+            "total_entities": total_entities,
             "anomaly_score": anomaly_score,
             "top_anomaly": top_anomaly,
             "seasonal_models": seasonal.seasonal_status(),

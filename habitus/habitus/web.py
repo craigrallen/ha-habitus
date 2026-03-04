@@ -1178,12 +1178,21 @@ async function load() {
 
   // Stats
   const td = state.training_days??'—';
+  const requestedDays = state.requested_days ?? null;
   document.getElementById('tdays').innerHTML = td+'<span class="sunit">days</span>';
   const df=state.data_from?new Date(state.data_from).toLocaleDateString():'?';
   const dt=state.data_to?new Date(state.data_to).toLocaleDateString():'?';
-  document.getElementById('tdays-range').textContent = td!=='—' ? `${df} → ${dt}` : '';
+  document.getElementById('tdays-range').textContent = td!=='—'
+    ? `${df} → ${dt}` + (requestedDays ? ` · requested ${requestedDays}d` : '')
+    : '';
 
   document.getElementById('ecount').innerHTML = (state.entity_count??'—')+'<span class="sunit">sensors</span>';
+  const totalEntities = state.total_entities || null;
+  const totalStatIds = state.total_stat_ids || null;
+  const extraParts = [];
+  if (totalStatIds) extraParts.push(`${totalStatIds} long-term stats`);
+  if (totalEntities) extraParts.push(`${totalEntities} HA entities`);
+  document.getElementById('ecount-sub').textContent = extraParts.length ? `from ${extraParts.join(' · ')}` : '';
 
   // Season
   const sm = state.seasonal_models||{};
