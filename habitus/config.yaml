@@ -1,6 +1,6 @@
 name: "Habitus"
 description: "Behavioral intelligence — learns patterns from HA, detects anomalies, proposes automations."
-version: "3.8.7"
+version: "3.8.8"
 slug: "habitus"
 init: false
 arch:
