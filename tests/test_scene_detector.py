@@ -66,6 +66,62 @@ def test_find_co_occurrences_handles_empty_and_non_activation_input() -> None:
     ) == {}
 
 
+def _baseline_cluster_pairs_to_scenes(
+    pair_occurrences: dict[tuple[str, str], list[float]],
+    min_co: int,
+) -> list[set[str]]:
+    frequent_pairs = {pair: times for pair, times in pair_occurrences.items() if len(times) >= min_co}
+    if not frequent_pairs:
+        return []
+
+    adjacency: dict[str, set[str]] = defaultdict(set)
+    pair_counts: dict[tuple[str, str], int] = {}
+    for (a, b), times in frequent_pairs.items():
+        adjacency[a].add(b)
+        adjacency[b].add(a)
+        pair_counts[(a, b)] = len(times)
+
+    visited: set[str] = set()
+    scenes: list[set[str]] = []
+
+    for entity in adjacency:
+        if entity in visited:
+            continue
+
+        component: set[str] = set()
+        queue = [entity]
+        while queue:
+            node = queue.pop(0)
+            if node in visited:
+                continue
+            visited.add(node)
+            component.add(node)
+            for neighbor in adjacency[node]:
+                if neighbor not in visited:
+                    queue.append(neighbor)
+
+        if len(component) >= 2:
+            if len(component) <= 12:
+                scenes.append(component)
+            else:
+                scene_detector._split_large_component(component, pair_counts, scenes)
+
+    return scenes
+
+
+def test_cluster_pairs_matches_reference_behavior() -> None:
+    entities = [f"light.room_{idx}" for idx in range(16)]
+    pair_occurrences: dict[tuple[str, str], list[float]] = {}
+    for i, a in enumerate(entities):
+        for b in entities[i + 1 :]:
+            pair_occurrences[(a, b)] = [1.0, 2.0, 3.0, 4.0, 5.0]
+
+    expected = _baseline_cluster_pairs_to_scenes(pair_occurrences, min_co=5)
+    actual = scene_detector._cluster_pairs_to_scenes(pair_occurrences, min_co=5)
+
+    assert {frozenset(scene) for scene in actual} == {frozenset(scene) for scene in expected}
+
+
 def test_detect_scenes_confidence_counts_wrapped_midnight_window(monkeypatch) -> None:
     monkeypatch.setattr(
         scene_detector,

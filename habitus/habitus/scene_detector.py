@@ -10,7 +10,7 @@ import datetime
 import json
 import logging
 import os
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from itertools import combinations
 from typing import Any
 
@@ -203,9 +203,9 @@ def _cluster_pairs_to_scenes(
             continue
         # BFS
         component: set[str] = set()
-        queue = [entity]
+        queue = deque([entity])
         while queue:
-            node = queue.pop(0)
+            node = queue.popleft()
             if node in visited:
                 continue
             visited.add(node)
