@@ -25,11 +25,12 @@ import sqlite3
 from collections import Counter, defaultdict
 from typing import Any
 
+from .ha_db import resolve_ha_db_path
+
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 PREDICTIONS_PATH = os.path.join(DATA_DIR, "room_predictions.json")
 PREDICTION_LOG_PATH = os.path.join(DATA_DIR, "prediction_log.json")
-HA_DB = "/homeassistant/home-assistant_v2.db"
 
 # Minimum times a pattern must occur to be suggested
 MIN_OCCURRENCES = 3
@@ -47,7 +48,8 @@ def _get_room_entry_events(entity_to_area: dict[str, str], days: int = DEFAULT_D
     A "room entry" = motion sensor turns on, or door sensor opens,
     in a room with a known HA area assignment.
     """
-    if not os.path.exists(HA_DB):
+    db_path = resolve_ha_db_path()
+    if not db_path:
         return []
 
     cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)
@@ -66,7 +68,7 @@ def _get_room_entry_events(entity_to_area: dict[str, str], days: int = DEFAULT_D
         return []
 
     try:
-        conn = sqlite3.connect(f"file:{HA_DB}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         cursor = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='states_meta'"
         )
@@ -114,7 +116,8 @@ def _get_actions_after_entry(entry_ts: float, room: str, entity_to_area: dict[st
 
     Only includes entities in the same room (or unassigned entities matching room keywords).
     """
-    if not os.path.exists(HA_DB):
+    db_path = resolve_ha_db_path()
+    if not db_path:
         return []
 
     window_end = entry_ts + ACTION_WINDOW_MIN * 60
@@ -123,7 +126,7 @@ def _get_actions_after_entry(entry_ts: float, room: str, entity_to_area: dict[st
     room_entities = {eid for eid, area in entity_to_area.items() if area == room}
 
     try:
-        conn = sqlite3.connect(f"file:{HA_DB}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         cursor = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='states_meta'"
         )

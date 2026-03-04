@@ -23,10 +23,11 @@ import sqlite3
 from collections import Counter, defaultdict
 from typing import Any
 
+from .ha_db import resolve_ha_db_path
+
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 ROUTINES_PATH = os.path.join(DATA_DIR, "routines.json")
-HA_DB = "/homeassistant/home-assistant_v2.db"
 
 # Humidity spike threshold (percentage points above rolling average)
 HUMIDITY_SPIKE_THRESHOLD = 10.0
@@ -49,11 +50,12 @@ def _find_humidity_sensors() -> dict[str, str]:
     Returns dict of {entity_id: room_type} where room_type is
     'bathroom', 'kitchen', 'bedroom', or 'other'.
     """
-    if not os.path.exists(HA_DB):
+    db_path = resolve_ha_db_path()
+    if not db_path:
         return {}
 
     try:
-        conn = sqlite3.connect(f"file:{HA_DB}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         cursor = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='states_meta'"
         )
@@ -100,14 +102,15 @@ def _find_humidity_sensors() -> dict[str, str]:
 
 def _get_humidity_history(entity_id: str, days: int = 30) -> list[tuple[float, float]]:
     """Get humidity history as [(timestamp, value), ...] from HA database."""
-    if not os.path.exists(HA_DB):
+    db_path = resolve_ha_db_path()
+    if not db_path:
         return []
 
     cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)
     cutoff_ts = cutoff.timestamp()
 
     try:
-        conn = sqlite3.connect(f"file:{HA_DB}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         cursor = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='states_meta'"
         )

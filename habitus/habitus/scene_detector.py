@@ -15,11 +15,12 @@ from collections import Counter, defaultdict
 from itertools import combinations
 from typing import Any
 
+from .ha_db import resolve_ha_db_path
+
 log = logging.getLogger("habitus")
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 SCENES_PATH = os.path.join(DATA_DIR, "scenes.json")
-HA_DB_PATH = "/homeassistant/home-assistant_v2.db"
 
 # Co-occurrence window in seconds
 CO_OCCURRENCE_WINDOW = 300  # 5 minutes
@@ -41,15 +42,16 @@ def _get_state_changes(days: int = 30) -> list[dict[str, Any]]:
 
     Returns list of dicts with entity_id, state, last_changed (as datetime).
     """
-    if not os.path.exists(HA_DB_PATH):
-        log.warning("HA database not found at %s — falling back to empty", HA_DB_PATH)
+    db_path = resolve_ha_db_path()
+    if not db_path:
+        log.warning("HA database not found in standard paths — falling back to empty")
         return []
 
     cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)
     cutoff_ts = cutoff.timestamp()
 
     try:
-        conn = sqlite3.connect(f"file:{HA_DB_PATH}?mode=ro", uri=True, timeout=10)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
         conn.row_factory = sqlite3.Row
 
         # HA uses states_meta for entity_id mapping (HA 2023.4+)

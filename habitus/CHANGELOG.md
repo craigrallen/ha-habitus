@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Suggestion cards now show entity badges, time patterns, and overlap info
 - All existing API endpoints remain backward-compatible
 
+### Fixed
+- Recorder DB path resolution no longer assumes `/homeassistant/home-assistant_v2.db` in core scene/appliance/routine/room modules; now honors `HABITUS_HA_DB`/`HA_DB_PATH` and common HA mount paths (restores scene and NILM-style detections on systems using `/config` mounts)
+
 ## [3.1.0] - 2026-03-03
 
 ### Added

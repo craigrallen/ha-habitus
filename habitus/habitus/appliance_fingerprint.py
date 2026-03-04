@@ -30,10 +30,11 @@ from typing import Any
 
 import numpy as np
 
+from .ha_db import resolve_ha_db_path
+
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 FINGERPRINTS_PATH = os.path.join(DATA_DIR, "appliance_fingerprints.json")
-HA_DB = "/homeassistant/home-assistant_v2.db"
 
 # Known appliance power signatures (watts) — used as hints for classification
 KNOWN_SIGNATURES: dict[str, dict[str, Any]] = {
@@ -77,15 +78,16 @@ def detect_power_steps(entity_id: str, days: int = 30) -> list[dict[str, Any]]:
     Reads directly from HA SQLite database for speed.
     Returns list of detected steps with magnitude, direction, timestamp.
     """
-    if not os.path.exists(HA_DB):
-        log.warning("HA database not found at %s — using REST API fallback", HA_DB)
+    db_path = resolve_ha_db_path()
+    if not db_path:
+        log.warning("HA database not found in standard paths — using REST API fallback")
         return _detect_steps_rest(entity_id, days)
 
     cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)
     cutoff_ts = cutoff.timestamp()
 
     try:
-        conn = sqlite3.connect(f"file:{HA_DB}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         cursor = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='states_meta'"
         )
@@ -422,12 +424,13 @@ def run_fingerprinting(power_entities: list[str] | None = None, days: int = 30) 
 
 def _get_raw_readings(entity_id: str, days: int = 30) -> list[tuple[float, float]]:
     """Get raw (timestamp, watts) readings for power shape analysis."""
-    if not os.path.exists(HA_DB):
+    db_path = resolve_ha_db_path()
+    if not db_path:
         return []
     cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)
     cutoff_ts = cutoff.timestamp()
     try:
-        conn = sqlite3.connect(f"file:{HA_DB}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         cursor = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='states_meta'"
         )
@@ -461,11 +464,12 @@ def _get_raw_readings(entity_id: str, days: int = 30) -> list[tuple[float, float
 
 def _find_power_entities() -> list[str]:
     """Find watt power sensors from HA database."""
-    if not os.path.exists(HA_DB):
+    db_path = resolve_ha_db_path()
+    if not db_path:
         return []
 
     try:
-        conn = sqlite3.connect(f"file:{HA_DB}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         cursor = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='states_meta'"
         )
