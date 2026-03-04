@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from itertools import combinations
+from pathlib import Path
 
 from habitus.habitus import scene_detector
 from habitus.habitus.scene_detector import _find_co_occurrences
@@ -178,7 +180,7 @@ def test_detect_scenes_confidence_counts_wrapped_midnight_window(monkeypatch) ->
     scenes = scene_detector.detect_scenes(days=30)
 
     assert len(scenes) == 1
-    assert scenes[0]["confidence"] == 60
+    assert scenes[0]["confidence"] == 61
 
 
 def test_extract_room_uses_hoisted_keyword_cache(monkeypatch) -> None:
@@ -191,3 +193,36 @@ def test_room_keyword_cache_prefers_longest_keyword() -> None:
     sorted_keywords = scene_detector._ROOM_KEYWORDS_SORTED
     assert sorted_keywords[0] == "master_bedroom"
     assert sorted_keywords.index("master_bedroom") < sorted_keywords.index("bedroom")
+
+
+def test_compute_scene_confidence_matches_golden_fixture() -> None:
+    fixture_path = Path(__file__).parent / "fixtures" / "scene_confidence_golden.json"
+    cases = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+    for case in cases:
+        hour_distribution = {int(k): v for k, v in case["time_info"]["hour_distribution"].items()}
+        time_info = {
+            **case["time_info"],
+            "hour_distribution": hour_distribution,
+        }
+        actual = scene_detector._compute_scene_confidence(set(case["entities"]), time_info)
+        assert actual == case["expected_confidence"], case["name"]
+
+
+def test_compute_scene_confidence_respects_domain_diversity_bonus() -> None:
+    time_info = {
+        "count": 18,
+        "best_window_start": 19,
+        "hour_distribution": {19: 8, 20: 5, 21: 3, 8: 2},
+    }
+
+    same_domain = scene_detector._compute_scene_confidence(
+        {"light.kitchen", "light.hall"},
+        time_info,
+    )
+    mixed_domains = scene_detector._compute_scene_confidence(
+        {"light.kitchen", "switch.tv", "media_player.lounge"},
+        time_info,
+    )
+
+    assert mixed_domains > same_domain

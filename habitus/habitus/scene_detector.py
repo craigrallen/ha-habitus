@@ -491,6 +491,43 @@ def _name_scene(entities: set[str], time_info: dict[str, Any]) -> str:
     return room_str
 
 
+def _compute_scene_confidence(entities: set[str], time_info: dict[str, Any]) -> int:
+    """Compute calibrated confidence score for a scene candidate."""
+    freq_score = min(100, time_info["count"] * 3)
+
+    best_window_start = time_info.get("best_window_start", 0)
+    total_in_peak = sum(
+        time_info.get("hour_distribution", {}).get((best_window_start + offset) % 24, 0)
+        for offset in range(3)
+    )
+    time_consistency = (
+        (total_in_peak / max(time_info["count"], 1)) * 100
+        if time_info["count"] > 0
+        else 0
+    )
+
+    domains_in_scene = {e.split(".")[0] for e in entities}
+    signal_types = set()
+    for d in domains_in_scene:
+        if d in ("light",):
+            signal_types.add("lighting")
+        elif d in ("switch", "input_boolean"):
+            signal_types.add("switching")
+        elif d in ("media_player",):
+            signal_types.add("media")
+        elif d in ("climate", "fan"):
+            signal_types.add("comfort")
+        elif d in ("cover",):
+            signal_types.add("covers")
+        elif d in ("binary_sensor",):
+            signal_types.add("presence")
+        elif d in ("person", "device_tracker"):
+            signal_types.add("location")
+
+    diversity_bonus = min(20, (len(signal_types) - 1) * 10) if len(signal_types) > 1 else 0
+    return int(round(min(95, (freq_score * 0.35) + (time_consistency * 0.45) + diversity_bonus)))
+
+
 def detect_scenes(days: int = 30) -> list[dict[str, Any]]:
     """Main entry point: detect implicit scenes from HA state history.
 
@@ -524,44 +561,7 @@ def detect_scenes(days: int = 30) -> list[dict[str, Any]]:
 
         name = _name_scene(entities, time_info)
 
-        # Calculate confidence based on frequency and consistency
-        freq_score = min(100, time_info["count"] * 3)  # More occurrences = higher
-        # Time consistency: how concentrated in peak window
-        best_window_start = time_info.get("best_window_start", 0)
-        total_in_peak = sum(
-            time_info.get("hour_distribution", {}).get((best_window_start + offset) % 24, 0)
-            for offset in range(3)
-        )
-        time_consistency = (
-            (total_in_peak / max(time_info["count"], 1)) * 100
-            if time_info["count"] > 0
-            else 0
-        )
-        # Domain diversity bonus — scenes with multiple signal types are more convincing
-        # e.g. light + media_player + climate = strong scene; light + light = weaker
-        domains_in_scene = {e.split(".")[0] for e in entities}
-        # Categorise into signal types
-        signal_types = set()
-        for d in domains_in_scene:
-            if d in ("light",):
-                signal_types.add("lighting")
-            elif d in ("switch", "input_boolean"):
-                signal_types.add("switching")
-            elif d in ("media_player",):
-                signal_types.add("media")
-            elif d in ("climate", "fan"):
-                signal_types.add("comfort")
-            elif d in ("cover",):
-                signal_types.add("covers")
-            elif d in ("binary_sensor",):
-                signal_types.add("presence")
-            elif d in ("person", "device_tracker"):
-                signal_types.add("location")
-
-        # 1 type = baseline, 2 types = +10, 3+ types = +20
-        diversity_bonus = min(20, (len(signal_types) - 1) * 10) if len(signal_types) > 1 else 0
-
-        confidence = int(min(95, (freq_score * 0.4 + time_consistency * 0.4 + diversity_bonus * 0.2) + diversity_bonus))
+        confidence = _compute_scene_confidence(entities, time_info)
 
         if confidence < MIN_CONFIDENCE:
             continue
