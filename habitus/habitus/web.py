@@ -1256,11 +1256,15 @@ async function load() {
   // Stats
   const td = state.training_days??'—';
   const requestedDays = state.requested_days ?? null;
-  document.getElementById('tdays').innerHTML = td+'<span class="sunit">days</span>';
+  if (requestedDays && td !== '—') {
+    document.getElementById('tdays').innerHTML = `${td}<span class="sunit">d actual</span> <span class="sunit">/ ${requestedDays}d cfg</span>`;
+  } else {
+    document.getElementById('tdays').innerHTML = td+'<span class="sunit">days</span>';
+  }
   const df=state.data_from?new Date(state.data_from).toLocaleDateString():'?';
   const dt=state.data_to?new Date(state.data_to).toLocaleDateString():'?';
   document.getElementById('tdays-range').textContent = td!=='—'
-    ? `${df} → ${dt}` + (requestedDays ? ` · requested ${requestedDays}d` : '')
+    ? `${df} → ${dt}` + (requestedDays ? ` · configured ${requestedDays}d` : '')
     : '';
 
   document.getElementById('ecount').innerHTML = (state.entity_count??'—')+'<span class="sunit">sensors</span>';
