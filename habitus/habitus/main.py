@@ -61,6 +61,8 @@ MIN_SCORING_DAYS = _env_int("HABITUS_MIN_SCORING_DAYS", 7)
 # Set <=0 to disable (not recommended).
 FETCH_ROW_BUDGET = _env_int("HABITUS_FETCH_ROW_BUDGET", 1000000)
 FETCH_MIN_WINDOW_DAYS = _env_int("HABITUS_FETCH_MIN_WINDOW_DAYS", 7)
+FETCH_WARN_MS = _env_int("HABITUS_FETCH_WARN_MS", 15000)
+BUILD_FEATURES_WARN_MS = _env_int("HABITUS_BUILD_FEATURES_WARN_MS", 5000)
 
 
 def _fetch_row_budget() -> int:
@@ -69,6 +71,68 @@ def _fetch_row_budget() -> int:
 
 def _fetch_min_window_days() -> int:
     return _env_int("HABITUS_FETCH_MIN_WINDOW_DAYS", FETCH_MIN_WINDOW_DAYS)
+
+
+def summarize_perf_guardrail(
+    stage: str,
+    elapsed_seconds: float,
+    *,
+    rows: int = 0,
+    entities: int = 0,
+    warn_ms: int = 0,
+) -> dict[str, float | int | str | bool]:
+    """Build a normalized performance summary and guardrail verdict."""
+    elapsed_s = max(0.0, float(elapsed_seconds))
+    elapsed_ms = int(round(elapsed_s * 1000))
+    safe_rows = max(0, int(rows))
+    safe_entities = max(0, int(entities))
+    rows_per_sec = round((safe_rows / elapsed_s), 1) if elapsed_s > 0 else 0.0
+    per_entity_rows = round((safe_rows / safe_entities), 1) if safe_entities > 0 else 0.0
+    budget = max(0, int(warn_ms))
+    exceeded = budget > 0 and elapsed_ms > budget
+    return {
+        "stage": stage,
+        "elapsed_ms": elapsed_ms,
+        "rows": safe_rows,
+        "entities": safe_entities,
+        "rows_per_sec": rows_per_sec,
+        "rows_per_entity": per_entity_rows,
+        "warn_ms": budget,
+        "warn_exceeded": exceeded,
+    }
+
+
+def log_perf_guardrail(
+    stage: str,
+    elapsed_seconds: float,
+    *,
+    rows: int = 0,
+    entities: int = 0,
+    warn_ms: int = 0,
+) -> dict[str, float | int | str | bool]:
+    """Log standardized performance telemetry for hot fetch/feature paths."""
+    summary = summarize_perf_guardrail(
+        stage,
+        elapsed_seconds,
+        rows=rows,
+        entities=entities,
+        warn_ms=warn_ms,
+    )
+    msg = (
+        "Perf[%s]: %dms · rows=%d · entities=%d · rows/s=%.1f"
+        % (
+            summary["stage"],
+            summary["elapsed_ms"],
+            summary["rows"],
+            summary["entities"],
+            summary["rows_per_sec"],
+        )
+    )
+    if summary["warn_exceeded"]:
+        log.warning("%s (guardrail %dms exceeded)", msg, summary["warn_ms"])
+    else:
+        log.info("%s", msg)
+    return summary
 
 
 def contamination_for_days(days: int) -> float:
@@ -762,6 +826,13 @@ def fetch_stats_sqlite(entity_ids, start_iso, end_iso=None):
     df = pd.DataFrame(rows, columns=["entity_id", "ts", "mean", "sum"])
     df["ts"] = pd.to_datetime(df["ts"], unit="s", utc=True)
     log.info("Fetched %d rows from SQLite | %s → %s", len(df), df["ts"].min().date(), df["ts"].max().date())
+    log_perf_guardrail(
+        "fetch_sqlite",
+        _t.time() - t0,
+        rows=len(df),
+        entities=len(entity_ids),
+        warn_ms=_env_int("HABITUS_FETCH_WARN_MS", FETCH_WARN_MS),
+    )
     return df
 
 
@@ -883,6 +954,13 @@ async def fetch_stats(entity_ids, start_iso, end_iso=None):
     df = pd.DataFrame(all_rows)
     df["ts"] = pd.to_datetime(df["ts"], unit="s", utc=True)
     log.info("Fetched %d rows | %s → %s", len(df), df["ts"].min().date(), df["ts"].max().date())
+    log_perf_guardrail(
+        "fetch_api",
+        _t.time() - t0,
+        rows=len(df),
+        entities=len(entity_ids),
+        warn_ms=_env_int("HABITUS_FETCH_WARN_MS", FETCH_WARN_MS),
+    )
     return df
 
 
@@ -901,6 +979,10 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         DataFrame with one row per hour and all FEATURE_COLS populated.
     """
+    import time as _t
+
+    t0 = _t.time()
+    source_rows = len(df)
     df = df.copy()
     df["hour"] = df["ts"].dt.floor("h")
     hours = pd.DataFrame({"hour": pd.date_range(df["hour"].min(), df["hour"].max(), freq="h")})
@@ -1016,7 +1098,15 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     for col in FEATURE_COLS:
         if col not in features.columns:
             features[col] = 0.0
-    return features.fillna(0).reset_index()
+    out = features.fillna(0).reset_index()
+    log_perf_guardrail(
+        "build_features",
+        _t.time() - t0,
+        rows=source_rows,
+        entities=int(df["entity_id"].nunique()) if "entity_id" in df.columns else 0,
+        warn_ms=_env_int("HABITUS_BUILD_FEATURES_WARN_MS", BUILD_FEATURES_WARN_MS),
+    )
+    return out
 
 
 # ── Model ──────────────────────────────────────────────────────────────────────
