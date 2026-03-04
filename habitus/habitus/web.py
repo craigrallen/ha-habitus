@@ -271,8 +271,8 @@ tr:hover td { background: var(--bg2); }
   th { font-size: 0.66rem; padding: 6px 8px 8px; }
   td { font-size: 0.78rem; padding: 8px; }
 
-  /* Keep cards/tables on-screen on phone without horizontal scrolling */
-  .table-wrap { overflow-x: hidden; }
+  /* Keep cards/tables on-screen on phone without clipping */
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .table-wrap table { min-width: 0; width: 100%; table-layout: fixed; }
   .table-wrap th, .table-wrap td { white-space: normal; word-break: break-word; }
 
@@ -286,6 +286,12 @@ tr:hover td { background: var(--bg2); }
   #tab-breakdown .bd-col-sensor { width: 58%; }
   #tab-breakdown .bd-col-deviation { width: 24%; }
   #tab-breakdown .bd-col-bar { width: 18%; }
+
+  /* Automation health: reduce columns on mobile to avoid viewport cut-off */
+  .auto-health-table th:nth-child(3), .auto-health-table td:nth-child(3),
+  .auto-health-table th:nth-child(5), .auto-health-table td:nth-child(5) {
+    display: none;
+  }
 }
 
 /* ── Bar ── */
@@ -978,6 +984,7 @@ pre.raw {
 
 <script>
 let allSuggestions = [];
+let haAutomationMap = new Map();
 let currentFilter = 'all';
 const phaseOrder = ['fetching','building_baselines','training','seasonal_training','pattern_analysis'];
 
@@ -1027,6 +1034,33 @@ function confDots(n) {
 }
 
 function fmtW(w,cap){cap=cap||25000;if(!isFinite(w)||w<0||w>cap)return'—';if(w>=1000)return(w/1000).toFixed(1)+'kW';return Math.round(w)+'W';}
+
+function normalizeAutomationId(s=''){
+  return (s||'')
+    .toString()
+    .toLowerCase()
+    .replace(/^automation\./,'')
+    .replace(/[^a-z0-9_]+/g,'_')
+    .replace(/_+/g,'_')
+    .replace(/^_|_$/g,'');
+}
+
+function extractAliasFromYaml(yaml=''){
+  const m = (yaml||'').match(/^\s*alias\s*:\s*["']?([^"'\n]+)["']?/m);
+  return m ? m[1].trim() : '';
+}
+
+function buildAutomationMap(haAutos=[]){
+  const map = new Map();
+  (haAutos||[]).forEach(a => {
+    const byAlias = normalizeAutomationId(a.alias || '');
+    const byEntity = normalizeAutomationId(a.entity_id || '');
+    if (byAlias) map.set(byAlias, a);
+    if (byEntity) map.set(byEntity, a);
+  });
+  return map;
+}
+
 function renderSuggestions() {
   const list = currentFilter === 'all' ? allSuggestions : allSuggestions.filter(s=>s.category===currentFilter);
   if (!list.length) {
@@ -1039,11 +1073,24 @@ function renderSuggestions() {
     const overlapHtml = s.overlap_automation ? `<div style="font-size:.75rem;color:var(--amber);margin:4px 0">⚠ Possible overlap with: ${s.overlap_automation}</div>` : '';
     const entitiesHtml = (s.entities && s.entities.length) ? `<div style="margin:6px 0;display:flex;flex-wrap:wrap;gap:3px">${s.entities.map(e=>`<span class="badge b-info" style="font-size:.68rem;margin:1px">${e}</span>`).join('')}</div>` : '';
     const timeHtml = s.time_pattern ? `<div style="font-size:.72rem;color:var(--text3)">⏰ ${(s.time_pattern.peak_hour||'').toString().padStart(2,'0')}:00 · ${s.time_pattern.days||'daily'}</div>` : '';
+
+    const alias = extractAliasFromYaml(s.yaml || '') || s.title || '';
+    const key = normalizeAutomationId(alias);
+    const existing = key ? haAutomationMap.get(key) : null;
+    const existsBadge = s.category !== 'lovelace'
+      ? (existing
+          ? `<span class="badge b-ok" title="${existing.entity_id || ''}">in HA</span>`
+          : `<span class="badge b-muted">not in HA</span>`)
+      : '';
+
     return `
     <div class="sug ${s.applicable===false?'na':''}">
       <div class="sug-head">
         <h3>${s.title}</h3>
-        <span class="badge ${bc}">${ic} ${s.category}</span>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <span class="badge ${bc}">${ic} ${s.category}</span>
+          ${existsBadge}
+        </div>
       </div>
       <div class="sug-meta">
         <div class="conf-bar"><div class="conf-dots">${confDots(s.confidence)}</div><span style="font-size:.72rem;color:var(--text3)">${s.confidence}% confidence</span></div>
@@ -1055,9 +1102,11 @@ function renderSuggestions() {
       ${overlapHtml}
       <details><summary style="cursor:pointer;color:var(--accent);font-size:.82rem;margin:6px 0">Show YAML</summary>
         <pre id="yaml-${s.id}">${(s.yaml||'').trim()}</pre>
-        <div style="display:flex;gap:8px;margin-top:4px">
+        <div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
           <button class="btn btn-accent" onclick="copyYaml('${s.id}')">📋 Copy YAML</button>
-          ${s.category!=='lovelace'?`<button class="btn btn-success" id="add-${s.id}" onclick="addToHA('${s.id}')">+ Add to HA</button>`:''}
+          ${s.category!=='lovelace' ? (!existing
+            ? `<button class="btn btn-success" id="add-${s.id}" onclick="addToHA('${s.id}')">+ Add to HA</button>`
+            : `<button class="btn btn-danger" id="remove-${s.id}" onclick="removeFromHA('${(existing.entity_id || '').replace(/'/g, "\\'")}', '${s.id}')">🗑 Remove from HA</button>`) : ''}
         </div>
       </details>
     </div>`;
@@ -1076,9 +1125,37 @@ async function addToHA(id) {
   try {
     const r = await fetch('api/add_automation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({yaml})});
     const d = await r.json();
-    if (d.ok) { btn.textContent = '✓ Added'; toast('Automation added ✓'); }
-    else { btn.disabled=false; btn.textContent='+ Add to HA'; toast('Failed: '+(d.error||'?'),'te'); }
+    if (d.ok) {
+      btn.textContent = '✓ Added';
+      toast('Automation added ✓');
+      setTimeout(()=>load(), 500);
+    } else {
+      btn.disabled=false; btn.textContent='+ Add to HA'; toast('Failed: '+(d.error||'?'),'te');
+    }
   } catch(e) { btn.disabled=false; btn.textContent='+ Add to HA'; toast('Network error','te'); }
+}
+
+async function removeFromHA(entityId, suggestionId='') {
+  const btn = suggestionId ? document.getElementById('remove-'+suggestionId) : null;
+  if (btn) { btn.disabled = true; btn.textContent = 'Removing…'; }
+  try {
+    const r = await fetch('api/remove_automation',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({entity_id:entityId})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      toast('Automation removed ✓');
+      load();
+    } else {
+      if (btn) { btn.disabled = false; btn.textContent = '🗑 Remove from HA'; }
+      toast('Remove failed: '+(d.error||'?'),'te');
+    }
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.textContent = '🗑 Remove from HA'; }
+    toast('Network error','te');
+  }
 }
 
 function setGauge(score) {
@@ -1269,7 +1346,6 @@ async function load() {
   const smartSugList = (smartSuggestions && smartSuggestions.suggestions && smartSuggestions.suggestions.length)
     ? smartSuggestions.suggestions : suggestions;
   allSuggestions = smartSugList;
-  renderSuggestions();
 
   // ── Activity States (HMM) ──
   fetch('api/activity_states').then(r=>r.json()).catch(()=>({states:[]})).then(h => {
@@ -1453,6 +1529,8 @@ async function load() {
 
   // HA Automations
   const haAutos = (haAutomations && haAutomations.automations) ? haAutomations.automations : [];
+  haAutomationMap = buildAutomationMap(haAutos);
+  renderSuggestions();
   if (haAutos.length) {
     const enabled = haAutos.filter(a => a.current_state === 'on');
     const disabled = haAutos.filter(a => a.current_state !== 'on');
@@ -1463,13 +1541,15 @@ async function load() {
         <span class="badge b-ok" style="font-size:.68rem">on</span>
         <div style="flex:1;font-weight:500;font-size:.82rem">${a.alias}</div>
         <div style="font-size:.72rem;color:var(--text3)">Last: ${triggered}</div>
+        <button class="btn btn-danger" style="padding:2px 8px;font-size:.72rem" onclick="removeFromHA('${(a.entity_id||'').replace(/'/g, "\\'")}')">Remove</button>
       </div>`;
     }).join('');
     if (disabled.length) {
       haHtml += `<details style="margin-top:10px"><summary style="cursor:pointer;color:var(--text3);font-size:.82rem">Disabled automations (${disabled.length})</summary><div style="margin-top:6px">`;
-      haHtml += disabled.map(a => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;opacity:.6">
+      haHtml += disabled.map(a => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;opacity:.8">
         <span class="badge b-muted" style="font-size:.68rem">off</span>
         <div style="flex:1;font-size:.82rem">${a.alias}</div>
+        <button class="btn btn-danger" style="padding:2px 8px;font-size:.72rem" onclick="removeFromHA('${(a.entity_id||'').replace(/'/g, "\\'")}')">Remove</button>
       </div>`).join('');
       haHtml += '</div></details>';
     }
@@ -1809,7 +1889,8 @@ async function load() {
   // Insights — Automation Health
   if (autoScores && autoScores.length) {
     document.getElementById('auto-scores').innerHTML = `
-      <table>
+      <div class="table-wrap">
+      <table class="auto-health-table">
         <thead><tr><th>Automation</th><th>Triggers/7d</th><th>Overrides</th><th>Score</th><th style="width:80px"></th></tr></thead>
         <tbody>${autoScores.map(a=>{
           const col = a.score>=70?'var(--green)':a.score>=40?'var(--amber)':'var(--red)';
@@ -1823,7 +1904,8 @@ async function load() {
             <td><div class="bar-wrap"><div class="bar" style="width:${a.score}%;background:${col}"></div></div></td>
           </tr>`;}).join('')}
         </tbody>
-      </table>`;
+      </table>
+      </div>`;
   } else {
     document.getElementById('auto-scores').innerHTML = '<div style="color:var(--text3);padding:12px">No automations scored yet.</div>';
   }
@@ -2291,6 +2373,43 @@ def api_add_automation():
             f"{ha_url}/api/config/automation/config/{alias}",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             json=auto,
+            timeout=10,
+        )
+        if r.status_code in (200, 201, 204):
+            return jsonify({"ok": True})
+        return jsonify({"ok": False, "error": f"HA {r.status_code}"}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/remove_automation", methods=["POST"])
+@app.route("/ingress/api/remove_automation", methods=["POST"])
+def api_remove_automation():
+    import requests as req
+
+    data = request.get_json() or {}
+    entity_id = (data.get("entity_id") or "").strip()
+    alias = (data.get("alias") or "").strip().lower()
+
+    if entity_id.startswith("automation."):
+        automation_id = entity_id.split(".", 1)[1]
+    else:
+        automation_id = (
+            alias.replace(" ", "_").replace("—", "").replace("–", "")
+            if alias
+            else ""
+        )
+
+    if not automation_id:
+        return jsonify({"ok": False, "error": "missing entity_id/alias"}), 400
+
+    ha_url = os.environ.get("HA_URL", "http://supervisor/core")
+    token = os.environ.get("SUPERVISOR_TOKEN", "")
+
+    try:
+        r = req.delete(
+            f"{ha_url}/api/config/automation/config/{automation_id}",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             timeout=10,
         )
         if r.status_code in (200, 201, 204):
