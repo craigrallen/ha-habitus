@@ -868,7 +868,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     _max_w = _env_float("HABITUS_MAX_POWER_KW", 25.0) * 1000.0
     _power_entity = os.environ.get("HABITUS_POWER_ENTITY", "").strip()
     _energy_grid = os.environ.get("HABITUS_ENERGY_GRID", "").strip()
-    _energy_rates = [e for e in os.environ.get("HABITUS_ENERGY_RATES", "").split(",") if e]
+    _energy_rates = [e.strip() for e in os.environ.get("HABITUS_ENERGY_RATES", "").split(",") if e.strip()]
 
     grid_kwh_w = pd.Series(dtype=float, name="grid_kwh_w")  # init before branches
     if _power_entity:

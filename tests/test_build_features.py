@@ -70,6 +70,23 @@ def test_build_features_gas_entities_compute_hourly_delta(monkeypatch) -> None:
     assert per_hour[ts1] == pytest.approx(1.2)
 
 
+def test_build_features_energy_rates_trim_whitespace(monkeypatch) -> None:
+    monkeypatch.delenv("HABITUS_POWER_ENTITY", raising=False)
+    monkeypatch.delenv("HABITUS_ENERGY_GRID", raising=False)
+    monkeypatch.setenv("HABITUS_ENERGY_RATES", " sensor.rate_a , sensor.rate_b ")
+
+    ts0 = pd.Timestamp("2026-01-01T00:00:00Z")
+    df = pd.DataFrame(
+        [
+            {"entity_id": "sensor.rate_a", "ts": ts0, "mean": 300.0, "sum": None},
+            {"entity_id": "sensor.rate_b", "ts": ts0, "mean": 700.0, "sum": None},
+        ]
+    )
+
+    features = build_features(df)
+    assert float(features.loc[0, "total_power_w"]) == 1000.0
+
+
 def test_build_features_invalid_max_power_env_uses_default(monkeypatch) -> None:
     monkeypatch.setenv("HABITUS_POWER_ENTITY", "sensor.house_power")
     monkeypatch.setenv("HABITUS_MAX_POWER_KW", "not-a-number")
