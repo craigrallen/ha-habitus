@@ -938,6 +938,18 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         leak_series = leaks.groupby("hour")["v"].max().rename("water_leak")
         features = features.join(leak_series, how="left")
 
+    # Gas meters (m³) — convert cumulative readings to hourly consumption
+    gas_entities = [e.strip() for e in os.environ.get("HABITUS_GAS_ENTITIES", "").split(",") if e.strip()]
+    if gas_entities:
+        gas = df[df["entity_id"].isin(gas_entities)].copy()
+        if not gas.empty:
+            max_gas = float(os.environ.get("HABITUS_MAX_GAS_M3_H", "20"))
+            gas["v"] = pd.to_numeric(gas["mean"], errors="coerce").clip(lower=0)
+            gas = gas.sort_values(["entity_id", "hour"])
+            gas["delta"] = gas.groupby("entity_id")["v"].diff().clip(lower=0, upper=max_gas)
+            gas_series = gas.groupby("hour")["delta"].sum(min_count=1).rename("gas_m3_per_h")
+            features = features.join(gas_series, how="left")
+
     # Ensure all FEATURE_COLS exist (pad with zeros if activity extraction failed)
     for col in FEATURE_COLS:
         if col not in features.columns:

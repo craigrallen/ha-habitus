@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from habitus.habitus.main import build_features
 
@@ -45,6 +46,28 @@ def test_build_features_grid_energy_populates_grid_kwh_w(monkeypatch) -> None:
     assert per_hour_grid[ts0] == 0.0
     assert per_hour_grid[ts1] == 1500.0
     assert per_hour_power[ts1] == 1500.0
+
+
+def test_build_features_gas_entities_compute_hourly_delta(monkeypatch) -> None:
+    monkeypatch.setenv("HABITUS_GAS_ENTITIES", "sensor.gas_meter_total")
+
+    ts0 = pd.Timestamp("2026-01-01T00:00:00Z")
+    ts1 = pd.Timestamp("2026-01-01T01:00:00Z")
+
+    df = pd.DataFrame(
+        [
+            {"entity_id": "sensor.mastervolt_total_load", "ts": ts0, "mean": 500.0, "sum": None},
+            {"entity_id": "sensor.mastervolt_total_load", "ts": ts1, "mean": 450.0, "sum": None},
+            {"entity_id": "sensor.gas_meter_total", "ts": ts0, "mean": 100.0, "sum": None},
+            {"entity_id": "sensor.gas_meter_total", "ts": ts1, "mean": 101.2, "sum": None},
+        ]
+    )
+
+    features = build_features(df)
+
+    per_hour = dict(zip(features["hour"], features["gas_m3_per_h"], strict=False))
+    assert per_hour[ts0] == 0.0
+    assert per_hour[ts1] == pytest.approx(1.2)
 
 
 def test_build_features_leak_sensor_prefers_state_when_available() -> None:
