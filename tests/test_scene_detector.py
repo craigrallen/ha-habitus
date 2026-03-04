@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from itertools import combinations
 
+from habitus.habitus import scene_detector
 from habitus.habitus.scene_detector import _find_co_occurrences
 
 
@@ -63,3 +64,39 @@ def test_find_co_occurrences_handles_empty_and_non_activation_input() -> None:
         [{"entity_id": "switch.tv", "state": "off", "timestamp": 1.0}],
         window_s=60,
     ) == {}
+
+
+def test_detect_scenes_confidence_counts_wrapped_midnight_window(monkeypatch) -> None:
+    monkeypatch.setattr(
+        scene_detector,
+        "_get_state_changes",
+        lambda days: [{"entity_id": "light.kitchen", "state": "on", "timestamp": 1.0}],
+    )
+    monkeypatch.setattr(
+        scene_detector,
+        "_find_co_occurrences",
+        lambda changes: {("light.kitchen", "switch.tv"): [1.0] * 10},
+    )
+    monkeypatch.setattr(
+        scene_detector,
+        "_cluster_pairs_to_scenes",
+        lambda pairs: [{"light.kitchen", "switch.tv"}],
+    )
+    monkeypatch.setattr(
+        scene_detector,
+        "_analyze_time_patterns",
+        lambda entities, changes: {
+            "count": 10,
+            "peak_hour": 23,
+            "best_window_start": 23,
+            "best_window_end": 1,
+            "time_label": "Night",
+            "day_pattern": "daily",
+            "hour_distribution": {23: 4, 0: 3, 1: 2, 12: 1},
+        },
+    )
+
+    scenes = scene_detector.detect_scenes(days=30)
+
+    assert len(scenes) == 1
+    assert scenes[0]["confidence"] == 60

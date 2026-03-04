@@ -507,12 +507,10 @@ def detect_scenes(days: int = 30) -> list[dict[str, Any]]:
         # Calculate confidence based on frequency and consistency
         freq_score = min(100, time_info["count"] * 3)  # More occurrences = higher
         # Time consistency: how concentrated in peak window
+        best_window_start = time_info.get("best_window_start", 0)
         total_in_peak = sum(
-            time_info.get("hour_distribution", {}).get(h, 0)
-            for h in range(
-                time_info.get("best_window_start", 0),
-                time_info.get("best_window_start", 0) + 3,
-            )
+            time_info.get("hour_distribution", {}).get((best_window_start + offset) % 24, 0)
+            for offset in range(3)
         )
         time_consistency = (
             (total_in_peak / max(time_info["count"], 1)) * 100
