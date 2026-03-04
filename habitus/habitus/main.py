@@ -550,6 +550,7 @@ def fetch_stats_sqlite(entity_ids, start_iso, end_iso=None):
     Preferred path for Supervisor app/add-on installs.
     Falls back to API path if DB is unavailable.
     """
+    import time as _t
     db_path = os.environ.get("HABITUS_HA_DB", "/homeassistant/home-assistant_v2.db")
     if os.environ.get("HABITUS_FORCE_API", "").lower() == "true":
         return pd.DataFrame()
@@ -564,6 +565,9 @@ def fetch_stats_sqlite(entity_ids, start_iso, end_iso=None):
 
     rows = []
     batch = int(os.environ.get("HABITUS_SQL_BATCH", "300"))
+    total = len(entity_ids)
+    done = 0
+    t0 = _t.time()
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
@@ -583,6 +587,11 @@ def fetch_stats_sqlite(entity_ids, start_iso, end_iso=None):
             """
             cur.execute(q, [*chunk, start_ts, end_ts])
             rows.extend(cur.fetchall())
+            done += len(chunk)
+            elapsed = _t.time() - t0
+            eta = (elapsed / done) * (total - done) if done else 0
+            set_progress("fetching", done, total, len(rows), elapsed, eta)
+            log.info("  %d/%d sensors — %d rows", done, total, len(rows))
         conn.close()
     except Exception as e:
         log.warning("Direct SQLite stats read failed: %s", e)
