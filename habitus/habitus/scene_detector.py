@@ -119,7 +119,9 @@ def _get_state_changes(days: int = 30) -> list[dict[str, Any]]:
 
 
 def _find_co_occurrences(
-    changes: list[dict[str, Any]], window_s: int = CO_OCCURRENCE_WINDOW
+    changes: list[dict[str, Any]],
+    window_s: int = CO_OCCURRENCE_WINDOW,
+    strict_sorted: bool = False,
 ) -> dict[tuple[str, str], list[float]]:
     """Find groups of entities that change state within the same time window.
 
@@ -127,9 +129,25 @@ def _find_co_occurrences(
     activations for every event.
 
     Returns dict mapping entity pairs to occurrence timestamps.
+
+    Args:
+        changes: Input events. Expected to be sorted by ascending ``timestamp``.
+        window_s: Co-occurrence window in seconds.
+        strict_sorted: When ``True``, validate that ``changes`` are monotonic by
+            timestamp and fail fast with ``ValueError`` if not.
     """
     if not changes:
         return {}
+
+    if strict_sorted:
+        last_ts = float(changes[0].get("timestamp", 0.0))
+        for idx, change in enumerate(changes[1:], start=1):
+            ts = float(change.get("timestamp", 0.0))
+            if ts < last_ts:
+                raise ValueError(
+                    f"changes must be sorted by timestamp for _find_co_occurrences (index {idx})"
+                )
+            last_ts = ts
 
     # Group "on" transitions (state going to on/playing/open/home)
     on_states = {"on", "playing", "open", "home", "heat", "cool", "auto", "above_horizon"}

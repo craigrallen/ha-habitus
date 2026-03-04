@@ -66,6 +66,29 @@ def test_find_co_occurrences_handles_empty_and_non_activation_input() -> None:
     ) == {}
 
 
+def test_find_co_occurrences_strict_sorted_guard_raises_for_unsorted_input() -> None:
+    changes = [
+        {"entity_id": "light.kitchen", "state": "on", "timestamp": 10.0},
+        {"entity_id": "switch.tv", "state": "on", "timestamp": 9.0},
+    ]
+
+    try:
+        _find_co_occurrences(changes, window_s=60, strict_sorted=True)
+        assert False, "Expected ValueError for unsorted timestamps"
+    except ValueError as exc:
+        assert "sorted" in str(exc)
+
+
+def test_find_co_occurrences_strict_sorted_guard_accepts_sorted_input() -> None:
+    changes = [
+        {"entity_id": "light.kitchen", "state": "on", "timestamp": 9.0},
+        {"entity_id": "switch.tv", "state": "on", "timestamp": 10.0},
+    ]
+
+    result = _find_co_occurrences(changes, window_s=60, strict_sorted=True)
+    assert result == {("light.kitchen", "switch.tv"): [9.0]}
+
+
 def _baseline_cluster_pairs_to_scenes(
     pair_occurrences: dict[tuple[str, str], list[float]],
     min_co: int,
