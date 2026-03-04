@@ -856,7 +856,16 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     hours["day_of_week"] = hours["hour"].dt.dayofweek
     hours["is_weekend"] = (hours["day_of_week"] >= 5).astype(int)
     hours["month"] = hours["hour"].dt.month
-    _max_w = int(os.environ.get("HABITUS_MAX_POWER_KW", "25")) * 1000
+    def _env_float(name: str, default: float) -> float:
+        raw = os.environ.get(name)
+        if raw in (None, ""):
+            return default
+        with contextlib.suppress(TypeError, ValueError):
+            return float(raw)
+        log.warning("Invalid %s=%r; using default %.3f", name, raw, default)
+        return default
+
+    _max_w = _env_float("HABITUS_MAX_POWER_KW", 25.0) * 1000.0
     _power_entity = os.environ.get("HABITUS_POWER_ENTITY", "").strip()
     _energy_grid = os.environ.get("HABITUS_ENERGY_GRID", "").strip()
     _energy_rates = [e for e in os.environ.get("HABITUS_ENERGY_RATES", "").split(",") if e]
@@ -912,8 +921,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         )
     ].copy()
     if not water_pump.empty:
+        max_water = _env_float("HABITUS_MAX_WATER_L_H", 5000.0)
         water_pump["v"] = pd.to_numeric(water_pump["mean"], errors="coerce").clip(
-            lower=0, upper=5000
+            lower=0, upper=max_water
         )
         wp_series = water_pump.groupby("hour")["v"].max().rename("water_l_per_h")
         features = features.join(wp_series, how="left")
@@ -943,7 +953,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     if gas_entities:
         gas = df[df["entity_id"].isin(gas_entities)].copy()
         if not gas.empty:
-            max_gas = float(os.environ.get("HABITUS_MAX_GAS_M3_H", "20"))
+            max_gas = _env_float("HABITUS_MAX_GAS_M3_H", 20.0)
             gas["v"] = pd.to_numeric(gas["mean"], errors="coerce").clip(lower=0)
             gas = gas.sort_values(["entity_id", "hour"])
             gas["delta"] = gas.groupby("entity_id")["v"].diff().clip(lower=0, upper=max_gas)
