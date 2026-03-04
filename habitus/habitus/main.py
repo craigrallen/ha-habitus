@@ -287,8 +287,111 @@ async def get_stat_ids() -> tuple[list[str], int]:
     await ws.close()
     all_ids = [s["statistic_id"] for s in result.get("result", [])]
     behavioral = [e for e in all_ids if is_behavioral(e)]
-    log.info(f"Found {len(behavioral)} behavioral sensors (from {len(all_ids)} total)")
+    log.info(f"Found {len(behavioral)} behavioral sensors with long-term stats (from {len(all_ids)} total stats ids)")
     return behavioral, len(all_ids)
+
+
+async def get_behavioral_entity_ids() -> list[str]:
+    """Return behavioral entity ids from live HA state list (includes non-stat entities)."""
+    try:
+        headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
+        r = requests.get(f"{HA_URL}/api/states", headers=headers, timeout=15)
+        if r.status_code != 200:
+            return []
+        states = r.json()
+        if not isinstance(states, list):
+            return []
+        ids = [s.get("entity_id", "") for s in states if isinstance(s, dict)]
+        return [e for e in ids if e and is_behavioral(e)]
+    except Exception:
+        return []
+
+
+def _state_to_numeric(state: object) -> float | None:
+    """Best-effort conversion of HA state strings to numeric values."""
+    if state is None:
+        return None
+    s = str(state).strip().lower()
+    if s in {"unknown", "unavailable", "none", "null", ""}:
+        return None
+    try:
+        return float(s)
+    except Exception:
+        pass
+    on_states = {"on", "open", "opening", "home", "playing", "heat", "cool", "auto", "true", "armed"}
+    off_states = {"off", "closed", "closing", "not_home", "idle", "standby", "false", "disarmed", "clear"}
+    if s in on_states:
+        return 1.0
+    if s in off_states:
+        return 0.0
+    return None
+
+
+def fetch_recent_raw_history(entity_ids: list[str], start_iso: str, end_iso: str) -> pd.DataFrame:
+    """Fetch raw history for entities that lack long-term recorder statistics.
+
+    Uses HA /api/history/period in batches and collapses raw state changes to hourly means.
+    """
+    if not entity_ids:
+        return pd.DataFrame()
+
+    headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
+    rows: list[dict] = []
+    batch_size = 25
+
+    for i in range(0, len(entity_ids), batch_size):
+        batch = entity_ids[i : i + batch_size]
+        try:
+            params = {
+                "end_time": end_iso,
+                "filter_entity_id": ",".join(batch),
+                "minimal_response": "true",
+                "no_attributes": "true",
+                "significant_changes_only": "false",
+            }
+            r = requests.get(
+                f"{HA_URL}/api/history/period/{start_iso}",
+                headers=headers,
+                params=params,
+                timeout=60,
+            )
+            if r.status_code != 200:
+                continue
+            payload = r.json()
+            if not isinstance(payload, list):
+                continue
+            for series in payload:
+                if not isinstance(series, list):
+                    continue
+                for p in series:
+                    if not isinstance(p, dict):
+                        continue
+                    eid = p.get("entity_id")
+                    val = _state_to_numeric(p.get("state"))
+                    if not eid or val is None:
+                        continue
+                    ts = p.get("last_changed") or p.get("last_updated")
+                    if not ts:
+                        continue
+                    rows.append({"entity_id": eid, "ts": ts, "mean": val, "sum": None})
+        except Exception:
+            continue
+
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    df["ts"] = pd.to_datetime(df["ts"], utc=True, errors="coerce")
+    df = df.dropna(subset=["ts"])
+    if df.empty:
+        return pd.DataFrame()
+
+    df["hour"] = df["ts"].dt.floor("h")
+    out = df.groupby(["entity_id", "hour"], as_index=False)["mean"].mean()
+    out = out.rename(columns={"hour": "ts"})
+    out["sum"] = None
+    log.info("Fetched raw short-term history for %d non-stat entities (%d hourly rows)", len(entity_ids), len(out))
+    return out[["entity_id", "ts", "mean", "sum"]]
 
 
 def get_ha_entity_count() -> int:
@@ -1033,10 +1136,20 @@ async def run(days_history: int, mode: str = "full") -> None:
             log.info("Water meters: %s", energy["water"])
 
     stat_ids, total_stat_ids = await get_stat_ids()
-    if not stat_ids:
+    behavioral_entity_ids = await get_behavioral_entity_ids()
+    stat_id_set = set(stat_ids)
+    non_stat_ids = [e for e in behavioral_entity_ids if e not in stat_id_set]
+
+    if not stat_ids and not non_stat_ids:
         log.error("No behavioral sensors found")
         return
+
     total_entities = get_ha_entity_count()
+    log.info(
+        "Behavioral coverage: %d with long-term stats + %d raw-only entities",
+        len(stat_ids),
+        len(non_stat_ids),
+    )
 
     if state.get("data_to") and os.path.exists(MODEL_PATH):
         # Incremental
@@ -1071,10 +1184,21 @@ async def run(days_history: int, mode: str = "full") -> None:
             full_from = saved if saved > cap_iso else cap_iso
             log.info(f"Retraining {days_history}d window {full_from} → {now_iso}")
             set_progress("fetching", 0, len(stat_ids), 0, 0, 0)
-            df = await fetch_stats(stat_ids, full_from, now_iso)
-            if df.empty:
+            df_stats = await fetch_stats(stat_ids, full_from, now_iso) if stat_ids else pd.DataFrame()
+
+            raw_max_days = int(os.environ.get("HABITUS_RAW_MAX_DAYS", "30"))
+            raw_days = min(days_history, raw_max_days)
+            raw_from = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=raw_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            raw_to = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            df_raw = fetch_recent_raw_history(non_stat_ids, raw_from, raw_to)
+
+            frames = [x for x in (df_stats, df_raw) if x is not None and not x.empty]
+            if not frames:
                 log.warning("No data")
                 return
+            df = pd.concat(frames, ignore_index=True)
+            unique_entity_count = int(df["entity_id"].nunique())
+
             set_progress("building_baselines", len(stat_ids), len(stat_ids), len(df), 0, 0)
             log.info("Building entity baselines...")
             anomaly_breakdown.build_entity_baselines(df)
@@ -1260,23 +1384,34 @@ async def run(days_history: int, mode: str = "full") -> None:
             training_days = round(
                 (features["hour"].max() - features["hour"].min()).total_seconds() / 86400
             )
-            entity_count = len(stat_ids)
+            entity_count = unique_entity_count
     else:
         # First run — all history
         cap = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days_history)
         full_from = cap.strftime("%Y-%m-%dT%H:00:00+00:00")
         log.info(f"First run: fetching last {days_history} days from {full_from}")
         set_progress("fetching", 0, len(stat_ids), 0, 0, 0)
-        df = await fetch_stats(stat_ids, full_from, now_iso)
-        if df.empty:
+        df_stats = await fetch_stats(stat_ids, full_from, now_iso) if stat_ids else pd.DataFrame()
+
+        raw_max_days = int(os.environ.get("HABITUS_RAW_MAX_DAYS", "30"))
+        raw_days = min(days_history, raw_max_days)
+        raw_from = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=raw_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        raw_to = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        df_raw = fetch_recent_raw_history(non_stat_ids, raw_from, raw_to)
+
+        frames = [x for x in (df_stats, df_raw) if x is not None and not x.empty]
+        if not frames:
             log.warning("No data returned")
             return
+        df = pd.concat(frames, ignore_index=True)
+        unique_entity_count = int(df["entity_id"].nunique())
+
         set_progress("building_baselines", len(stat_ids), len(stat_ids), len(df), 0, 0)
         log.info("Building entity baselines...")
         anomaly_breakdown.build_entity_baselines(df)
         activity_engine.build_activity_baseline(activity_engine.extract_activity_features(df))
         # Partial state write — unblocks UI baseline tab
-        state.update({"phase": "baselines_ready", "entity_count": len(stat_ids)})
+        state.update({"phase": "baselines_ready", "entity_count": unique_entity_count})
         save_state(state)
         features = build_features(df)
         del df
@@ -1441,7 +1576,7 @@ async def run(days_history: int, mode: str = "full") -> None:
         training_days = round(
             (features["hour"].max() - features["hour"].min()).total_seconds() / 86400
         )
-        entity_count = len(stat_ids)
+        entity_count = unique_entity_count
         state["data_from"] = full_from
         # Record actual first data point date (not the query start)
         # actual_start logic moved earlier (before del df)

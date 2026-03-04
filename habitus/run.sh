@@ -33,7 +33,7 @@ export HABITUS_MAX_POWER_KW=$(bashio::config "max_power_kw" 2>/dev/null || echo 
 export HABITUS_POWER_ENTITY=$(bashio::config "power_entity" 2>/dev/null || echo "")
 export HABITUS_KWH_PRICE=$(bashio::config "kwh_price" 2>/dev/null || echo "0.30")
 export HABITUS_CURRENCY=$(bashio::config "currency" 2>/dev/null || echo "kr")
-bashio::log.info "Habitus v3.8.3 | Schedule: ${SCHEDULE} | Train: ${TRAIN_TIME} | Scan: ${SCAN}h | Days: ${DAYS}"
+bashio::log.info "Habitus v3.8.4 | Schedule: ${SCHEDULE} | Train: ${TRAIN_TIME} | Scan: ${SCAN}h | Days: ${DAYS}"
 
 cd /app && python3 -u -c "
 import sys, os, traceback
