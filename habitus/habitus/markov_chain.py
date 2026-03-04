@@ -12,10 +12,11 @@ import sqlite3
 from collections import Counter, defaultdict
 from typing import Any
 
+from .ha_db import resolve_ha_db_path
+
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 MARKOV_PATH = os.path.join(DATA_DIR, "markov_model.json")
-HA_DB = "/homeassistant/home-assistant_v2.db"
 
 ACTION_DOMAINS = ("light", "switch", "media_player", "climate", "fan", "cover",
                   "binary_sensor", "input_boolean")
@@ -32,7 +33,8 @@ def build_markov_model(entity_to_area: dict[str, str], days: int = 30) -> dict[s
 
     Transition: (entity_A:state_A) → (entity_B:state_B) with probability.
     """
-    if not os.path.exists(HA_DB):
+    db_path = resolve_ha_db_path()
+    if not db_path:
         return {"transitions": {}, "predictions": []}
 
     cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)
@@ -41,7 +43,7 @@ def build_markov_model(entity_to_area: dict[str, str], days: int = 30) -> dict[s
     like_clauses = " OR ".join(f"sm.entity_id LIKE '{d}.%'" for d in ACTION_DOMAINS)
 
     try:
-        conn = sqlite3.connect(f"file:{HA_DB}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         rows = conn.execute(f"""
             SELECT sm.entity_id, s.state, s.last_changed_ts
             FROM states s

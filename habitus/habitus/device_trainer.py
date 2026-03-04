@@ -20,13 +20,14 @@ import sqlite3
 import time
 from typing import Any
 
+from .ha_db import resolve_ha_db_path
+
 import numpy as np
 
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 CUSTOM_SIGNATURES_PATH = os.path.join(DATA_DIR, "custom_signatures.json")
 TRAINING_SESSION_PATH = os.path.join(DATA_DIR, "training_session.json")
-HA_DB = "/homeassistant/home-assistant_v2.db"
 
 
 def _load_custom_signatures() -> list[dict]:
@@ -99,9 +100,10 @@ def stop_training_session(device_name: str, device_category: str = "custom") -> 
 
     # Read power values during the training window from DB
     readings = []
-    if os.path.exists(HA_DB):
+    db_path = resolve_ha_db_path()
+    if db_path:
         try:
-            conn = sqlite3.connect(f"file:{HA_DB}?mode=ro", uri=True)
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
             rows = conn.execute("""
                 SELECT s.state, s.last_changed_ts FROM states s
                 JOIN states_meta sm ON s.metadata_id = sm.metadata_id

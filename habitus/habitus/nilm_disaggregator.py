@@ -23,13 +23,14 @@ import sqlite3
 from collections import Counter, defaultdict
 from typing import Any
 
+from .ha_db import resolve_ha_db_path
+
 import numpy as np
 
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 NILM_PATH = os.path.join(DATA_DIR, "nilm_disaggregation.json")
 CUSTOM_SIGS_PATH = os.path.join(DATA_DIR, "custom_signatures.json")
-HA_DB = "/homeassistant/home-assistant_v2.db"
 
 # Edge detection
 MIN_EDGE_WATTS = 100  # Minimum step change to count as an appliance event
@@ -70,9 +71,10 @@ def _get_aggregate_power(entity_id: str, days: int = 7) -> list[tuple[float, flo
     cutoff_ts = cutoff.timestamp()
 
     # 1) DB path
-    if os.path.exists(HA_DB):
+    db_path = resolve_ha_db_path()
+    if db_path:
         try:
-            conn = sqlite3.connect(f"file:{HA_DB}?mode=ro", uri=True)
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
             rows = conn.execute("""
                 SELECT s.state, s.last_changed_ts FROM states s
                 JOIN states_meta sm ON s.metadata_id = sm.metadata_id
@@ -307,9 +309,10 @@ def _learn_signatures_from_known_monitors(exclude_entity: str = "", days: int = 
             learned[key]['priority'] = 1
 
     # 1) DB learning
-    if os.path.exists(HA_DB):
+    db_path = resolve_ha_db_path()
+    if db_path:
         try:
-            conn = sqlite3.connect(f"file:{HA_DB}?mode=ro", uri=True)
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
             candidates = conn.execute("""
                 SELECT DISTINCT sm.entity_id
                 FROM states_meta sm
@@ -523,9 +526,10 @@ def run_disaggregation(power_entity: str = "", days: int = 7) -> dict[str, Any]:
                 pass
         if not power_entity:
             # Auto-detect
-            if os.path.exists(HA_DB):
+            db_path = resolve_ha_db_path()
+            if db_path:
                 try:
-                    conn = sqlite3.connect(f"file:{HA_DB}?mode=ro", uri=True)
+                    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
                     rows = conn.execute("""
                         SELECT DISTINCT sm.entity_id FROM states_meta sm
                         WHERE sm.entity_id LIKE 'sensor.%'

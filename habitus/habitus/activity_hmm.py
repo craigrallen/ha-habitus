@@ -17,12 +17,13 @@ import sqlite3
 from collections import Counter, defaultdict
 from typing import Any
 
+from .ha_db import resolve_ha_db_path
+
 import numpy as np
 
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 HMM_PATH = os.path.join(DATA_DIR, "activity_states.json")
-HA_DB = "/homeassistant/home-assistant_v2.db"
 
 # Number of hidden activity states to discover
 N_STATES = 8
@@ -37,14 +38,15 @@ def _build_observation_matrix(entity_to_area: dict[str, str], days: int = 30) ->
     Features: lights_on, switches_on, motion_events, media_active, climate_active,
               doors_open, people_home, power_level (binned), hour_of_day
     """
-    if not os.path.exists(HA_DB):
+    db_path = resolve_ha_db_path()
+    if not db_path:
         return np.array([]), []
 
     cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)
     cutoff_ts = cutoff.timestamp()
 
     try:
-        conn = sqlite3.connect(f"file:{HA_DB}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         rows = conn.execute("""
             SELECT sm.entity_id, s.state, s.last_changed_ts
             FROM states s

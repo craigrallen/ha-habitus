@@ -19,10 +19,11 @@ import sqlite3
 from collections import Counter, defaultdict
 from typing import Any
 
+from .ha_db import resolve_ha_db_path
+
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 CORRELATIONS_PATH = os.path.join(DATA_DIR, "correlations.json")
-HA_DB = "/homeassistant/home-assistant_v2.db"
 
 # Only analyse actionable domains (skip sensors — they're triggers, not actions)
 ACTION_DOMAINS = ("light", "switch", "media_player", "climate", "fan", "cover", "input_boolean")
@@ -45,7 +46,8 @@ def _get_state_change_events(days: int = 30) -> dict[str, list[tuple[float, str]
 
     Returns: {entity_id: [(timestamp, new_state), ...]}
     """
-    if not os.path.exists(HA_DB):
+    db_path = resolve_ha_db_path()
+    if not db_path:
         return {}
 
     cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)
@@ -55,7 +57,7 @@ def _get_state_change_events(days: int = 30) -> dict[str, list[tuple[float, str]
     like_clauses = " OR ".join(f"sm.entity_id LIKE '{d}.%'" for d in all_domains)
 
     try:
-        conn = sqlite3.connect(f"file:{HA_DB}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         cursor = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='states_meta'"
         )

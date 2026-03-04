@@ -15,12 +15,13 @@ import sqlite3
 from collections import defaultdict
 from typing import Any
 
+from .ha_db import resolve_ha_db_path
+
 import numpy as np
 
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 FORECAST_PATH = os.path.join(DATA_DIR, "energy_forecast.json")
-HA_DB = "/homeassistant/home-assistant_v2.db"
 
 # Default entities
 WEATHER_ENTITY = "weather.forecast_home"  # HA default weather integration
@@ -32,14 +33,15 @@ def _get_daily_energy_and_weather(days: int = 90) -> list[dict]:
 
     Returns list of {date, kwh, avg_temp, min_temp, max_temp, day_of_week, month}.
     """
-    if not os.path.exists(HA_DB):
+    db_path = resolve_ha_db_path()
+    if not db_path:
         return []
 
     cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)
     cutoff_ts = cutoff.timestamp()
 
     try:
-        conn = sqlite3.connect(f"file:{HA_DB}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
 
         # Find energy entity (cumulative kWh meter)
         energy_candidates = conn.execute("""

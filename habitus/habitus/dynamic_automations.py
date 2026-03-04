@@ -15,12 +15,13 @@ import sqlite3
 from collections import Counter, defaultdict
 from typing import Any
 
+from .ha_db import resolve_ha_db_path
+
 import numpy as np
 
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 DYNAMIC_PATH = os.path.join(DATA_DIR, "dynamic_automations.json")
-HA_DB = "/homeassistant/home-assistant_v2.db"
 
 # Drift detection window
 RECENT_DAYS = 7
@@ -34,14 +35,15 @@ def _get_routine_timings(entity_to_area: dict[str, str], days: int = 30) -> dict
 
     Returns: {event_key: [{date, hour, minute, timestamp}, ...]}
     """
-    if not os.path.exists(HA_DB):
+    db_path = resolve_ha_db_path()
+    if not db_path:
         return {}
 
     cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)
     cutoff_ts = cutoff.timestamp()
 
     try:
-        conn = sqlite3.connect(f"file:{HA_DB}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         rows = conn.execute("""
             SELECT sm.entity_id, s.state, s.last_changed_ts
             FROM states s
