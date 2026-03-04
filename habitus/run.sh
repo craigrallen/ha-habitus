@@ -77,6 +77,12 @@ start_web(int(os.environ.get('INGRESS_PORT','8099')))
         WEB_PID=$!
     fi
 
+    if [ -f /data/progress.json ] && grep -q '"running"[[:space:]]*:[[:space:]]*true' /data/progress.json 2>/dev/null; then
+        bashio::log.info "Training already running — skip scheduler tick"
+        sleep 30
+        continue
+    fi
+
     if [ -f "$RESCAN_FLAG" ]; then
         bashio::log.info "Full rescan — wiping state"
         rm -f "$RESCAN_FLAG" "$STATE_FILE" /data/model*.pkl /data/scaler*.pkl
