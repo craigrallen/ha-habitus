@@ -595,8 +595,8 @@ def fetch_stats_sqlite(entity_ids, start_iso, end_iso=None):
                 """,
                 [*chunk, start_ts, end_ts],
             )
-            for eid, ts, mean, summ in cur.fetchall():
-                rows.append({"entity_id": eid, "ts": ts, "mean": mean, "sum": summ})
+            batch_rows = cur.fetchall()
+            rows.extend(batch_rows)
 
             done += len(chunk)
             elapsed = _t.time() - t0
