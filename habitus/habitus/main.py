@@ -1186,7 +1186,7 @@ async def run(days_history: int, mode: str = "full") -> None:
             set_progress("fetching", 0, len(stat_ids), 0, 0, 0)
             df_stats = await fetch_stats(stat_ids, full_from, now_iso) if stat_ids else pd.DataFrame()
 
-            raw_max_days = int(os.environ.get("HABITUS_RAW_MAX_DAYS", "30"))
+            raw_max_days = int(os.environ.get("HABITUS_RAW_MAX_DAYS", "3650"))
             raw_days = min(days_history, raw_max_days)
             raw_from = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=raw_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
             raw_to = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -1393,7 +1393,7 @@ async def run(days_history: int, mode: str = "full") -> None:
         set_progress("fetching", 0, len(stat_ids), 0, 0, 0)
         df_stats = await fetch_stats(stat_ids, full_from, now_iso) if stat_ids else pd.DataFrame()
 
-        raw_max_days = int(os.environ.get("HABITUS_RAW_MAX_DAYS", "30"))
+        raw_max_days = int(os.environ.get("HABITUS_RAW_MAX_DAYS", "3650"))
         raw_days = min(days_history, raw_max_days)
         raw_from = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=raw_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
         raw_to = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
