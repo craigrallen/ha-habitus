@@ -380,6 +380,9 @@ ROOM_KEYWORDS = [
     "foredeck", "aft_deck", "anchor", "helm",
 ]
 
+# Hoisted once to avoid per-call sorting inside _extract_room.
+_ROOM_KEYWORDS_SORTED = tuple(sorted(ROOM_KEYWORDS, key=len, reverse=True))
+
 
 def _extract_room(entity_id: str) -> str | None:
     """Extract room name from an entity ID using keyword matching.
@@ -390,8 +393,7 @@ def _extract_room(entity_id: str) -> str | None:
     name_part = entity_id.split(".")[-1].lower()
 
     # Try longest match first (e.g. "living_room" before "room")
-    sorted_keywords = sorted(ROOM_KEYWORDS, key=len, reverse=True)
-    for kw in sorted_keywords:
+    for kw in _ROOM_KEYWORDS_SORTED:
         kw_underscore = kw.replace(" ", "_")
         if kw_underscore in name_part or kw in name_part:
             return kw.replace("_", " ").title()

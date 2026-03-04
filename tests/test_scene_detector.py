@@ -156,3 +156,15 @@ def test_detect_scenes_confidence_counts_wrapped_midnight_window(monkeypatch) ->
 
     assert len(scenes) == 1
     assert scenes[0]["confidence"] == 60
+
+
+def test_extract_room_uses_hoisted_keyword_cache(monkeypatch) -> None:
+    monkeypatch.setattr(scene_detector, "_ROOM_KEYWORDS_SORTED", ("galley", "kitchen"))
+
+    assert scene_detector._extract_room("light.boat_galley_main") == "Galley"
+
+
+def test_room_keyword_cache_prefers_longest_keyword() -> None:
+    sorted_keywords = scene_detector._ROOM_KEYWORDS_SORTED
+    assert sorted_keywords[0] == "master_bedroom"
+    assert sorted_keywords.index("master_bedroom") < sorted_keywords.index("bedroom")
