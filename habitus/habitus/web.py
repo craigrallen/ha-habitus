@@ -6,7 +6,7 @@ import os
 import yaml as _yaml  # type: ignore[import-untyped]
 from flask import Flask, jsonify, render_template_string, request
 
-from habitus import trainer as _trainer
+from . import trainer as _trainer
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 STATE_PATH = os.path.join(DATA_DIR, "run_state.json")
@@ -1250,20 +1250,43 @@ function updateTrainingLog(progress, state) {
   const total = (progress && progress.total) || 0;
   const rows = (progress && progress.rows) || 0;
   const running = !!(progress && progress.running);
+  const lastRunIso = (state && state.last_run) || (progress && progress.last_run) || null;
+  const hasRecentProgress = !!lastRunIso || rows > 0 || done > 0 || total > 0;
 
-  statusEl.textContent = running ? `Running · ${phase}` : 'Idle';
-  barEl.style.width = running ? `${pct}%` : '0%';
-  metaEl.textContent = running
-    ? `${pct}% · ${done}/${total || '?'} sensors · ${rows.toLocaleString()} rows`
-    : `Last run: ${(state && state.last_run) ? new Date(state.last_run).toLocaleString() : 'n/a'}`;
+  if (running) {
+    statusEl.textContent = `Running · ${phase}`;
+    barEl.style.width = `${pct}%`;
+    barEl.style.opacity = '1';
+    metaEl.textContent = `${pct}% · ${done}/${total || '?'} sensors · ${rows.toLocaleString()} rows`;
+  } else if (hasRecentProgress) {
+    statusEl.textContent = 'Last run complete';
+    barEl.style.width = '100%';
+    barEl.style.opacity = '0.35';
+    const when = lastRunIso ? new Date(lastRunIso).toLocaleString() : 'recently';
+    const sensorsLabel = total > 0 ? `${done}/${total}` : `${done}`;
+    metaEl.textContent = `Last run: ${when} · ${sensorsLabel} sensors · ${rows.toLocaleString()} rows`;
+  } else {
+    statusEl.textContent = 'Idle';
+    barEl.style.width = '0%';
+    barEl.style.opacity = '0.2';
+    metaEl.textContent = 'No training run recorded yet';
+  }
 
   if (!window._trainLog) window._trainLog = [];
   const stamp = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-  const line = running
-    ? `[${stamp}] ${phase} · ${pct}% · ${done}/${total || '?'} sensors · ${rows.toLocaleString()} rows`
-    : `[${stamp}] idle`;
+  const lineKey = running
+    ? `run:${phase}:${pct}:${done}:${total}:${rows}`
+    : hasRecentProgress
+      ? `last:${lastRunIso || 'none'}:${done}:${total}:${rows}`
+      : 'idle';
 
-  if (window._trainLog[window._trainLog.length - 1] !== line) {
+  if (window._trainLogLastKey !== lineKey) {
+    window._trainLogLastKey = lineKey;
+    const line = running
+      ? `[${stamp}] ${phase} · ${pct}% · ${done}/${total || '?'} sensors · ${rows.toLocaleString()} rows`
+      : hasRecentProgress
+        ? `[${stamp}] last run complete · ${(lastRunIso ? new Date(lastRunIso).toLocaleString() : 'recently')} · ${rows.toLocaleString()} rows`
+        : `[${stamp}] waiting for first run`;
     window._trainLog.push(line);
     if (window._trainLog.length > 120) window._trainLog = window._trainLog.slice(-120);
     linesEl.textContent = window._trainLog.join('\n');
@@ -2294,9 +2317,6 @@ def api_progress():
             if age > stale_sec:
                 p["running"] = False
                 p["phase"] = "idle"
-                p["pct"] = 0
-                p["done"] = 0
-                p["rows"] = 0
                 p["stale_recovered"] = True
                 p["stale_age_sec"] = age
                 try:
@@ -2306,6 +2326,11 @@ def api_progress():
                     pass
     except Exception:
         pass
+
+    # Enrich with last-run metadata so UI can present a useful idle summary.
+    st = _read(STATE_PATH) or {}
+    if st.get("last_run") and not p.get("last_run"):
+        p["last_run"] = st.get("last_run")
     return jsonify(p)
 
 
