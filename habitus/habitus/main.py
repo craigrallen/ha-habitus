@@ -922,9 +922,18 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         df["entity_id"].str.contains("water_leak|bilge.*leak|leak.*detect", case=False, na=False)
     ].copy()
     if not leaks.empty:
-        leaks["v"] = leaks["state"].apply(
-            lambda x: 1.0 if str(x).lower() in ("on", "true", "wet", "detected", "1") else 0.0
-        )
+        leak_col = "state" if "state" in leaks.columns else "mean"
+
+        def _leak_to_float(v) -> float:
+            if pd.isna(v):
+                return 0.0
+            if isinstance(v, str):
+                return 1.0 if v.strip().lower() in {"on", "true", "wet", "detected", "1"} else 0.0
+            with contextlib.suppress(TypeError, ValueError):
+                return 1.0 if float(v) > 0 else 0.0
+            return 0.0
+
+        leaks["v"] = leaks[leak_col].map(_leak_to_float)
         leak_series = leaks.groupby("hour")["v"].max().rename("water_leak")
         features = features.join(leak_series, how="left")
 
