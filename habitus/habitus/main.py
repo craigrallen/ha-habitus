@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import pickle
+import sqlite3
 
 import numpy as np
 import pandas as pd
@@ -407,16 +408,72 @@ def get_ha_entity_count() -> int:
         return 0
 
 
+def fetch_stats_sqlite(entity_ids, start_iso, end_iso=None):
+    """Fetch long-term statistics directly from HA SQLite DB.
+
+    Preferred path for Supervisor app/add-on installs.
+    Falls back to API path if DB is unavailable.
+    """
+    db_path = os.environ.get("HABITUS_HA_DB", "/homeassistant/home-assistant_v2.db")
+    if os.environ.get("HABITUS_FORCE_API", "").lower() == "true":
+        return pd.DataFrame()
+    if not os.path.exists(db_path):
+        return pd.DataFrame()
+
+    try:
+        start_ts = pd.to_datetime(start_iso, utc=True).timestamp()
+        end_ts = pd.to_datetime(end_iso, utc=True).timestamp() if end_iso else datetime.datetime.now(datetime.UTC).timestamp()
+    except Exception:
+        return pd.DataFrame()
+
+    rows = []
+    batch = int(os.environ.get("HABITUS_SQL_BATCH", "300"))
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        for i in range(0, len(entity_ids), batch):
+            chunk = entity_ids[i:i + batch]
+            if not chunk:
+                continue
+            ph = ",".join(["?"] * len(chunk))
+            q = f"""
+                SELECT sm.statistic_id AS entity_id, s.start_ts AS ts, s.mean AS mean, s.sum AS sum
+                FROM statistics s
+                JOIN statistics_meta sm ON s.metadata_id = sm.id
+                WHERE sm.statistic_id IN ({ph})
+                  AND s.start_ts >= ? AND s.start_ts <= ?
+                ORDER BY s.start_ts
+            """
+            cur.execute(q, [*chunk, start_ts, end_ts])
+            rows.extend(cur.fetchall())
+        conn.close()
+    except Exception as e:
+        log.warning("Direct SQLite stats read failed: %s", e)
+        return pd.DataFrame()
+
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows, columns=["entity_id", "ts", "mean", "sum"])
+    df["ts"] = pd.to_datetime(df["ts"], unit="s", utc=True)
+    log.info("Fetched %d rows from SQLite | %s → %s", len(df), df["ts"].min().date(), df["ts"].max().date())
+    return df
+
+
 async def fetch_stats(entity_ids, start_iso, end_iso=None):
     """Fetch hourly statistics and return an aggregated DataFrame.
 
-    Uses batched WebSocket calls to avoid opening one WS connection per entity,
-    which can trigger HA 502 errors on large installs.
+    Preferred path: direct SQLite reads.
+    Fallback path: batched WebSocket API calls.
     """
     if end_iso is None:
         end_iso = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:00:00+00:00")
     if not entity_ids:
         return pd.DataFrame()
+
+    df_sql = fetch_stats_sqlite(entity_ids, start_iso, end_iso)
+    if not df_sql.empty:
+        return df_sql
 
     all_rows = []
     done = 0
