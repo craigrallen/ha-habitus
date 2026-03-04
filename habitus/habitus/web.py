@@ -922,7 +922,7 @@ pre.raw {
     <div class="sec-header"><h2>Notifications</h2></div>
     <p style="color:var(--text3);font-size:.8rem;margin:0 0 12px">Control whether Habitus sends anomaly/training notifications.</p>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <button id="notify-toggle-btn" class="btn btn-accent" onclick="toggleHabitusNotifications()">Loading…</button>
+      <button id="notify-toggle-btn" class="btn btn-accent" onclick="toggleHabitusNotifications()">Toggle notifications</button>
       <span id="notify-toggle-status" style="font-size:.78rem;color:var(--text3)"></span>
     </div>
   </div>
@@ -1252,7 +1252,7 @@ function updateTrainingLog(progress, state) {
   const running = !!(progress && progress.running);
 
   statusEl.textContent = running ? `Running · ${phase}` : 'Idle';
-  barEl.style.width = `${pct}%`;
+  barEl.style.width = running ? `${pct}%` : '0%';
   metaEl.textContent = running
     ? `${pct}% · ${done}/${total || '?'} sensors · ${rows.toLocaleString()} rows`
     : `Last run: ${(state && state.last_run) ? new Date(state.last_run).toLocaleString() : 'n/a'}`;
@@ -2294,6 +2294,9 @@ def api_progress():
             if age > stale_sec:
                 p["running"] = False
                 p["phase"] = "idle"
+                p["pct"] = 0
+                p["done"] = 0
+                p["rows"] = 0
                 p["stale_recovered"] = True
                 p["stale_age_sec"] = age
                 try:
