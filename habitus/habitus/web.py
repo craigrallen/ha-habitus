@@ -981,6 +981,27 @@ let allSuggestions = [];
 let currentFilter = 'all';
 const phaseOrder = ['fetching','building_baselines','training','seasonal_training','pattern_analysis'];
 
+function loadDismissedAnomalies(){
+  try { return new Set(JSON.parse(localStorage.getItem('habitus-dismissed-anomalies') || '[]')); }
+  catch(_) { return new Set(); }
+}
+function saveDismissedAnomalies(setObj){
+  localStorage.setItem('habitus-dismissed-anomalies', JSON.stringify(Array.from(setObj)));
+}
+function anomalyKey(a){
+  return (a && (a.entity_id || a.name || a.description || '')).toString();
+}
+function dismissAnomaly(anomalyId, entityId, score){
+  const key = (entityId || anomalyId || '').toString();
+  const dismissed = loadDismissedAnomalies();
+  dismissed.add(key);
+  saveDismissedAnomalies(dismissed);
+  if (anomalyId || entityId) {
+    anomalyFeedback(anomalyId || key, 'dismissed', entityId || key, score || 0);
+  }
+  load();
+}
+
 function gotoTab(id, btn) {
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.querySelectorAll('nav button').forEach(b=>b.classList.remove('active'));
@@ -1136,6 +1157,11 @@ async function load() {
   }
   document.getElementById('prog-overlay').style.display = 'none';
 
+  // Version badge
+  if (document.getElementById('hdr-version')) {
+    document.getElementById('hdr-version').textContent = 'v' + (state.version || '—');
+  }
+
   // Header — treat as normal during warmup grace period
   const warmingUp = state.warming_up || state.phase === 'warming_up';
   const warmupDaysLeft = state.warmup_days_remaining ?? 0;
@@ -1178,8 +1204,11 @@ async function load() {
       <div class="pat-item"><div class="pi-label">Night Base</div><div class="pi-val">${fmtW(r.night_baseline_watts)}</div></div>
     </div>` : '<div style="color:var(--text3);font-size:.82rem">No patterns yet — baseline first, then flow.</div>';
 
-  // Top anomalies
-  const ents = (anomalies.anomalies||[]).slice(0,5);
+  // Top anomalies (dismissable)
+  const dismissedAnomalies = loadDismissedAnomalies();
+  const ents = (anomalies.anomalies||[])
+    .filter(a => !dismissedAnomalies.has(anomalyKey(a)))
+    .slice(0,5);
   document.getElementById('top-anomalies').innerHTML = ents.length
     ? ents.map(e => `
       <div class="anom-item">
@@ -1187,7 +1216,10 @@ async function load() {
           <div class="anom-name">${e.name}</div>
           <div class="anom-sub">${e.current_value}${e.unit} vs ${e.baseline_mean}${e.unit} expected</div>
         </div>
-        <div class="anom-score" style="color:${e.z_score>=3?'var(--red)':e.z_score>=1.5?'var(--amber)':'var(--green)'}">${e.z_score}σ</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="anom-score" style="color:${e.z_score>=3?'var(--red)':e.z_score>=1.5?'var(--amber)':'var(--green)'}">${e.z_score}σ</div>
+          <button class="btn" style="padding:3px 8px;font-size:.72rem" onclick="dismissAnomaly('${(e.id || e.entity_id || e.name || '').replace(/'/g, "\\'")}', '${(e.entity_id || e.name || '').replace(/'/g, "\\'")}', ${e.z_score || 0})">Dismiss</button>
+        </div>
       </div>`).join('')
     : '<div style="color:var(--text3);font-size:.82rem">No anomalies right now.</div>';
 
