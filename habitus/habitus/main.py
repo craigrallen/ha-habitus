@@ -685,7 +685,8 @@ def score_current(features):
 
 # ── Notify ────────────────────────────────────────────────────────────────────
 def send_notification(title, message):
-    if not NOTIFY_ON:
+    notify_on = os.environ.get("HABITUS_NOTIFY_ON", "true").lower() == "true"
+    if not notify_on:
         return
     headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
     service = NOTIFY_SVC.replace(".", "/")
@@ -1112,6 +1113,9 @@ async def run(days_history: int, mode: str = "full") -> None:
         if _saved.get("power_entity") and not os.environ.get("HABITUS_POWER_ENTITY"):
             os.environ["HABITUS_POWER_ENTITY"] = _saved["power_entity"]
             log.info("Loaded saved power entity from settings: %s", _saved["power_entity"])
+        if "notify_on_anomaly" in _saved:
+            os.environ["HABITUS_NOTIFY_ON"] = "true" if bool(_saved.get("notify_on_anomaly")) else "false"
+            log.info("Loaded saved notify setting from settings: %s", os.environ["HABITUS_NOTIFY_ON"])
     except Exception:
         pass
 

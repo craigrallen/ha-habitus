@@ -869,9 +869,63 @@ pre.raw {
         status.style.color = 'var(--red)';
       }
     };
+
+    async function loadNotificationSetting(){
+      const btn = document.getElementById('notify-toggle-btn');
+      const st = document.getElementById('notify-toggle-status');
+      if (!btn || !st) return;
+      try {
+        const r = await fetch('api/settings');
+        const d = await r.json();
+        const on = !!(d.settings && d.settings.notify_on_anomaly);
+        btn.textContent = on ? 'Disable notifications' : 'Enable notifications';
+        btn.className = on ? 'btn btn-danger' : 'btn btn-accent';
+        st.textContent = on ? 'Notifications are ON' : 'Notifications are OFF';
+      } catch(e) {
+        btn.textContent = 'Toggle notifications';
+        st.textContent = 'Failed to load setting';
+      }
+    }
+
+    window.toggleHabitusNotifications = async function(){
+      const btn = document.getElementById('notify-toggle-btn');
+      const st = document.getElementById('notify-toggle-status');
+      if (!btn || !st) return;
+      btn.disabled = true;
+      try {
+        const currentOn = (btn.textContent || '').toLowerCase().includes('disable');
+        const next = !currentOn;
+        const r = await fetch('api/settings', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({notify_on_anomaly: next})
+        });
+        const d = await r.json();
+        if (d.ok) {
+          await loadNotificationSetting();
+          st.textContent = next ? 'Notifications enabled' : 'Notifications disabled';
+        } else {
+          st.textContent = `Error: ${d.error || 'failed'}`;
+        }
+      } catch(e) {
+        st.textContent = `Error: ${e}`;
+      }
+      btn.disabled = false;
+    };
+
     loadPowerSensors();
+    loadNotificationSetting();
   })();
   </script>
+
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>Notifications</h2></div>
+    <p style="color:var(--text3);font-size:.8rem;margin:0 0 12px">Control whether Habitus sends anomaly/training notifications.</p>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button id="notify-toggle-btn" class="btn btn-accent" onclick="toggleHabitusNotifications()">Loading…</button>
+      <span id="notify-toggle-status" style="font-size:.78rem;color:var(--text3)"></span>
+    </div>
+  </div>
 
   <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>About</h2></div>
@@ -2391,6 +2445,10 @@ def api_settings():
                 pass
         if "anonymous_sharing" in data:
             settings["anonymous_sharing"] = bool(data["anonymous_sharing"])
+        if "notify_on_anomaly" in data:
+            notify_on = bool(data["notify_on_anomaly"])
+            settings["notify_on_anomaly"] = notify_on
+            os.environ["HABITUS_NOTIFY_ON"] = "true" if notify_on else "false"
         state["user_settings"] = settings
         try:
             with open(state_path, "w") as f:
@@ -2399,6 +2457,8 @@ def api_settings():
             return jsonify({"ok": False, "error": str(e)})
         return jsonify({"ok": True, "settings": settings})
 
+    if "notify_on_anomaly" not in settings:
+        settings["notify_on_anomaly"] = os.environ.get("HABITUS_NOTIFY_ON", "true").lower() == "true"
     return jsonify({"settings": settings})
 
 
