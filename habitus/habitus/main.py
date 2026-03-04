@@ -29,6 +29,17 @@ from . import patterns as pattern_engine
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("habitus")
 
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw in (None, ""):
+        return default
+    with contextlib.suppress(TypeError, ValueError):
+        return int(raw)
+    log.warning("Invalid %s=%r; using default %d", name, raw, default)
+    return default
+
+
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 HA_WS_URL = (
     os.environ.get("HABITUS_HA_URL", "http://supervisor/core")
@@ -41,23 +52,23 @@ HA_WS = os.environ.get("HA_WS", "ws://supervisor/core/api/websocket")
 HA_TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
 NOTIFY_SVC = os.environ.get("HABITUS_NOTIFY_SERVICE", "notify.notify")
 NOTIFY_ON = os.environ.get("HABITUS_NOTIFY_ON", "true").lower() == "true"
-THRESHOLD = int(os.environ.get("HABITUS_ANOMALY_THRESHOLD", "70"))
+THRESHOLD = _env_int("HABITUS_ANOMALY_THRESHOLD", 70)
 DAILY_DIGEST = os.environ.get("HABITUS_DAILY_DIGEST", "false").lower() == "true"
-DAILY_DIGEST_HOUR = int(os.environ.get("HABITUS_DAILY_DIGEST_HOUR", "8"))
+DAILY_DIGEST_HOUR = _env_int("HABITUS_DAILY_DIGEST_HOUR", 8)
 # Minimum training days before anomaly scoring is trusted — assume normal until then
-MIN_SCORING_DAYS = int(os.environ.get("HABITUS_MIN_SCORING_DAYS", "7"))
+MIN_SCORING_DAYS = _env_int("HABITUS_MIN_SCORING_DAYS", 7)
 # Hard safety guard for very large history pulls (prevents web process OOM).
 # Set <=0 to disable (not recommended).
-FETCH_ROW_BUDGET = int(os.environ.get("HABITUS_FETCH_ROW_BUDGET", "1000000"))
-FETCH_MIN_WINDOW_DAYS = int(os.environ.get("HABITUS_FETCH_MIN_WINDOW_DAYS", "7"))
+FETCH_ROW_BUDGET = _env_int("HABITUS_FETCH_ROW_BUDGET", 1000000)
+FETCH_MIN_WINDOW_DAYS = _env_int("HABITUS_FETCH_MIN_WINDOW_DAYS", 7)
 
 
 def _fetch_row_budget() -> int:
-    return int(os.environ.get("HABITUS_FETCH_ROW_BUDGET", str(FETCH_ROW_BUDGET)))
+    return _env_int("HABITUS_FETCH_ROW_BUDGET", FETCH_ROW_BUDGET)
 
 
 def _fetch_min_window_days() -> int:
-    return int(os.environ.get("HABITUS_FETCH_MIN_WINDOW_DAYS", str(FETCH_MIN_WINDOW_DAYS)))
+    return _env_int("HABITUS_FETCH_MIN_WINDOW_DAYS", FETCH_MIN_WINDOW_DAYS)
 
 
 def contamination_for_days(days: int) -> float:
@@ -448,7 +459,7 @@ def fetch_recent_raw_history(entity_ids: list[str], start_iso: str, end_iso: str
             start_ts = pd.to_datetime(start_iso, utc=True).timestamp()
             end_ts = pd.to_datetime(end_iso, utc=True).timestamp()
             rows: list[dict] = []
-            batch = int(os.environ.get("HABITUS_SQL_BATCH", "40"))
+            batch = max(1, _env_int("HABITUS_SQL_BATCH", 40))
             cur = conn.cursor()
             for i in range(0, len(entity_ids), batch):
                 chunk = entity_ids[i:i + batch]
@@ -654,7 +665,7 @@ def fetch_stats_sqlite(entity_ids, start_iso, end_iso=None):
         cur = conn.cursor()
 
         # Fast path: query in chunks of statistic_ids (much faster than per-sensor loop)
-        batch = int(os.environ.get("HABITUS_SQL_BATCH", "100"))
+        batch = max(1, _env_int("HABITUS_SQL_BATCH", 100))
         for i in range(0, len(entity_ids), batch):
             chunk = entity_ids[i : i + batch]
             if not chunk:
@@ -749,8 +760,8 @@ async def fetch_stats(entity_ids, start_iso, end_iso=None):
     total = len(entity_ids)
     import time as _t
 
-    batch_size = int(os.environ.get("HABITUS_STATS_BATCH", "120"))
-    max_retries = int(os.environ.get("HABITUS_STATS_RETRIES", "3"))
+    batch_size = max(1, _env_int("HABITUS_STATS_BATCH", 120))
+    max_retries = max(1, _env_int("HABITUS_STATS_RETRIES", 3))
     row_budget = max(0, int(_fetch_row_budget()))
     hit_budget = False
 
@@ -1600,7 +1611,7 @@ async def run(days_history: int, mode: str = "full") -> None:
             set_progress("fetching", 0, len(stat_ids), 0, 0, 0)
             df_stats = await fetch_stats(stat_ids, full_from, now_iso) if stat_ids else pd.DataFrame()
 
-            raw_max_days = int(os.environ.get("HABITUS_RAW_MAX_DAYS", "3650"))
+            raw_max_days = max(1, _env_int("HABITUS_RAW_MAX_DAYS", 3650))
             raw_days = min(days_history, raw_max_days)
             raw_from = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=raw_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
             raw_to = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -1807,7 +1818,7 @@ async def run(days_history: int, mode: str = "full") -> None:
         set_progress("fetching", 0, len(stat_ids), 0, 0, 0)
         df_stats = await fetch_stats(stat_ids, full_from, now_iso) if stat_ids else pd.DataFrame()
 
-        raw_max_days = int(os.environ.get("HABITUS_RAW_MAX_DAYS", "3650"))
+        raw_max_days = max(1, _env_int("HABITUS_RAW_MAX_DAYS", 3650))
         raw_days = min(days_history, raw_max_days)
         raw_from = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=raw_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
         raw_to = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -2010,7 +2021,7 @@ async def run(days_history: int, mode: str = "full") -> None:
         {
             "last_run": now_iso,
             "version": os.environ.get("HABITUS_VERSION", os.environ.get("BUILD_VERSION", "?")),
-            "max_power_kw": int(os.environ.get("HABITUS_MAX_POWER_KW", "25")),
+            "max_power_kw": _env_int("HABITUS_MAX_POWER_KW", 25),
             "data_to": now_iso,
             "training_days": training_days,
             "requested_days": days_history,
