@@ -281,81 +281,75 @@ async def ws_connect():
     return ws
 
 
+def _resolve_db_path() -> str | None:
+    configured = os.environ.get("HABITUS_HA_DB", "").strip()
+    candidates = [
+        configured,
+        "/homeassistant/home-assistant_v2.db",
+        "/config/home-assistant_v2.db",
+        "/mnt/data/supervisor/homeassistant/home-assistant_v2.db",
+    ]
+    for p in candidates:
+        if p and os.path.exists(p):
+            return p
+    return None
+
+
 def _sqlite_connect():
-    db_path = os.environ.get("HABITUS_HA_DB", "/homeassistant/home-assistant_v2.db")
     if os.environ.get("HABITUS_FORCE_API", "").lower() == "true":
         return None
-    if not os.path.exists(db_path):
+    db_path = _resolve_db_path()
+    if not db_path:
+        log.error("Recorder DB not found (checked HABITUS_HA_DB,/homeassistant,/config,/mnt/data)")
         return None
     try:
         return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    except Exception:
+    except Exception as e:
+        log.error("Failed opening recorder DB (%s): %s", db_path, e)
         return None
 
 
 async def get_stat_ids() -> tuple[list[str], int]:
     conn = _sqlite_connect()
-    if conn:
+    if not conn:
+        raise RuntimeError("Recorder DB unavailable; direct SQL required")
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT statistic_id FROM statistics_meta")
+        all_ids = [r[0] for r in cur.fetchall()]
+        conn.close()
+        behavioral = [e for e in all_ids if is_behavioral(e)]
+        log.info(
+            "Found %d behavioral sensors with long-term stats (from %d total stats ids)",
+            len(behavioral),
+            len(all_ids),
+        )
+        return behavioral, len(all_ids)
+    except Exception as e:
         try:
-            cur = conn.cursor()
-            cur.execute("SELECT statistic_id FROM statistics_meta")
-            all_ids = [r[0] for r in cur.fetchall()]
             conn.close()
-            behavioral = [e for e in all_ids if is_behavioral(e)]
-            log.info(
-                "Found %d behavioral sensors with long-term stats (from %d total stats ids)",
-                len(behavioral),
-                len(all_ids),
-            )
-            return behavioral, len(all_ids)
-        except Exception as e:
-            log.warning("SQLite stats_meta read failed: %s", e)
-            try:
-                conn.close()
-            except Exception:
-                pass
-
-    # Fallback to WS API when DB is unavailable (dev)
-    ws = await ws_connect()
-    await ws.send(json.dumps({"id": 1, "type": "recorder/list_statistic_ids"}))
-    result = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
-    await ws.close()
-    all_ids = [s["statistic_id"] for s in result.get("result", [])]
-    behavioral = [e for e in all_ids if is_behavioral(e)]
-    log.info(f"Found {len(behavioral)} behavioral sensors with long-term stats (from {len(all_ids)} total stats ids)")
-    return behavioral, len(all_ids)
+        except Exception:
+            pass
+        raise RuntimeError(f"SQLite stats_meta read failed: {e}") from e
 
 
 async def get_behavioral_entity_ids() -> list[str]:
     """Return behavioral entity ids from recorder metadata (includes non-stat entities)."""
     conn = _sqlite_connect()
-    if conn:
-        try:
-            cur = conn.cursor()
-            cur.execute("SELECT entity_id FROM states_meta")
-            ids = [r[0] for r in cur.fetchall()]
-            conn.close()
-            return [e for e in ids if e and is_behavioral(e)]
-        except Exception as e:
-            log.warning("SQLite states_meta read failed: %s", e)
-            try:
-                conn.close()
-            except Exception:
-                pass
-
-    # Fallback to API when DB is unavailable (dev)
+    if not conn:
+        raise RuntimeError("Recorder DB unavailable; direct SQL required")
     try:
-        headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
-        r = requests.get(f"{HA_URL}/api/states", headers=headers, timeout=15)
-        if r.status_code != 200:
-            return []
-        states = r.json()
-        if not isinstance(states, list):
-            return []
-        ids = [s.get("entity_id", "") for s in states if isinstance(s, dict)]
+        cur = conn.cursor()
+        cur.execute("SELECT entity_id FROM states_meta")
+        ids = [r[0] for r in cur.fetchall()]
+        conn.close()
         return [e for e in ids if e and is_behavioral(e)]
-    except Exception:
-        return []
+    except Exception as e:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        raise RuntimeError(f"SQLite states_meta read failed: {e}") from e
 
 
 def _state_to_numeric(state: object) -> float | None:
@@ -469,6 +463,9 @@ def fetch_recent_raw_history(entity_ids: list[str], start_iso: str, end_iso: str
             return out[["entity_id", "ts", "mean", "sum"]]
 
     # Fallback to API (dev only)
+    if os.environ.get("HABITUS_FORCE_API", "").lower() != "true":
+        return pd.DataFrame()
+
     headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
     rows: list[dict] = []
     batch_size = 25
@@ -531,27 +528,19 @@ def fetch_recent_raw_history(entity_ids: list[str], start_iso: str, end_iso: str
 def get_ha_entity_count() -> int:
     """Return total number of HA entities (recorder metadata)."""
     conn = _sqlite_connect()
-    if conn:
-        try:
-            cur = conn.cursor()
-            cur.execute("SELECT count(*) FROM states_meta")
-            total = int(cur.fetchone()[0])
-            conn.close()
-            return total
-        except Exception:
-            try:
-                conn.close()
-            except Exception:
-                pass
-
+    if not conn:
+        return 0
     try:
-        headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
-        r = requests.get(f"{HA_URL}/api/states", headers=headers, timeout=10)
-        if r.status_code != 200:
-            return 0
-        data = r.json()
-        return len(data) if isinstance(data, list) else 0
+        cur = conn.cursor()
+        cur.execute("SELECT count(*) FROM states_meta")
+        total = int(cur.fetchone()[0])
+        conn.close()
+        return total
     except Exception:
+        try:
+            conn.close()
+        except Exception:
+            pass
         return 0
 
 
@@ -619,7 +608,7 @@ async def fetch_stats(entity_ids, start_iso, end_iso=None):
         return pd.DataFrame()
 
     df_sql = fetch_stats_sqlite(entity_ids, start_iso, end_iso)
-    if not df_sql.empty:
+    if os.environ.get("HABITUS_FORCE_API", "").lower() != "true":
         return df_sql
 
     all_rows = []
