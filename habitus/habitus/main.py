@@ -1285,6 +1285,13 @@ async def run(days_history: int, mode: str = "full") -> None:
         if _saved.get("power_entity") and not os.environ.get("HABITUS_POWER_ENTITY"):
             os.environ["HABITUS_POWER_ENTITY"] = _saved["power_entity"]
             log.info("Loaded saved power entity from settings: %s", _saved["power_entity"])
+        if "days_history" in _saved:
+            try:
+                days_history = int(_saved.get("days_history"))
+                os.environ["HABITUS_DAYS"] = str(days_history)
+                log.info("Loaded saved days_history from settings: %s", days_history)
+            except Exception:
+                pass
         if "notify_on_anomaly" in _saved:
             os.environ["HABITUS_NOTIFY_ON"] = "true" if bool(_saved.get("notify_on_anomaly")) else "false"
             log.info("Loaded saved notify setting from settings: %s", os.environ["HABITUS_NOTIFY_ON"])
