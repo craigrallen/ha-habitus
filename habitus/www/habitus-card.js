@@ -138,6 +138,7 @@ class HabitusCardDetail extends HTMLElement {
     this._config = {};
     this._anomalies = null;  // top-3 anomaly reason dicts
     this._suggestion = null; // top suggestion with confidence
+    this._stateMeta = null;  // run state (requested_days/training_days)
     this._fetchDone = false;
     this._fetchErr = false;
   }
@@ -150,9 +151,10 @@ class HabitusCardDetail extends HTMLElement {
   async _fetchData() {
     this._fetchDone = true;
     try {
-      const [ar, sr] = await Promise.all([
+      const [ar, sr, st] = await Promise.all([
         fetch(HABITUS_INGRESS + '/api/anomalies'),
         fetch(HABITUS_INGRESS + '/api/suggestions'),
+        fetch(HABITUS_INGRESS + '/api/state'),
       ]);
       if (ar.ok) {
         const ad = await ar.json();
@@ -161,6 +163,9 @@ class HabitusCardDetail extends HTMLElement {
       if (sr.ok) {
         const sd = await sr.json();
         this._suggestion = Array.isArray(sd) && sd.length ? sd[0] : null;
+      }
+      if (st.ok) {
+        this._stateMeta = await st.json();
       }
     } catch(e) {
       this._fetchErr = true;
@@ -173,7 +178,10 @@ class HabitusCardDetail extends HTMLElement {
     const s = parseInt(score,10)||0;
     const color = _hsc(score);
     const label = _hsl(score);
-    const days = _hes(h, 'sensor.habitus_training_days');
+    const daysActual = _hes(h, 'sensor.habitus_training_days');
+    const daysRequested = (this._stateMeta && this._stateMeta.requested_days != null)
+      ? this._stateMeta.requested_days
+      : null;
     const sens = _hes(h, 'sensor.habitus_entity_count');
     const time = _hlc(h, 'sensor.habitus_anomaly_score');
     const pct = Math.min(s, 100);
@@ -241,7 +249,8 @@ class HabitusCardDetail extends HTMLElement {
       ${sugRow}
       <button class="ab" id="ab">Open Habitus Dashboard</button>
       <div class="ft">
-        <span>\uD83D\uDCC5 ${days!=='\u2014'?days+' days trained':'\u2014'}</span>
+        <span>\uD83D\uDCC5 ${daysRequested!=null ? (daysRequested + 'd configured') : (daysActual!=='\u2014' ? daysActual+'d actual' : '\u2014')}</span>
+        <span>\uD83E\uDDEA ${daysActual!=='\u2014' ? daysActual+'d actual' : '\u2014'}</span>
         <span>\uD83D\uDCE1 ${sens!=='\u2014'?sens+' sensors':'\u2014'}</span>
       </div>
     </div>`;
