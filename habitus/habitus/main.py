@@ -291,6 +291,47 @@ def clear_progress():
         os.remove(PROGRESS_PATH)
 
 
+def mark_last_completed_progress(
+    state: dict,
+    phase: str,
+    *,
+    done: int | None = None,
+    total: int | None = None,
+    rows: int | None = None,
+    pct: int | None = None,
+    extra: dict | None = None,
+    completed_at: str | None = None,
+) -> None:
+    """Persist explicit metadata for the most recently completed training phase."""
+    checkpoint = {
+        "phase": str(phase or "unknown"),
+        "completed_at": completed_at
+        or datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+    }
+
+    def _safe_int(value: int | None) -> int | None:
+        if value is None:
+            return None
+        with contextlib.suppress(Exception):
+            return max(0, int(value))
+        return None
+
+    values = {
+        "done": _safe_int(done),
+        "total": _safe_int(total),
+        "rows": _safe_int(rows),
+        "pct": _safe_int(pct),
+    }
+    for key, value in values.items():
+        if value is not None:
+            checkpoint[key] = min(100, value) if key == "pct" else value
+
+    if isinstance(extra, dict):
+        checkpoint["extra"] = extra
+
+    state["last_completed_progress"] = checkpoint
+
+
 def clamp_fetch_window_by_row_budget(
     start_iso: str,
     end_iso: str,
@@ -1623,10 +1664,29 @@ async def run(days_history: int, mode: str = "full") -> None:
                 return
             df = pd.concat(frames, ignore_index=True)
             unique_entity_count = int(df["entity_id"].nunique())
+            mark_last_completed_progress(
+                state,
+                "fetching",
+                done=len(stat_ids),
+                total=len(stat_ids),
+                rows=len(df),
+                pct=100,
+                extra={"unique_entities": unique_entity_count},
+            )
+            save_state(state)
 
             set_progress("building_baselines", len(stat_ids), len(stat_ids), len(df), 0, 0)
             log.info("Building entity baselines...")
             anomaly_breakdown.build_entity_baselines(df)
+            mark_last_completed_progress(
+                state,
+                "building_baselines",
+                done=len(stat_ids),
+                total=len(stat_ids),
+                rows=len(df),
+                pct=100,
+            )
+            save_state(state)
             try:
                 log.info("Building feature matrix...")
                 features = build_features(df)
@@ -1658,6 +1718,15 @@ async def run(days_history: int, mode: str = "full") -> None:
                     "contamination_tier": contamination_tier_name(_train_days),
                 }
             )
+            mark_last_completed_progress(
+                state,
+                "training",
+                done=len(stat_ids),
+                total=len(stat_ids),
+                rows=len(features),
+                pct=100,
+                extra={"training_days": _train_days, "anomaly_score": _partial_score},
+            )
             save_state(state)
             log.info(f"Model ready — preliminary score {_partial_score}/100")
             # Only train seasonal models with enough data (need ≥180d for all seasons)
@@ -1675,6 +1744,15 @@ async def run(days_history: int, mode: str = "full") -> None:
             set_progress("pattern_analysis", len(stat_ids), len(stat_ids), len(features), 0, 0)
             log.info("Discovering patterns...")
             pattern_engine.run(features, stat_ids)
+            mark_last_completed_progress(
+                state,
+                "pattern_analysis",
+                done=len(stat_ids),
+                total=len(stat_ids),
+                rows=len(features),
+                pct=100,
+            )
+            save_state(state)
 
             # ── Novel ML features (incremental) ──
             log.info("Running phantom load detection...")
@@ -1830,11 +1908,29 @@ async def run(days_history: int, mode: str = "full") -> None:
             return
         df = pd.concat(frames, ignore_index=True)
         unique_entity_count = int(df["entity_id"].nunique())
+        mark_last_completed_progress(
+            state,
+            "fetching",
+            done=len(stat_ids),
+            total=len(stat_ids),
+            rows=len(df),
+            pct=100,
+            extra={"unique_entities": unique_entity_count},
+        )
+        save_state(state)
 
         set_progress("building_baselines", len(stat_ids), len(stat_ids), len(df), 0, 0)
         log.info("Building entity baselines...")
         anomaly_breakdown.build_entity_baselines(df)
         activity_engine.build_activity_baseline(activity_engine.extract_activity_features(df))
+        mark_last_completed_progress(
+            state,
+            "building_baselines",
+            done=len(stat_ids),
+            total=len(stat_ids),
+            rows=len(df),
+            pct=100,
+        )
         # Partial state write — unblocks UI baseline tab
         state.update({"phase": "baselines_ready", "entity_count": tracked_entity_count})
         save_state(state)
@@ -1856,6 +1952,15 @@ async def run(days_history: int, mode: str = "full") -> None:
                 "contamination_tier": contamination_tier_name(_train_days),
             }
         )
+        mark_last_completed_progress(
+            state,
+            "training",
+            done=len(stat_ids),
+            total=len(stat_ids),
+            rows=len(features),
+            pct=100,
+            extra={"training_days": _train_days, "anomaly_score": _partial_score},
+        )
         save_state(state)
         log.info(f"Model ready — preliminary score {_partial_score}/100")
         # Only train seasonal models with enough data (need ≥180d for all seasons)
@@ -1871,6 +1976,15 @@ async def run(days_history: int, mode: str = "full") -> None:
         set_progress("pattern_analysis", len(stat_ids), len(stat_ids), len(features), 0, 0)
         log.info("Discovering patterns...")
         pattern_engine.run(features, stat_ids)
+        mark_last_completed_progress(
+            state,
+            "pattern_analysis",
+            done=len(stat_ids),
+            total=len(stat_ids),
+            rows=len(features),
+            pct=100,
+        )
+        save_state(state)
 
         # ── Novel ML features ──
         log.info("Running phantom load detection...")
@@ -2019,6 +2133,7 @@ async def run(days_history: int, mode: str = "full") -> None:
 
     state.update(
         {
+            "phase": "idle",
             "last_run": now_iso,
             "version": os.environ.get("HABITUS_VERSION", os.environ.get("BUILD_VERSION", "?")),
             "max_power_kw": _env_int("HABITUS_MAX_POWER_KW", 25),
@@ -2033,6 +2148,16 @@ async def run(days_history: int, mode: str = "full") -> None:
             "seasonal_models": seasonal.seasonal_status(),
             "contamination_tier": contamination_tier_name(training_days),
         }
+    )
+    mark_last_completed_progress(
+        state,
+        "complete",
+        done=len(stat_ids),
+        total=len(stat_ids),
+        rows=len(features),
+        pct=100,
+        extra={"training_days": training_days, "anomaly_score": anomaly_score},
+        completed_at=now_iso,
     )
     save_state(state)
     clear_progress()
