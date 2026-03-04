@@ -383,6 +383,9 @@ def fetch_recent_raw_history(entity_ids: list[str], start_iso: str, end_iso: str
 
     Preferred path: direct SQLite read from recorder DB.
     Fallback path: HA /api/history/period (dev only).
+
+    Includes one latest-state synthetic row for entities with no history rows in
+    the requested range, so sparse/non-changing sensors still participate.
     """
     if not entity_ids:
         return pd.DataFrame()
@@ -414,6 +417,35 @@ def fetch_recent_raw_history(entity_ids: list[str], start_iso: str, end_iso: str
                     if not eid or val is None:
                         continue
                     rows.append({"entity_id": eid, "ts": ts, "mean": val, "sum": None})
+
+            # Ensure sparse/non-changing entities are still represented once
+            seen = {r["entity_id"] for r in rows}
+            missing = [e for e in entity_ids if e not in seen]
+            if missing:
+                for i in range(0, len(missing), batch):
+                    chunk = missing[i:i + batch]
+                    ph = ",".join(["?"] * len(chunk))
+                    q_latest = f"""
+                        SELECT m.entity_id, s.last_updated_ts AS ts, s.state
+                        FROM states s
+                        JOIN states_meta m ON s.metadata_id = m.metadata_id
+                        JOIN (
+                            SELECT m2.entity_id AS entity_id, MAX(s2.last_updated_ts) AS max_ts
+                            FROM states s2
+                            JOIN states_meta m2 ON s2.metadata_id = m2.metadata_id
+                            WHERE m2.entity_id IN ({ph})
+                            GROUP BY m2.entity_id
+                        ) latest ON latest.entity_id = m.entity_id AND latest.max_ts = s.last_updated_ts
+                    """
+                    cur.execute(q_latest, chunk)
+                    for eid, ts, state in cur.fetchall():
+                        if ts is None:
+                            continue
+                        val = _state_to_numeric(state)
+                        if not eid or val is None:
+                            continue
+                        # stamp at end window so it joins current-hour inference
+                        rows.append({"entity_id": eid, "ts": end_ts, "mean": val, "sum": None})
             conn.close()
         except Exception as e:
             log.warning("SQLite raw history read failed: %s", e)
@@ -1351,6 +1383,7 @@ async def run(days_history: int, mode: str = "full") -> None:
     behavioral_entity_ids = await get_behavioral_entity_ids()
     stat_id_set = set(stat_ids)
     non_stat_ids = [e for e in behavioral_entity_ids if e not in stat_id_set]
+    tracked_entity_count = len(stat_ids) + len(non_stat_ids)
 
     if not stat_ids and not non_stat_ids:
         log.error("No behavioral sensors found")
@@ -1388,7 +1421,7 @@ async def run(days_history: int, mode: str = "full") -> None:
                 )
             )[0]
             training_days = state.get("training_days", 0)
-            entity_count = state.get("entity_count", len(stat_ids))
+            entity_count = state.get("entity_count", tracked_entity_count)
         else:
             cap = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days_history)
             cap_iso = cap.strftime("%Y-%m-%dT%H:00:00+00:00")
@@ -1596,7 +1629,7 @@ async def run(days_history: int, mode: str = "full") -> None:
             training_days = round(
                 (features["hour"].max() - features["hour"].min()).total_seconds() / 86400
             )
-            entity_count = unique_entity_count
+            entity_count = tracked_entity_count
     else:
         # First run — all history
         cap = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days_history)
@@ -1623,7 +1656,7 @@ async def run(days_history: int, mode: str = "full") -> None:
         anomaly_breakdown.build_entity_baselines(df)
         activity_engine.build_activity_baseline(activity_engine.extract_activity_features(df))
         # Partial state write — unblocks UI baseline tab
-        state.update({"phase": "baselines_ready", "entity_count": unique_entity_count})
+        state.update({"phase": "baselines_ready", "entity_count": tracked_entity_count})
         save_state(state)
         features = build_features(df)
         del df
@@ -1788,7 +1821,7 @@ async def run(days_history: int, mode: str = "full") -> None:
         training_days = round(
             (features["hour"].max() - features["hour"].min()).total_seconds() / 86400
         )
-        entity_count = unique_entity_count
+        entity_count = tracked_entity_count
         state["data_from"] = full_from
         # Record actual first data point date (not the query start)
         # actual_start logic moved earlier (before del df)
