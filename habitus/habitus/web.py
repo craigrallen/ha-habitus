@@ -792,6 +792,17 @@ pre.raw {
     <div class="warn-box" id="rescan-warn">
       ⚠️ This will delete the existing model and re-train from scratch using all available HA history. Takes 20–40 minutes depending on data volume.
     </div>
+
+    <div style="margin-top:12px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg2)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:.8rem;font-weight:600;color:var(--text2)">Training Progress</div>
+        <div id="train-log-status" style="font-size:.75rem;color:var(--text3)">Idle</div>
+      </div>
+      <div class="bar-wrap" style="height:8px;margin-bottom:8px"><div id="train-log-bar" class="bar" style="width:0%"></div></div>
+      <div id="train-log-meta" style="font-size:.74rem;color:var(--text3);margin-bottom:8px">No active training run</div>
+      <pre id="train-log-lines" class="raw" style="max-height:170px;overflow:auto;margin:0">Waiting for training events…</pre>
+    </div>
+
     <pre class="raw" id="raw-state">Loading...</pre>
   </div>
   <div class="sec" style="margin-top:12px">
@@ -1172,6 +1183,40 @@ function setGauge(score) {
   card.className = 'score-card ' + (score>=70?'sr':score>=40?'sa':'sn');
 }
 
+function updateTrainingLog(progress, state) {
+  const statusEl = document.getElementById('train-log-status');
+  const barEl = document.getElementById('train-log-bar');
+  const metaEl = document.getElementById('train-log-meta');
+  const linesEl = document.getElementById('train-log-lines');
+  if (!statusEl || !barEl || !metaEl || !linesEl) return;
+
+  const phase = (progress && progress.phase) || (state && state.phase) || 'idle';
+  const pct = Math.max(0, Math.min(100, (progress && progress.pct) || 0));
+  const done = (progress && progress.done) || 0;
+  const total = (progress && progress.total) || 0;
+  const rows = (progress && progress.rows) || 0;
+  const running = !!(progress && progress.running);
+
+  statusEl.textContent = running ? `Running · ${phase}` : 'Idle';
+  barEl.style.width = `${pct}%`;
+  metaEl.textContent = running
+    ? `${pct}% · ${done}/${total || '?'} sensors · ${rows.toLocaleString()} rows`
+    : `Last run: ${(state && state.last_run) ? new Date(state.last_run).toLocaleString() : 'n/a'}`;
+
+  if (!window._trainLog) window._trainLog = [];
+  const stamp = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  const line = running
+    ? `[${stamp}] ${phase} · ${pct}% · ${done}/${total || '?'} sensors · ${rows.toLocaleString()} rows`
+    : `[${stamp}] idle`;
+
+  if (window._trainLog[window._trainLog.length - 1] !== line) {
+    window._trainLog.push(line);
+    if (window._trainLog.length > 120) window._trainLog = window._trainLog.slice(-120);
+    linesEl.textContent = window._trainLog.join('\n');
+    linesEl.scrollTop = linesEl.scrollHeight;
+  }
+}
+
 async function load() {
   const [state, baseline, progress, patterns, suggestions, anomalies, phantomData, driftData, autoScores, gapData, scenesData, smartSuggestions, haAutomations] = await Promise.all([
     fetch('api/state').then(r=>r.json()).catch(()=>({})),
@@ -1188,6 +1233,9 @@ async function load() {
     fetch('api/smart_suggestions').then(r=>r.json()).catch(()=>({suggestions:[]})),
     fetch('api/ha_automations').then(r=>r.json()).catch(()=>({automations:[]})),
   ]);
+
+  // Always update visible training status + log
+  updateTrainingLog(progress, state);
 
   // Progress overlay — only block UI if no data at all yet
   const hasData = state.last_run || state.phase === 'baselines_ready' || state.phase === 'model_ready';
