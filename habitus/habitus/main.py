@@ -578,38 +578,31 @@ def fetch_stats_sqlite(entity_ids, start_iso, end_iso=None):
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         cur = conn.cursor()
 
-        # Resolve metadata_id per statistic_id once, then query per sensor.
-        batch = int(os.environ.get("HABITUS_SQL_BATCH", "40"))
-        meta = []
+        # Fast path: query in chunks of statistic_ids (much faster than per-sensor loop)
+        batch = int(os.environ.get("HABITUS_SQL_BATCH", "200"))
         for i in range(0, len(entity_ids), batch):
             chunk = entity_ids[i : i + batch]
             if not chunk:
                 continue
             ph = ",".join(["?"] * len(chunk))
             cur.execute(
-                f"SELECT id, statistic_id FROM statistics_meta WHERE statistic_id IN ({ph})",
-                chunk,
-            )
-            meta.extend(cur.fetchall())
-
-        for metadata_id, eid in meta:
-            cur.execute(
-                """
-                SELECT start_ts, mean, sum
-                FROM statistics
-                WHERE metadata_id = ? AND start_ts >= ? AND start_ts <= ?
+                f"""
+                SELECT sm.statistic_id AS entity_id, s.start_ts AS ts, s.mean AS mean, s.sum AS sum
+                FROM statistics s
+                JOIN statistics_meta sm ON s.metadata_id = sm.id
+                WHERE sm.statistic_id IN ({ph})
+                  AND s.start_ts >= ? AND s.start_ts <= ?
                 """,
-                [metadata_id, start_ts, end_ts],
+                [*chunk, start_ts, end_ts],
             )
-            for ts, mean, summ in cur.fetchall():
+            for eid, ts, mean, summ in cur.fetchall():
                 rows.append({"entity_id": eid, "ts": ts, "mean": mean, "sum": summ})
 
-            done += 1
+            done += len(chunk)
             elapsed = _t.time() - t0
             eta = (elapsed / done) * (total - done) if done else 0
             set_progress("fetching", done, total, len(rows), elapsed, eta)
-            if done % 10 == 0 or done == total:
-                log.info("  %d/%d sensors — %d rows", done, total, len(rows))
+            log.info("  %d/%d sensors — %d rows", done, total, len(rows))
 
         conn.close()
     except Exception as e:
