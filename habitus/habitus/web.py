@@ -2279,7 +2279,31 @@ def api_baseline():
 @app.route("/api/progress")
 @app.route("/ingress/api/progress")
 def api_progress():
-    return jsonify(_read(PROGRESS_PATH) or {})
+    """Return training progress with stale-run auto-recovery.
+
+    If progress.json says running but hasn't been updated for a long time,
+    mark it as not running so the UI doesn't stay blocked forever.
+    """
+    p = _read(PROGRESS_PATH) or {}
+    try:
+        if p.get("running") and os.path.exists(PROGRESS_PATH):
+            import time as _t
+
+            stale_sec = int(os.environ.get("HABITUS_PROGRESS_STALE_SEC", "600"))
+            age = int(_t.time() - os.path.getmtime(PROGRESS_PATH))
+            if age > stale_sec:
+                p["running"] = False
+                p["phase"] = "idle"
+                p["stale_recovered"] = True
+                p["stale_age_sec"] = age
+                try:
+                    with open(PROGRESS_PATH, "w") as f:
+                        json.dump(p, f)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return jsonify(p)
 
 
 @app.route("/api/patterns")
