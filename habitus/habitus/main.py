@@ -579,7 +579,7 @@ def fetch_stats_sqlite(entity_ids, start_iso, end_iso=None):
         cur = conn.cursor()
 
         # Fast path: query in chunks of statistic_ids (much faster than per-sensor loop)
-        batch = int(os.environ.get("HABITUS_SQL_BATCH", "200"))
+        batch = int(os.environ.get("HABITUS_SQL_BATCH", "100"))
         for i in range(0, len(entity_ids), batch):
             chunk = entity_ids[i : i + batch]
             if not chunk:
