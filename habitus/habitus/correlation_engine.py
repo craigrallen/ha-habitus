@@ -15,11 +15,10 @@ import json
 import logging
 import math
 import os
-import sqlite3
 from collections import Counter, defaultdict
 from typing import Any
 
-from .ha_db import resolve_ha_db_path
+from .ha_db import managed_read_connection, resolve_ha_db_path, table_exists
 
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
@@ -57,36 +56,33 @@ def _get_state_change_events(days: int = 30) -> dict[str, list[tuple[float, str]
     like_clauses = " OR ".join(f"sm.entity_id LIKE '{d}.%'" for d in all_domains)
 
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='states_meta'"
-        )
-        has_meta = cursor.fetchone() is not None
+        with managed_read_connection(db_path) as conn:
+            if conn is None:
+                return {}
+            has_meta = table_exists(conn, "states_meta")
 
-        events: dict[str, list[tuple[float, str]]] = defaultdict(list)
+            events: dict[str, list[tuple[float, str]]] = defaultdict(list)
 
-        if has_meta:
-            rows = conn.execute(f"""
-                SELECT sm.entity_id, s.state, s.last_changed_ts
-                FROM states s
-                JOIN states_meta sm ON s.metadata_id = sm.metadata_id
-                WHERE s.last_changed_ts > ?
-                AND ({like_clauses})
-                AND s.state NOT IN ('unavailable', 'unknown', '')
-                ORDER BY s.last_changed_ts
-            """, (cutoff_ts,)).fetchall()
-        else:
-            like_clauses_plain = " OR ".join(f"entity_id LIKE '{d}.%'" for d in all_domains)
-            rows = conn.execute(f"""
-                SELECT entity_id, state, last_changed_ts
-                FROM states
-                WHERE last_changed_ts > ?
-                AND ({like_clauses_plain})
-                AND state NOT IN ('unavailable', 'unknown', '')
-                ORDER BY last_changed_ts
-            """, (cutoff_ts,)).fetchall()
-
-        conn.close()
+            if has_meta:
+                rows = conn.execute(f"""
+                    SELECT sm.entity_id, s.state, s.last_changed_ts
+                    FROM states s
+                    JOIN states_meta sm ON s.metadata_id = sm.metadata_id
+                    WHERE s.last_changed_ts > ?
+                    AND ({like_clauses})
+                    AND s.state NOT IN ('unavailable', 'unknown', '')
+                    ORDER BY s.last_changed_ts
+                """, (cutoff_ts,)).fetchall()
+            else:
+                like_clauses_plain = " OR ".join(f"entity_id LIKE '{d}.%'" for d in all_domains)
+                rows = conn.execute(f"""
+                    SELECT entity_id, state, last_changed_ts
+                    FROM states
+                    WHERE last_changed_ts > ?
+                    AND ({like_clauses_plain})
+                    AND state NOT IN ('unavailable', 'unknown', '')
+                    ORDER BY last_changed_ts
+                """, (cutoff_ts,)).fetchall()
 
         for eid, state, ts in rows:
             events[eid].append((ts, state))

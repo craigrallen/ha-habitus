@@ -10,12 +10,11 @@ import datetime
 import json
 import logging
 import os
-import sqlite3
 from collections import Counter, defaultdict
 from itertools import combinations
 from typing import Any
 
-from .ha_db import resolve_ha_db_path
+from .ha_db import managed_read_connection, resolve_ha_db_path, table_exists
 
 log = logging.getLogger("habitus")
 
@@ -51,87 +50,67 @@ def _get_state_changes(days: int = 30) -> list[dict[str, Any]]:
     cutoff_ts = cutoff.timestamp()
 
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
-        conn.row_factory = sqlite3.Row
+        with managed_read_connection(db_path) as conn:
+            if conn is None:
+                return []
 
-        # HA uses states_meta for entity_id mapping (HA 2023.4+)
-        # Check if states_meta exists
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='states_meta'"
-        )
-        has_states_meta = cursor.fetchone() is not None
+            # HA uses states_meta for entity_id mapping (HA 2023.4+)
+            has_states_meta = table_exists(conn, "states_meta")
 
-        if has_states_meta:
-            query = """
-                SELECT sm.entity_id, s.state, s.last_changed_ts
-                FROM states s
-                JOIN states_meta sm ON s.metadata_id = sm.metadata_id
-                WHERE s.last_changed_ts > ?
-                AND sm.entity_id LIKE 'light.%'
-                   OR sm.entity_id LIKE 'switch.%'
-                   OR sm.entity_id LIKE 'media_player.%'
-                   OR sm.entity_id LIKE 'fan.%'
-                   OR sm.entity_id LIKE 'cover.%'
-                   OR sm.entity_id LIKE 'climate.%'
-                   OR sm.entity_id LIKE 'input_boolean.%'
-                ORDER BY s.last_changed_ts
-            """
-            # Fix: need proper WHERE clause with parentheses
-            query = """
-                SELECT sm.entity_id, s.state, s.last_changed_ts
-                FROM states s
-                JOIN states_meta sm ON s.metadata_id = sm.metadata_id
-                WHERE s.last_changed_ts > ?
-                AND (
-                    sm.entity_id LIKE 'light.%'
-                    OR sm.entity_id LIKE 'switch.%'
-                    OR sm.entity_id LIKE 'media_player.%'
-                    OR sm.entity_id LIKE 'fan.%'
-                    OR sm.entity_id LIKE 'cover.%'
-                    OR sm.entity_id LIKE 'climate.%'
-                    OR sm.entity_id LIKE 'input_boolean.%'
-                    OR sm.entity_id LIKE 'binary_sensor.%'
-                    OR sm.entity_id LIKE 'person.%'
-                    OR sm.entity_id LIKE 'device_tracker.%'
-                )
-                ORDER BY s.last_changed_ts
-            """
-        else:
-            query = """
-                SELECT entity_id, state, last_changed_ts
-                FROM states
-                WHERE last_changed_ts > ?
-                AND (
-                    entity_id LIKE 'light.%'
-                    OR entity_id LIKE 'switch.%'
-                    OR entity_id LIKE 'media_player.%'
-                    OR entity_id LIKE 'fan.%'
-                    OR entity_id LIKE 'cover.%'
-                    OR entity_id LIKE 'climate.%'
-                    OR entity_id LIKE 'input_boolean.%'
-                    OR entity_id LIKE 'binary_sensor.%'
-                    OR entity_id LIKE 'person.%'
-                    OR entity_id LIKE 'device_tracker.%'
-                )
-                ORDER BY last_changed_ts
-            """
+            if has_states_meta:
+                query = """
+                    SELECT sm.entity_id, s.state, s.last_changed_ts
+                    FROM states s
+                    JOIN states_meta sm ON s.metadata_id = sm.metadata_id
+                    WHERE s.last_changed_ts > ?
+                    AND (
+                        sm.entity_id LIKE 'light.%'
+                        OR sm.entity_id LIKE 'switch.%'
+                        OR sm.entity_id LIKE 'media_player.%'
+                        OR sm.entity_id LIKE 'fan.%'
+                        OR sm.entity_id LIKE 'cover.%'
+                        OR sm.entity_id LIKE 'climate.%'
+                        OR sm.entity_id LIKE 'input_boolean.%'
+                        OR sm.entity_id LIKE 'binary_sensor.%'
+                        OR sm.entity_id LIKE 'person.%'
+                        OR sm.entity_id LIKE 'device_tracker.%'
+                    )
+                    ORDER BY s.last_changed_ts
+                """
+            else:
+                query = """
+                    SELECT entity_id, state, last_changed_ts
+                    FROM states
+                    WHERE last_changed_ts > ?
+                    AND (
+                        entity_id LIKE 'light.%'
+                        OR entity_id LIKE 'switch.%'
+                        OR entity_id LIKE 'media_player.%'
+                        OR entity_id LIKE 'fan.%'
+                        OR entity_id LIKE 'cover.%'
+                        OR entity_id LIKE 'climate.%'
+                        OR entity_id LIKE 'input_boolean.%'
+                        OR entity_id LIKE 'binary_sensor.%'
+                        OR entity_id LIKE 'person.%'
+                        OR entity_id LIKE 'device_tracker.%'
+                    )
+                    ORDER BY last_changed_ts
+                """
 
-        cursor = conn.execute(query, (cutoff_ts,))
+            rows = conn.execute(query, (cutoff_ts,)).fetchall()
+
         results = []
-        for row in cursor:
-            ts = row["last_changed_ts"]
+        for entity_id, state, ts in rows:
             if ts is None:
                 continue
-            state = row["state"]
             if state in ("unavailable", "unknown", ""):
                 continue
             results.append({
-                "entity_id": row["entity_id"],
+                "entity_id": entity_id,
                 "state": state,
                 "timestamp": float(ts),
                 "dt": datetime.datetime.fromtimestamp(float(ts), tz=datetime.UTC),
             })
-        conn.close()
         log.info("Scene detector: loaded %d state changes from HA database", len(results))
         return results
     except Exception as e:

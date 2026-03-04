@@ -21,11 +21,10 @@ import datetime
 import json
 import logging
 import os
-import sqlite3
 from collections import Counter, defaultdict
 from typing import Any
 
-from .ha_db import resolve_ha_db_path
+from .ha_db import managed_read_connection, resolve_ha_db_path, table_exists
 
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
@@ -68,41 +67,38 @@ def _get_room_entry_events(entity_to_area: dict[str, str], days: int = DEFAULT_D
         return []
 
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='states_meta'"
-        )
-        has_meta = cursor.fetchone() is not None
+        with managed_read_connection(db_path) as conn:
+            if conn is None:
+                return []
+            has_meta = table_exists(conn, "states_meta")
 
-        entries = []
-        for eid, area in trigger_entities.items():
-            if has_meta:
-                rows = conn.execute("""
-                    SELECT s.state, s.last_changed_ts
-                    FROM states s
-                    JOIN states_meta sm ON s.metadata_id = sm.metadata_id
-                    WHERE sm.entity_id = ? AND s.last_changed_ts > ? AND s.state = 'on'
-                    ORDER BY s.last_changed_ts
-                """, (eid, cutoff_ts)).fetchall()
-            else:
-                rows = conn.execute("""
-                    SELECT state, last_changed_ts
-                    FROM states WHERE entity_id = ? AND last_changed_ts > ? AND state = 'on'
-                    ORDER BY last_changed_ts
-                """, (eid, cutoff_ts)).fetchall()
+            entries = []
+            for eid, area in trigger_entities.items():
+                if has_meta:
+                    rows = conn.execute("""
+                        SELECT s.state, s.last_changed_ts
+                        FROM states s
+                        JOIN states_meta sm ON s.metadata_id = sm.metadata_id
+                        WHERE sm.entity_id = ? AND s.last_changed_ts > ? AND s.state = 'on'
+                        ORDER BY s.last_changed_ts
+                    """, (eid, cutoff_ts)).fetchall()
+                else:
+                    rows = conn.execute("""
+                        SELECT state, last_changed_ts
+                        FROM states WHERE entity_id = ? AND last_changed_ts > ? AND state = 'on'
+                        ORDER BY last_changed_ts
+                    """, (eid, cutoff_ts)).fetchall()
 
-            for _, ts in rows:
-                dt = datetime.datetime.fromtimestamp(ts, tz=datetime.UTC)
-                entries.append({
-                    "room": area,
-                    "timestamp": ts,
-                    "hour": dt.hour,
-                    "day_of_week": dt.weekday(),
-                    "is_weekend": dt.weekday() >= 5,
-                    "trigger_entity": eid,
-                })
-
-        conn.close()
+                for _, ts in rows:
+                    dt = datetime.datetime.fromtimestamp(ts, tz=datetime.UTC)
+                    entries.append({
+                        "room": area,
+                        "timestamp": ts,
+                        "hour": dt.hour,
+                        "day_of_week": dt.weekday(),
+                        "is_weekend": dt.weekday() >= 5,
+                        "trigger_entity": eid,
+                    })
         entries.sort(key=lambda e: e["timestamp"])
         log.info("Found %d room entry events across %d trigger sensors", len(entries), len(trigger_entities))
         return entries
@@ -126,45 +122,42 @@ def _get_actions_after_entry(entry_ts: float, room: str, entity_to_area: dict[st
     room_entities = {eid for eid, area in entity_to_area.items() if area == room}
 
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='states_meta'"
-        )
-        has_meta = cursor.fetchone() is not None
+        with managed_read_connection(db_path) as conn:
+            if conn is None:
+                return []
+            has_meta = table_exists(conn, "states_meta")
 
-        if has_meta:
-            rows = conn.execute("""
-                SELECT sm.entity_id, s.state, s.last_changed_ts
-                FROM states s
-                JOIN states_meta sm ON s.metadata_id = sm.metadata_id
-                WHERE s.last_changed_ts > ? AND s.last_changed_ts <= ?
-                AND (
-                    sm.entity_id LIKE 'light.%'
-                    OR sm.entity_id LIKE 'switch.%'
-                    OR sm.entity_id LIKE 'media_player.%'
-                    OR sm.entity_id LIKE 'climate.%'
-                    OR sm.entity_id LIKE 'fan.%'
-                    OR sm.entity_id LIKE 'cover.%'
-                )
-                ORDER BY s.last_changed_ts
-            """, (entry_ts, window_end)).fetchall()
-        else:
-            rows = conn.execute("""
-                SELECT entity_id, state, last_changed_ts
-                FROM states
-                WHERE last_changed_ts > ? AND last_changed_ts <= ?
-                AND (
-                    entity_id LIKE 'light.%'
-                    OR entity_id LIKE 'switch.%'
-                    OR entity_id LIKE 'media_player.%'
-                    OR entity_id LIKE 'climate.%'
-                    OR entity_id LIKE 'fan.%'
-                    OR entity_id LIKE 'cover.%'
-                )
-                ORDER BY last_changed_ts
-            """, (entry_ts, window_end)).fetchall()
-
-        conn.close()
+            if has_meta:
+                rows = conn.execute("""
+                    SELECT sm.entity_id, s.state, s.last_changed_ts
+                    FROM states s
+                    JOIN states_meta sm ON s.metadata_id = sm.metadata_id
+                    WHERE s.last_changed_ts > ? AND s.last_changed_ts <= ?
+                    AND (
+                        sm.entity_id LIKE 'light.%'
+                        OR sm.entity_id LIKE 'switch.%'
+                        OR sm.entity_id LIKE 'media_player.%'
+                        OR sm.entity_id LIKE 'climate.%'
+                        OR sm.entity_id LIKE 'fan.%'
+                        OR sm.entity_id LIKE 'cover.%'
+                    )
+                    ORDER BY s.last_changed_ts
+                """, (entry_ts, window_end)).fetchall()
+            else:
+                rows = conn.execute("""
+                    SELECT entity_id, state, last_changed_ts
+                    FROM states
+                    WHERE last_changed_ts > ? AND last_changed_ts <= ?
+                    AND (
+                        entity_id LIKE 'light.%'
+                        OR entity_id LIKE 'switch.%'
+                        OR entity_id LIKE 'media_player.%'
+                        OR entity_id LIKE 'climate.%'
+                        OR entity_id LIKE 'fan.%'
+                        OR entity_id LIKE 'cover.%'
+                    )
+                    ORDER BY last_changed_ts
+                """, (entry_ts, window_end)).fetchall()
 
         actions = []
         for eid, state, ts in rows:

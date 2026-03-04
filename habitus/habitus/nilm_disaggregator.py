@@ -19,11 +19,10 @@ import datetime
 import json
 import logging
 import os
-import sqlite3
 from collections import Counter, defaultdict
 from typing import Any
 
-from .ha_db import resolve_ha_db_path
+from .ha_db import managed_read_connection, resolve_ha_db_path, table_exists
 
 import numpy as np
 
@@ -74,14 +73,15 @@ def _get_aggregate_power(entity_id: str, days: int = 7) -> list[tuple[float, flo
     db_path = resolve_ha_db_path()
     if db_path:
         try:
-            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-            rows = conn.execute("""
-                SELECT s.state, s.last_changed_ts FROM states s
-                JOIN states_meta sm ON s.metadata_id = sm.metadata_id
-                WHERE sm.entity_id = ? AND s.last_changed_ts > ?
-                ORDER BY s.last_changed_ts
-            """, (entity_id, cutoff_ts)).fetchall()
-            conn.close()
+            with managed_read_connection(db_path) as conn:
+                if conn is None:
+                    return []
+                rows = conn.execute("""
+                    SELECT s.state, s.last_changed_ts FROM states s
+                    JOIN states_meta sm ON s.metadata_id = sm.metadata_id
+                    WHERE sm.entity_id = ? AND s.last_changed_ts > ?
+                    ORDER BY s.last_changed_ts
+                """, (entity_id, cutoff_ts)).fetchall()
 
             result = []
             for state_val, ts in rows:
@@ -312,39 +312,63 @@ def _learn_signatures_from_known_monitors(exclude_entity: str = "", days: int = 
     db_path = resolve_ha_db_path()
     if db_path:
         try:
-            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-            candidates = conn.execute("""
-                SELECT DISTINCT sm.entity_id
-                FROM states_meta sm
-                WHERE sm.entity_id LIKE 'sensor.%'
-                  AND (
-                    sm.entity_id LIKE '%_power%'
-                    OR sm.entity_id LIKE '%_watt%'
-                    OR sm.entity_id LIKE '%_watts%'
-                    OR sm.entity_id LIKE '%energy_watts%'
-                    OR sm.entity_id LIKE '%consumption_w%'
-                  )
-            """).fetchall()
-            for (eid,) in candidates:
-                if _skip_entity(eid):
-                    continue
-                rows = conn.execute("""
-                    SELECT s.state
-                    FROM states s
-                    JOIN states_meta sm ON s.metadata_id = sm.metadata_id
-                    WHERE sm.entity_id = ? AND s.last_changed_ts > ?
-                    ORDER BY s.last_changed_ts
-                """, (eid, cutoff_ts)).fetchall()
-                watts = []
-                for (state_val,) in rows:
-                    try:
-                        w = float(state_val)
-                        if 0 <= w <= 25000:
-                            watts.append(w)
-                    except (ValueError, TypeError):
+            with managed_read_connection(db_path) as conn:
+                if conn is None:
+                    return learned
+                has_meta = table_exists(conn, "states_meta")
+                if has_meta:
+                    candidates = conn.execute("""
+                        SELECT DISTINCT sm.entity_id
+                        FROM states_meta sm
+                        WHERE sm.entity_id LIKE 'sensor.%'
+                          AND (
+                            sm.entity_id LIKE '%_power%'
+                            OR sm.entity_id LIKE '%_watt%'
+                            OR sm.entity_id LIKE '%_watts%'
+                            OR sm.entity_id LIKE '%energy_watts%'
+                            OR sm.entity_id LIKE '%consumption_w%'
+                          )
+                    """).fetchall()
+                else:
+                    candidates = conn.execute("""
+                        SELECT DISTINCT entity_id
+                        FROM states
+                        WHERE entity_id LIKE 'sensor.%'
+                          AND (
+                            entity_id LIKE '%_power%'
+                            OR entity_id LIKE '%_watt%'
+                            OR entity_id LIKE '%_watts%'
+                            OR entity_id LIKE '%energy_watts%'
+                            OR entity_id LIKE '%consumption_w%'
+                          )
+                    """).fetchall()
+                for (eid,) in candidates:
+                    if _skip_entity(eid):
                         continue
-                _build_sig(eid, watts)
-            conn.close()
+                    if has_meta:
+                        rows = conn.execute("""
+                            SELECT s.state
+                            FROM states s
+                            JOIN states_meta sm ON s.metadata_id = sm.metadata_id
+                            WHERE sm.entity_id = ? AND s.last_changed_ts > ?
+                            ORDER BY s.last_changed_ts
+                        """, (eid, cutoff_ts)).fetchall()
+                    else:
+                        rows = conn.execute("""
+                            SELECT state
+                            FROM states
+                            WHERE entity_id = ? AND last_changed_ts > ?
+                            ORDER BY last_changed_ts
+                        """, (eid, cutoff_ts)).fetchall()
+                    watts = []
+                    for (state_val,) in rows:
+                        try:
+                            w = float(state_val)
+                            if 0 <= w <= 25000:
+                                watts.append(w)
+                        except (ValueError, TypeError):
+                            continue
+                    _build_sig(eid, watts)
         except Exception as e:
             log.warning("nilm: DB monitor-learning failed: %s", e)
 
@@ -508,27 +532,26 @@ def _estimate_current_breakdown(readings: list[tuple[float, float]],
 def _auto_detect_power_entity(db_path: str) -> str:
     """Best-effort auto-detect of a likely aggregate power sensor from recorder DB."""
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        has_meta = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='states_meta'"
-        ).fetchone() is not None
+        with managed_read_connection(db_path) as conn:
+            if conn is None:
+                return ""
+            has_meta = table_exists(conn, "states_meta")
 
-        if has_meta:
-            rows = conn.execute("""
-                SELECT DISTINCT sm.entity_id FROM states_meta sm
-                WHERE sm.entity_id LIKE 'sensor.%'
-                AND (sm.entity_id LIKE '%consumption_w' OR sm.entity_id LIKE '%power_w'
-                     OR sm.entity_id LIKE '%electric%w')
-            """).fetchall()
-        else:
-            rows = conn.execute("""
-                SELECT DISTINCT s.entity_id FROM states s
-                WHERE s.entity_id LIKE 'sensor.%'
-                AND (s.entity_id LIKE '%consumption_w' OR s.entity_id LIKE '%power_w'
-                     OR s.entity_id LIKE '%electric%w')
-            """).fetchall()
+            if has_meta:
+                rows = conn.execute("""
+                    SELECT DISTINCT sm.entity_id FROM states_meta sm
+                    WHERE sm.entity_id LIKE 'sensor.%'
+                    AND (sm.entity_id LIKE '%consumption_w' OR sm.entity_id LIKE '%power_w'
+                         OR sm.entity_id LIKE '%electric%w')
+                """).fetchall()
+            else:
+                rows = conn.execute("""
+                    SELECT DISTINCT s.entity_id FROM states s
+                    WHERE s.entity_id LIKE 'sensor.%'
+                    AND (s.entity_id LIKE '%consumption_w' OR s.entity_id LIKE '%power_w'
+                         OR s.entity_id LIKE '%electric%w')
+                """).fetchall()
 
-        conn.close()
         if rows:
             return rows[0][0]
     except Exception:

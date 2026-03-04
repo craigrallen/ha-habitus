@@ -19,11 +19,10 @@ import datetime
 import json
 import logging
 import os
-import sqlite3
 from collections import Counter, defaultdict
 from typing import Any
 
-from .ha_db import resolve_ha_db_path
+from .ha_db import managed_read_connection, resolve_ha_db_path, table_exists
 
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
@@ -55,30 +54,28 @@ def _find_humidity_sensors() -> dict[str, str]:
         return {}
 
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='states_meta'"
-        )
-        has_meta = cursor.fetchone() is not None
+        with managed_read_connection(db_path) as conn:
+            if conn is None:
+                return {}
+            has_meta = table_exists(conn, "states_meta")
 
-        if has_meta:
-            rows = conn.execute("""
-                SELECT DISTINCT sm.entity_id
-                FROM states_meta sm
-                WHERE (sm.entity_id LIKE 'sensor.%humidity%'
-                    OR sm.entity_id LIKE 'sensor.%hum%')
-                AND sm.entity_id NOT LIKE '%battery%'
-            """).fetchall()
-        else:
-            rows = conn.execute("""
-                SELECT DISTINCT entity_id
-                FROM states
-                WHERE (entity_id LIKE 'sensor.%humidity%'
-                    OR entity_id LIKE 'sensor.%hum%')
-                AND entity_id NOT LIKE '%battery%'
-                LIMIT 30
-            """).fetchall()
-        conn.close()
+            if has_meta:
+                rows = conn.execute("""
+                    SELECT DISTINCT sm.entity_id
+                    FROM states_meta sm
+                    WHERE (sm.entity_id LIKE 'sensor.%humidity%'
+                        OR sm.entity_id LIKE 'sensor.%hum%')
+                    AND sm.entity_id NOT LIKE '%battery%'
+                """).fetchall()
+            else:
+                rows = conn.execute("""
+                    SELECT DISTINCT entity_id
+                    FROM states
+                    WHERE (entity_id LIKE 'sensor.%humidity%'
+                        OR entity_id LIKE 'sensor.%hum%')
+                    AND entity_id NOT LIKE '%battery%'
+                    LIMIT 30
+                """).fetchall()
 
         sensors = {}
         for (eid,) in rows:
@@ -110,28 +107,26 @@ def _get_humidity_history(entity_id: str, days: int = 30) -> list[tuple[float, f
     cutoff_ts = cutoff.timestamp()
 
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='states_meta'"
-        )
-        has_meta = cursor.fetchone() is not None
+        with managed_read_connection(db_path) as conn:
+            if conn is None:
+                return []
+            has_meta = table_exists(conn, "states_meta")
 
-        if has_meta:
-            rows = conn.execute("""
-                SELECT s.state, s.last_changed_ts
-                FROM states s
-                JOIN states_meta sm ON s.metadata_id = sm.metadata_id
-                WHERE sm.entity_id = ? AND s.last_changed_ts > ?
-                ORDER BY s.last_changed_ts
-            """, (entity_id, cutoff_ts)).fetchall()
-        else:
-            rows = conn.execute("""
-                SELECT state, last_changed_ts
-                FROM states
-                WHERE entity_id = ? AND last_changed_ts > ?
-                ORDER BY last_changed_ts
-            """, (entity_id, cutoff_ts)).fetchall()
-        conn.close()
+            if has_meta:
+                rows = conn.execute("""
+                    SELECT s.state, s.last_changed_ts
+                    FROM states s
+                    JOIN states_meta sm ON s.metadata_id = sm.metadata_id
+                    WHERE sm.entity_id = ? AND s.last_changed_ts > ?
+                    ORDER BY s.last_changed_ts
+                """, (entity_id, cutoff_ts)).fetchall()
+            else:
+                rows = conn.execute("""
+                    SELECT state, last_changed_ts
+                    FROM states
+                    WHERE entity_id = ? AND last_changed_ts > ?
+                    ORDER BY last_changed_ts
+                """, (entity_id, cutoff_ts)).fetchall()
 
         readings = []
         for state_val, ts in rows:
