@@ -54,6 +54,8 @@ def test_api_progress_stale_recovery_preserves_recent_metrics_and_adds_last_run(
 
 def test_training_log_js_uses_last_run_complete_state() -> None:
     assert "statusEl.textContent = 'Last run complete';" in web.PAGE
+    assert "const completedPhase = (lastCompleted && lastCompleted.phase) || 'complete';" in web.PAGE
+    assert "last run complete · ${completedPhase}" in web.PAGE
     assert "`[${stamp}] idle`" not in web.PAGE
 
 

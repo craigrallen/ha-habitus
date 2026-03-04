@@ -1324,7 +1324,14 @@ function updateTrainingLog(progress, state) {
   const rows = (progress && progress.rows) || 0;
   const running = !!(progress && progress.running);
   const lastRunIso = (state && state.last_run) || (progress && progress.last_run) || null;
-  const hasRecentProgress = !!lastRunIso || rows > 0 || done > 0 || total > 0;
+  const lastCompleted = (progress && progress.last_completed_progress)
+    || (state && state.last_completed_progress)
+    || null;
+  const completedDone = Number((lastCompleted && lastCompleted.done) || done || 0);
+  const completedTotal = Number((lastCompleted && lastCompleted.total) || total || 0);
+  const completedRows = Number((lastCompleted && lastCompleted.rows) || rows || 0);
+  const completedPhase = (lastCompleted && lastCompleted.phase) || 'complete';
+  const hasRecentProgress = !!lastRunIso || !!lastCompleted || rows > 0 || done > 0 || total > 0;
 
   if (running) {
     statusEl.textContent = `Running · ${phase}`;
@@ -1336,8 +1343,8 @@ function updateTrainingLog(progress, state) {
     barEl.style.width = '100%';
     barEl.style.opacity = '0.35';
     const when = lastRunIso ? new Date(lastRunIso).toLocaleString() : 'recently';
-    const sensorsLabel = total > 0 ? `${done}/${total}` : `${done}`;
-    metaEl.textContent = `Last run: ${when} · ${sensorsLabel} sensors · ${rows.toLocaleString()} rows`;
+    const sensorsLabel = completedTotal > 0 ? `${completedDone}/${completedTotal}` : `${completedDone}`;
+    metaEl.textContent = `Last run: ${when} · ${completedPhase} · ${sensorsLabel} sensors · ${completedRows.toLocaleString()} rows`;
   } else {
     statusEl.textContent = 'Idle';
     barEl.style.width = '0%';
@@ -1350,7 +1357,7 @@ function updateTrainingLog(progress, state) {
   const lineKey = running
     ? `run:${phase}:${pct}:${done}:${total}:${rows}`
     : hasRecentProgress
-      ? `last:${lastRunIso || 'none'}:${done}:${total}:${rows}`
+      ? `last:${lastRunIso || 'none'}:${completedPhase}:${completedDone}:${completedTotal}:${completedRows}`
       : 'idle';
 
   if (window._trainLogLastKey !== lineKey) {
@@ -1358,7 +1365,7 @@ function updateTrainingLog(progress, state) {
     const line = running
       ? `[${stamp}] ${phase} · ${pct}% · ${done}/${total || '?'} sensors · ${rows.toLocaleString()} rows`
       : hasRecentProgress
-        ? `[${stamp}] last run complete · ${(lastRunIso ? new Date(lastRunIso).toLocaleString() : 'recently')} · ${rows.toLocaleString()} rows`
+        ? `[${stamp}] last run complete · ${completedPhase} · ${(lastRunIso ? new Date(lastRunIso).toLocaleString() : 'recently')} · ${completedRows.toLocaleString()} rows`
         : `[${stamp}] waiting for first run`;
     window._trainLog.push(line);
     if (window._trainLog.length > 120) window._trainLog = window._trainLog.slice(-120);
