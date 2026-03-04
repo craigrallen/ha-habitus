@@ -2,7 +2,9 @@
 
 SCAN=$(bashio::config 'scan_interval_hours')
 DAYS=$(bashio::config 'days_history')
-DAYS=$(( DAYS > 365 ? 365 : DAYS ))
+# Respect configured history depth up to 10 years (UI supports 3650)
+DAYS=$(( DAYS > 3650 ? 3650 : DAYS ))
+DAYS=$(( DAYS < 7 ? 7 : DAYS ))
 PORT=$(bashio::addon.ingress_port)
 NOTIFY=$(bashio::config 'notify_service')
 NOTIFY_ON=$(bashio::config 'notify_on_anomaly')

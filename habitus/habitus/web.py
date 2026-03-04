@@ -270,6 +270,22 @@ tr:hover td { background: var(--bg2); }
   .sec-header { margin-bottom: 10px; }
   th { font-size: 0.66rem; padding: 6px 8px 8px; }
   td { font-size: 0.78rem; padding: 8px; }
+
+  /* Keep cards/tables on-screen on phone without horizontal scrolling */
+  .table-wrap { overflow-x: hidden; }
+  .table-wrap table { min-width: 0; width: 100%; table-layout: fixed; }
+  .table-wrap th, .table-wrap td { white-space: normal; word-break: break-word; }
+
+  /* Breakdown table: hide secondary columns on mobile, keep core signal */
+  #tab-breakdown th, #tab-breakdown td { white-space: normal; word-break: break-word; }
+  #tab-breakdown .bd-col-current,
+  #tab-breakdown .bd-col-baseline,
+  #tab-breakdown .bd-col-confidence {
+    display: none;
+  }
+  #tab-breakdown .bd-col-sensor { width: 58%; }
+  #tab-breakdown .bd-col-deviation { width: 24%; }
+  #tab-breakdown .bd-col-bar { width: 18%; }
 }
 
 /* ── Bar ── */
@@ -582,7 +598,7 @@ pre.raw {
       <span class="sec-sub" id="bd-ts"></span>
     </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Sensor</th><th>Current</th><th>Baseline</th><th>Deviation</th><th>Confidence</th><th style="width:90px"></th></tr></thead>
+      <thead><tr><th class="bd-col-sensor">Sensor</th><th class="bd-col-current">Current</th><th class="bd-col-baseline">Baseline</th><th class="bd-col-deviation">Deviation</th><th class="bd-col-confidence">Confidence</th><th class="bd-col-bar" style="width:90px"></th></tr></thead>
       <tbody id="bd-table"><tr><td colspan="6" style="color:var(--text3);padding:16px">No entity data yet.</td></tr></tbody>
     </table></div>
   </div>
@@ -1199,12 +1215,12 @@ async function load() {
         const bc=z>=3?'b-alert':z>=1.5?'b-warn':'b-ok';
         const confLabel=e.confidence_label||'';
         return`<tr>
-          <td><div style="font-weight:500">${e.name}</div><div style="font-size:.7rem;color:var(--text3)">${e.entity_id}</div></td>
-          <td style="font-weight:600">${e.current_value}${e.unit}</td>
-          <td style="color:var(--text3)">${e.baseline_mean}${e.unit} <span style="color:var(--text3);font-size:.7rem">±${e.baseline_std}${e.unit}</span></td>
-          <td><span class="badge ${bc}">${z}σ</span></td>
-          <td style="font-size:.75rem;color:var(--text3)">${confLabel}</td>
-          <td><div class="bar-wrap"><div class="bar" style="width:${pct}%;background:${col}"></div></div></td>
+          <td class="bd-col-sensor"><div style="font-weight:500">${e.name}</div><div style="font-size:.7rem;color:var(--text3)">${e.entity_id}</div></td>
+          <td class="bd-col-current" style="font-weight:600">${e.current_value}${e.unit}</td>
+          <td class="bd-col-baseline" style="color:var(--text3)">${e.baseline_mean}${e.unit} <span style="color:var(--text3);font-size:.7rem">±${e.baseline_std}${e.unit}</span></td>
+          <td class="bd-col-deviation"><span class="badge ${bc}">${z}σ</span></td>
+          <td class="bd-col-confidence" style="font-size:.75rem;color:var(--text3)">${confLabel}</td>
+          <td class="bd-col-bar"><div class="bar-wrap"><div class="bar" style="width:${pct}%;background:${col}"></div></div></td>
         </tr>`;}).join('')
     : '<tr><td colspan="6" style="color:var(--text3);padding:16px">No entity anomalies detected.</td></tr>';
 
