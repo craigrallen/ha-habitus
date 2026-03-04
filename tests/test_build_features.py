@@ -25,6 +25,28 @@ def test_build_features_leak_sensor_uses_mean_when_state_absent() -> None:
     assert per_hour[ts1] == 0.0
 
 
+def test_build_features_grid_energy_populates_grid_kwh_w(monkeypatch) -> None:
+    monkeypatch.setenv("HABITUS_ENERGY_GRID", "sensor.grid_energy")
+
+    ts0 = pd.Timestamp("2026-01-01T00:00:00Z")
+    ts1 = pd.Timestamp("2026-01-01T01:00:00Z")
+
+    df = pd.DataFrame(
+        [
+            {"entity_id": "sensor.grid_energy", "ts": ts0, "mean": 100.0, "sum": None},
+            {"entity_id": "sensor.grid_energy", "ts": ts1, "mean": 101.5, "sum": None},
+        ]
+    )
+
+    features = build_features(df)
+    per_hour_grid = dict(zip(features["hour"], features["grid_kwh_w"], strict=False))
+    per_hour_power = dict(zip(features["hour"], features["total_power_w"], strict=False))
+
+    assert per_hour_grid[ts0] == 0.0
+    assert per_hour_grid[ts1] == 1500.0
+    assert per_hour_power[ts1] == 1500.0
+
+
 def test_build_features_leak_sensor_prefers_state_when_available() -> None:
     ts0 = pd.Timestamp("2026-01-01T00:00:00Z")
     ts1 = pd.Timestamp("2026-01-01T01:00:00Z")

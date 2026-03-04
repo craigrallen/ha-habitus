@@ -874,7 +874,8 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         grid = grid.set_index("hour").sort_index()
         # kWh delta per hour × 1000 = average watts for that hour
         kwh_per_hour = grid["v"].diff().clip(lower=0, upper=_max_w / 1000)
-        total_power = (kwh_per_hour * 1000).rename("total_power_w")
+        grid_kwh_w = (kwh_per_hour * 1000).rename("grid_kwh_w")
+        total_power = grid_kwh_w.rename("total_power_w")
     elif _energy_rates:
         # Per-device watt sensors from Energy Dashboard — sum these (no overlap)
         power = df[df["entity_id"].isin(_energy_rates)].copy()
