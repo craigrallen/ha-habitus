@@ -505,6 +505,37 @@ def _estimate_current_breakdown(readings: list[tuple[float, float]],
     return breakdown
 
 
+def _auto_detect_power_entity(db_path: str) -> str:
+    """Best-effort auto-detect of a likely aggregate power sensor from recorder DB."""
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        has_meta = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='states_meta'"
+        ).fetchone() is not None
+
+        if has_meta:
+            rows = conn.execute("""
+                SELECT DISTINCT sm.entity_id FROM states_meta sm
+                WHERE sm.entity_id LIKE 'sensor.%'
+                AND (sm.entity_id LIKE '%consumption_w' OR sm.entity_id LIKE '%power_w'
+                     OR sm.entity_id LIKE '%electric%w')
+            """).fetchall()
+        else:
+            rows = conn.execute("""
+                SELECT DISTINCT s.entity_id FROM states s
+                WHERE s.entity_id LIKE 'sensor.%'
+                AND (s.entity_id LIKE '%consumption_w' OR s.entity_id LIKE '%power_w'
+                     OR s.entity_id LIKE '%electric%w')
+            """).fetchall()
+
+        conn.close()
+        if rows:
+            return rows[0][0]
+    except Exception:
+        pass
+    return ""
+
+
 def run_disaggregation(power_entity: str = "", days: int = 7) -> dict[str, Any]:
     """Run full NILM disaggregation pipeline.
 
@@ -528,19 +559,7 @@ def run_disaggregation(power_entity: str = "", days: int = 7) -> dict[str, Any]:
             # Auto-detect
             db_path = resolve_ha_db_path()
             if db_path:
-                try:
-                    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-                    rows = conn.execute("""
-                        SELECT DISTINCT sm.entity_id FROM states_meta sm
-                        WHERE sm.entity_id LIKE 'sensor.%'
-                        AND (sm.entity_id LIKE '%consumption_w' OR sm.entity_id LIKE '%power_w'
-                             OR sm.entity_id LIKE '%electric%w')
-                    """).fetchall()
-                    conn.close()
-                    if rows:
-                        power_entity = rows[0][0]
-                except Exception:
-                    pass
+                power_entity = _auto_detect_power_entity(db_path)
 
     if not power_entity:
         return {"error": "No power entity configured", "breakdown": []}

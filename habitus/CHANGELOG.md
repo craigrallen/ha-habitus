@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Recorder DB path resolution no longer assumes `/homeassistant/home-assistant_v2.db`; scene/appliance/routine/room plus correlation/sequence/Markov/HMM/energy/NILM/dynamic-training modules now honor `HABITUS_HA_DB`/`HA_DB_PATH` and common HA mount paths (restores learning pipelines on systems using `/config` mounts)
+- NILM aggregate-power auto-detection now works on both modern (`states_meta`) and legacy (`states.entity_id`) recorder schemas, preventing false "No power entity configured" failures on older HA databases
 
 ## [3.1.0] - 2026-03-03
 
