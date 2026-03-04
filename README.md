@@ -88,6 +88,58 @@ A polished web UI served via HA ingress (sidebar button):
 
 ---
 
+## Feature Catalogue (Current)
+
+Below is the practical feature set currently in the repo (see `habitus/CHANGELOG.md` for version-by-version detail).
+
+### Detection & Scoring
+- Whole-home anomaly score (`sensor.habitus_anomaly_score`) with thresholded anomaly binary sensor
+- Per-entity anomaly breakdown with confidence weighting and sensor-type-aware scoring
+- Sensor classifier taxonomy (`accumulating`, `binary`, `gauge`, `event`, `setpoint`)
+- Data-quality guards, impossible-value filtering, and cold-start protection
+- Adaptive contamination / training-age-aware model behavior
+
+### Behavioral Learning
+- Activity baseline engine (motion, lights, doors, media, presence, person/device-tracker signals)
+- Routine predictor (humidity/temperature-derived shower, bath, cooking pattern detection)
+- Sequence mining (PrefixSpan) for ordered behavior flows
+- Markov chain next-action prediction
+- Hidden Markov Model (HMM) activity-state inference
+- Behavior drift analysis for “what changed” over time
+
+### Energy Intelligence
+- Power shape classification (`steady`, `cycling`, `decaying`, `phased`)
+- Appliance fingerprinting/event detection from power signatures
+- Deep correlation engine for statistically significant cross-entity patterns
+- Energy forecast with uncertainty estimates
+- Overnight baseline / phantom-load style analysis and cost-aware insights
+
+### Smart Home Automation
+- Scene detector (implicit scenes from co-occurrence patterns)
+- Automation builder (time/state/scene-based YAML suggestions)
+- Automation gap and automation score engines
+- Conflict detector (wasteful or contradictory states) with suggested fix-it automations
+- Dynamic automation generation with confidence thresholds
+- Existing HA automation import + overlap detection against suggested automations
+
+### Home Assistant Integration
+- Area registry integration with room-aware predictions
+- Room predictor based on area mapping + time/day context
+- Notification support for anomalies and actionable insights
+- Ingress web app with Smart Home + Geek views and API endpoints for state/insights/suggestions
+
+### Feedback, Training & Controls
+- User feedback loop (confirm/dismiss anomalies) to tighten/widen per-entity thresholds
+- Device training mode for user-labeled signatures (start/stop capture + naming)
+- Configurable history depth windows (30d → all history)
+- Full-train endpoint and progressive training flow
+- Seasonal model handling that extends knowledge without regressing stronger models
+
+### Privacy & Architecture
+- 100% local processing on your HA host
+- No required cloud account or outbound telemetry path for core operation
+- Stores model artifacts, not raw mirrored history
+
 ## Installation
 
 1. In Home Assistant: **Settings → Add-ons → Add-on Store → ⋮ → Repositories**
