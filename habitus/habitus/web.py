@@ -2219,8 +2219,6 @@ def api_sensor_health():
     return jsonify(_read(DATA_QUALITY_PATH) or [])
 
 
-@app.route("/api/rescan", methods=["POST"])
-@app.route("/ingress/api/rescan", methods=["POST"])
 @app.route("/api/full_train", methods=["POST"])
 @app.route("/ingress/api/full_train", methods=["POST"])
 def api_full_train():
@@ -2249,6 +2247,8 @@ def api_full_train():
     return jsonify({"ok": True, "message": f"Full {days}d training started"})
 
 
+@app.route("/api/rescan", methods=["POST"])
+@app.route("/ingress/api/rescan", methods=["POST"])
 def api_rescan():
     try:
         import glob as _glob  # noqa: PLC0415
