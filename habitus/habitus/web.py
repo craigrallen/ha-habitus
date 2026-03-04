@@ -1165,14 +1165,14 @@ function renderSuggestions() {
       ${entitiesHtml}
       ${timeHtml}
       ${overlapHtml}
+      <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
+        <button class="btn btn-accent" onclick="copyYaml('${s.id}')">📋 Copy YAML</button>
+        ${s.category!=='lovelace' ? (!existing
+          ? `<button class="btn btn-success" id="add-${s.id}" onclick="addToHA('${s.id}')">+ Add to HA</button>`
+          : `<button class="btn btn-danger" id="remove-${s.id}" onclick="removeFromHA('${(existing.entity_id || '').replace(/'/g, "\\'")}', '${s.id}')">🗑 Remove from HA</button>`) : ''}
+      </div>
       <details><summary style="cursor:pointer;color:var(--accent);font-size:.82rem;margin:6px 0">Show YAML</summary>
         <pre id="yaml-${s.id}">${(s.yaml||'').trim()}</pre>
-        <div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
-          <button class="btn btn-accent" onclick="copyYaml('${s.id}')">📋 Copy YAML</button>
-          ${s.category!=='lovelace' ? (!existing
-            ? `<button class="btn btn-success" id="add-${s.id}" onclick="addToHA('${s.id}')">+ Add to HA</button>`
-            : `<button class="btn btn-danger" id="remove-${s.id}" onclick="removeFromHA('${(existing.entity_id || '').replace(/'/g, "\\'")}', '${s.id}')">🗑 Remove from HA</button>`) : ''}
-        </div>
       </details>
     </div>`;
   }).join('');

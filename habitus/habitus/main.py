@@ -281,7 +281,41 @@ async def ws_connect():
     return ws
 
 
+def _sqlite_connect():
+    db_path = os.environ.get("HABITUS_HA_DB", "/homeassistant/home-assistant_v2.db")
+    if os.environ.get("HABITUS_FORCE_API", "").lower() == "true":
+        return None
+    if not os.path.exists(db_path):
+        return None
+    try:
+        return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except Exception:
+        return None
+
+
 async def get_stat_ids() -> tuple[list[str], int]:
+    conn = _sqlite_connect()
+    if conn:
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT statistic_id FROM statistics_meta")
+            all_ids = [r[0] for r in cur.fetchall()]
+            conn.close()
+            behavioral = [e for e in all_ids if is_behavioral(e)]
+            log.info(
+                "Found %d behavioral sensors with long-term stats (from %d total stats ids)",
+                len(behavioral),
+                len(all_ids),
+            )
+            return behavioral, len(all_ids)
+        except Exception as e:
+            log.warning("SQLite stats_meta read failed: %s", e)
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    # Fallback to WS API when DB is unavailable (dev)
     ws = await ws_connect()
     await ws.send(json.dumps({"id": 1, "type": "recorder/list_statistic_ids"}))
     result = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
@@ -293,7 +327,23 @@ async def get_stat_ids() -> tuple[list[str], int]:
 
 
 async def get_behavioral_entity_ids() -> list[str]:
-    """Return behavioral entity ids from live HA state list (includes non-stat entities)."""
+    """Return behavioral entity ids from recorder metadata (includes non-stat entities)."""
+    conn = _sqlite_connect()
+    if conn:
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT entity_id FROM states_meta")
+            ids = [r[0] for r in cur.fetchall()]
+            conn.close()
+            return [e for e in ids if e and is_behavioral(e)]
+        except Exception as e:
+            log.warning("SQLite states_meta read failed: %s", e)
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    # Fallback to API when DB is unavailable (dev)
     try:
         headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
         r = requests.get(f"{HA_URL}/api/states", headers=headers, timeout=15)
@@ -331,11 +381,62 @@ def _state_to_numeric(state: object) -> float | None:
 def fetch_recent_raw_history(entity_ids: list[str], start_iso: str, end_iso: str) -> pd.DataFrame:
     """Fetch raw history for entities that lack long-term recorder statistics.
 
-    Uses HA /api/history/period in batches and collapses raw state changes to hourly means.
+    Preferred path: direct SQLite read from recorder DB.
+    Fallback path: HA /api/history/period (dev only).
     """
     if not entity_ids:
         return pd.DataFrame()
 
+    conn = _sqlite_connect()
+    if conn:
+        try:
+            start_ts = pd.to_datetime(start_iso, utc=True).timestamp()
+            end_ts = pd.to_datetime(end_iso, utc=True).timestamp()
+            rows: list[dict] = []
+            batch = int(os.environ.get("HABITUS_SQL_BATCH", "300"))
+            cur = conn.cursor()
+            for i in range(0, len(entity_ids), batch):
+                chunk = entity_ids[i:i + batch]
+                if not chunk:
+                    continue
+                ph = ",".join(["?"] * len(chunk))
+                q = f"""
+                    SELECT m.entity_id, s.last_updated_ts, s.state
+                    FROM states s
+                    JOIN states_meta m ON s.metadata_id = m.metadata_id
+                    WHERE m.entity_id IN ({ph})
+                      AND s.last_updated_ts >= ? AND s.last_updated_ts <= ?
+                    ORDER BY s.last_updated_ts
+                """
+                cur.execute(q, [*chunk, start_ts, end_ts])
+                for eid, ts, state in cur.fetchall():
+                    val = _state_to_numeric(state)
+                    if not eid or val is None:
+                        continue
+                    rows.append({"entity_id": eid, "ts": ts, "mean": val, "sum": None})
+            conn.close()
+        except Exception as e:
+            log.warning("SQLite raw history read failed: %s", e)
+            try:
+                conn.close()
+            except Exception:
+                pass
+            rows = []
+
+        if rows:
+            df = pd.DataFrame(rows)
+            df["ts"] = pd.to_datetime(df["ts"], unit="s", utc=True, errors="coerce")
+            df = df.dropna(subset=["ts"])
+            if df.empty:
+                return pd.DataFrame()
+            df["hour"] = df["ts"].dt.floor("h")
+            out = df.groupby(["entity_id", "hour"], as_index=False)["mean"].mean()
+            out = out.rename(columns={"hour": "ts"})
+            out["sum"] = None
+            log.info("Fetched raw short-term history for %d non-stat entities (%d hourly rows)", len(entity_ids), len(out))
+            return out[["entity_id", "ts", "mean", "sum"]]
+
+    # Fallback to API (dev only)
     headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
     rows: list[dict] = []
     batch_size = 25
@@ -396,7 +497,21 @@ def fetch_recent_raw_history(entity_ids: list[str], start_iso: str, end_iso: str
 
 
 def get_ha_entity_count() -> int:
-    """Return total number of HA entities currently exposed by /api/states."""
+    """Return total number of HA entities (recorder metadata)."""
+    conn = _sqlite_connect()
+    if conn:
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT count(*) FROM states_meta")
+            total = int(cur.fetchone()[0])
+            conn.close()
+            return total
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
     try:
         headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
         r = requests.get(f"{HA_URL}/api/states", headers=headers, timeout=10)
