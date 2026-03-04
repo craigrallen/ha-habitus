@@ -410,57 +410,86 @@ def get_ha_entity_count() -> int:
 async def fetch_stats(entity_ids, start_iso, end_iso=None):
     """Fetch hourly statistics and return an aggregated DataFrame.
 
-    Memory-efficient: raw per-sensor rows are aggregated to hourly means
-    immediately after each sensor fetch, so peak RAM is bounded by one
-    sensor's worth of rows rather than all sensors combined.
+    Uses batched WebSocket calls to avoid opening one WS connection per entity,
+    which can trigger HA 502 errors on large installs.
     """
     if end_iso is None:
         end_iso = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:00:00+00:00")
-    all_rows = []  # accumulated hourly rows
+    if not entity_ids:
+        return pd.DataFrame()
+
+    all_rows = []
     done = 0
     total = len(entity_ids)
     import time as _t
 
+    batch_size = int(os.environ.get("HABITUS_STATS_BATCH", "120"))
+    max_retries = int(os.environ.get("HABITUS_STATS_RETRIES", "3"))
+
     t0 = _t.time()
-    for eid in entity_ids:
-        try:
-            ws = await ws_connect()
-            await ws.send(
-                json.dumps(
-                    {
-                        "id": 1,
-                        "type": "recorder/statistics_during_period",
-                        "start_time": start_iso,
-                        "end_time": end_iso,
-                        "statistic_ids": [eid],
-                        "period": "hour",
-                        "types": ["mean", "sum"],
-                    }
-                )
-            )
-            result = json.loads(await asyncio.wait_for(ws.recv(), timeout=30))
-            await ws.close()
-            for sid, points in result.get("result", {}).items():
-                for p in points:
-                    ts = p["start"]
-                    if ts > 1e10:
-                        ts /= 1000
-                    all_rows.append(
-                        {"entity_id": sid, "ts": ts, "mean": p.get("mean"), "sum": p.get("sum")}
+    for i in range(0, total, batch_size):
+        batch = entity_ids[i:i + batch_size]
+        ok = False
+
+        for attempt in range(1, max_retries + 1):
+            ws = None
+            try:
+                ws = await ws_connect()
+                await ws.send(
+                    json.dumps(
+                        {
+                            "id": 1,
+                            "type": "recorder/statistics_during_period",
+                            "start_time": start_iso,
+                            "end_time": end_iso,
+                            "statistic_ids": batch,
+                            "period": "hour",
+                            "types": ["mean", "sum"],
+                        }
                     )
-            done += 1
-            if done % 10 == 0 or done == total:
-                elapsed = _t.time() - t0
-                eta = (elapsed / done) * (total - done) if done else 0
-                set_progress("fetching", done, total, len(all_rows), elapsed, eta)
-                log.info(f"  {done}/{total} sensors — {len(all_rows):,} rows")
-        except Exception as e:
-            log.warning(f"Error {eid}: {e}")
+                )
+                result = json.loads(await asyncio.wait_for(ws.recv(), timeout=90))
+                payload = result.get("result", {}) or {}
+                for sid, points in payload.items():
+                    for p in points:
+                        ts = p["start"]
+                        if ts > 1e10:
+                            ts /= 1000
+                        all_rows.append(
+                            {"entity_id": sid, "ts": ts, "mean": p.get("mean"), "sum": p.get("sum")}
+                        )
+                ok = True
+                break
+            except Exception as e:
+                if attempt >= max_retries:
+                    log.warning(
+                        "Batch %d-%d failed after %d attempts: %s",
+                        i,
+                        i + len(batch) - 1,
+                        max_retries,
+                        e,
+                    )
+                else:
+                    await asyncio.sleep(min(5 * attempt, 15))
+            finally:
+                try:
+                    if ws is not None:
+                        await ws.close()
+                except Exception:
+                    pass
+
+        done += len(batch)
+        elapsed = _t.time() - t0
+        eta = (elapsed / done) * (total - done) if done else 0
+        set_progress("fetching", done, total, len(all_rows), elapsed, eta)
+        if ok:
+            log.info("  %d/%d sensors — %d rows", done, total, len(all_rows))
+
     if not all_rows:
         return pd.DataFrame()
     df = pd.DataFrame(all_rows)
     df["ts"] = pd.to_datetime(df["ts"], unit="s", utc=True)
-    log.info(f"Fetched {len(df):,} rows | {df['ts'].min().date()} → {df['ts'].max().date()}")
+    log.info("Fetched %d rows | %s → %s", len(df), df["ts"].min().date(), df["ts"].max().date())
     return df
 
 
