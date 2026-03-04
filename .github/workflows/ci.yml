@@ -58,6 +58,29 @@ jobs:
           flags: unittests
           fail_ci_if_error: false
 
+  benchmark:
+    name: Benchmark (NILM + scene)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -e .
+      - name: Run benchmark harness
+        run: |
+          python benchmarks/nilm_scene_benchmark.py --iterations 5 \
+            --json-out benchmark-results/nilm_scene_benchmark.json \
+            --summary-out benchmark-results/nilm_scene_benchmark.md
+      - name: Publish benchmark summary
+        run: cat benchmark-results/nilm_scene_benchmark.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nilm-scene-benchmark
+          path: benchmark-results/
+
   build:
     name: Docker build (aarch64)
     runs-on: ubuntu-latest
