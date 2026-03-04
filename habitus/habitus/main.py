@@ -390,7 +390,7 @@ def fetch_recent_raw_history(entity_ids: list[str], start_iso: str, end_iso: str
             start_ts = pd.to_datetime(start_iso, utc=True).timestamp()
             end_ts = pd.to_datetime(end_iso, utc=True).timestamp()
             rows: list[dict] = []
-            batch = int(os.environ.get("HABITUS_SQL_BATCH", "300"))
+            batch = int(os.environ.get("HABITUS_SQL_BATCH", "40"))
             cur = conn.cursor()
             for i in range(0, len(entity_ids), batch):
                 chunk = entity_ids[i:i + batch]
@@ -564,7 +564,7 @@ def fetch_stats_sqlite(entity_ids, start_iso, end_iso=None):
         return pd.DataFrame()
 
     rows = []
-    batch = int(os.environ.get("HABITUS_SQL_BATCH", "300"))
+    batch = int(os.environ.get("HABITUS_SQL_BATCH", "40"))
     total = len(entity_ids)
     done = 0
     t0 = _t.time()
@@ -583,7 +583,6 @@ def fetch_stats_sqlite(entity_ids, start_iso, end_iso=None):
                 JOIN statistics_meta sm ON s.metadata_id = sm.id
                 WHERE sm.statistic_id IN ({ph})
                   AND s.start_ts >= ? AND s.start_ts <= ?
-                ORDER BY s.start_ts
             """
             cur.execute(q, [*chunk, start_ts, end_ts])
             rows.extend(cur.fetchall())

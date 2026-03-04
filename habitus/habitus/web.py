@@ -2371,6 +2371,9 @@ def api_rescan():
         # Use progressive training: 30d → 60d → 90d → 180d → max
         from habitus import progressive as _prog  # noqa: PLC0415
 
+        p = _read(PROGRESS_PATH) or {}
+        if p.get("running"):
+            return jsonify({"ok": False, "error": "Training already running"}), 409
         if _prog.is_expanding():
             return jsonify({"ok": False, "error": "Progressive training already running"}), 409
         _prog.start_progressive(max_days=days)
