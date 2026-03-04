@@ -46,6 +46,18 @@ DAILY_DIGEST = os.environ.get("HABITUS_DAILY_DIGEST", "false").lower() == "true"
 DAILY_DIGEST_HOUR = int(os.environ.get("HABITUS_DAILY_DIGEST_HOUR", "8"))
 # Minimum training days before anomaly scoring is trusted — assume normal until then
 MIN_SCORING_DAYS = int(os.environ.get("HABITUS_MIN_SCORING_DAYS", "7"))
+# Hard safety guard for very large history pulls (prevents web process OOM).
+# Set <=0 to disable (not recommended).
+FETCH_ROW_BUDGET = int(os.environ.get("HABITUS_FETCH_ROW_BUDGET", "1000000"))
+FETCH_MIN_WINDOW_DAYS = int(os.environ.get("HABITUS_FETCH_MIN_WINDOW_DAYS", "7"))
+
+
+def _fetch_row_budget() -> int:
+    return int(os.environ.get("HABITUS_FETCH_ROW_BUDGET", str(FETCH_ROW_BUDGET)))
+
+
+def _fetch_min_window_days() -> int:
+    return int(os.environ.get("HABITUS_FETCH_MIN_WINDOW_DAYS", str(FETCH_MIN_WINDOW_DAYS)))
 
 
 def contamination_for_days(days: int) -> float:
@@ -266,6 +278,52 @@ def set_progress(phase, done=0, total=0, rows=0, elapsed=0.0, eta=0.0):
 def clear_progress():
     if os.path.exists(PROGRESS_PATH):
         os.remove(PROGRESS_PATH)
+
+
+def clamp_fetch_window_by_row_budget(
+    start_iso: str,
+    end_iso: str,
+    entity_count: int,
+    row_budget: int | None = None,
+    min_window_days: int | None = None,
+) -> tuple[str, bool, dict[str, int | str]]:
+    """Clamp history window to a deterministic max rows budget.
+
+    Uses a conservative estimate for hourly statistics rows:
+    ``estimated_rows ≈ entities × hours``.
+    """
+    budget = _fetch_row_budget() if row_budget is None else int(row_budget)
+    min_days = _fetch_min_window_days() if min_window_days is None else int(min_window_days)
+    info: dict[str, int | str] = {
+        "requested_hours": 0,
+        "max_hours": 0,
+        "row_budget": budget,
+        "entity_count": max(0, int(entity_count)),
+    }
+
+    if budget <= 0 or entity_count <= 0:
+        return start_iso, False, info
+
+    try:
+        start_dt = pd.to_datetime(start_iso, utc=True)
+        end_dt = pd.to_datetime(end_iso, utc=True)
+    except Exception:
+        return start_iso, False, info
+
+    if end_dt <= start_dt:
+        return start_iso, False, info
+
+    requested_hours = max(1, int((end_dt - start_dt).total_seconds() // 3600))
+    max_hours = max(int(min_days) * 24, max(1, budget // max(1, int(entity_count))))
+    info["requested_hours"] = requested_hours
+    info["max_hours"] = max_hours
+
+    if requested_hours <= max_hours:
+        return start_iso, False, info
+
+    clamped_start = (end_dt - datetime.timedelta(hours=max_hours)).floor("h")
+    clamped_start_iso = clamped_start.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    return clamped_start_iso, True, info
 
 
 # ── WebSocket ──────────────────────────────────────────────────────────────────
@@ -559,13 +617,28 @@ def fetch_stats_sqlite(entity_ids, start_iso, end_iso=None):
     if not db_path:
         return pd.DataFrame()
 
-    try:
-        start_ts = pd.to_datetime(start_iso, utc=True).timestamp()
-        end_ts = (
-            pd.to_datetime(end_iso, utc=True).timestamp()
-            if end_iso
-            else datetime.datetime.now(datetime.UTC).timestamp()
+    if end_iso is None:
+        end_iso = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:00:00+00:00")
+
+    start_iso_eff, was_clamped, clamp_info = clamp_fetch_window_by_row_budget(
+        start_iso,
+        end_iso,
+        len(entity_ids),
+    )
+    if was_clamped:
+        log.warning(
+            "Stats fetch window clamped (sqlite): budget=%s rows, entities=%s, requested=%sh, max=%sh, range=%s → %s",
+            clamp_info["row_budget"],
+            clamp_info["entity_count"],
+            clamp_info["requested_hours"],
+            clamp_info["max_hours"],
+            start_iso,
+            start_iso_eff,
         )
+
+    try:
+        start_ts = pd.to_datetime(start_iso_eff, utc=True).timestamp()
+        end_ts = pd.to_datetime(end_iso, utc=True).timestamp()
     except Exception:
         return pd.DataFrame()
 
@@ -573,6 +646,8 @@ def fetch_stats_sqlite(entity_ids, start_iso, end_iso=None):
     total = len(entity_ids)
     done = 0
     t0 = _t.time()
+    row_budget = max(0, int(_fetch_row_budget()))
+    hit_budget = False
 
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
@@ -592,17 +667,32 @@ def fetch_stats_sqlite(entity_ids, start_iso, end_iso=None):
                 JOIN statistics_meta sm ON s.metadata_id = sm.id
                 WHERE sm.statistic_id IN ({ph})
                   AND s.start_ts >= ? AND s.start_ts <= ?
+                ORDER BY sm.statistic_id, s.start_ts
                 """,
                 [*chunk, start_ts, end_ts],
             )
             batch_rows = cur.fetchall()
-            rows.extend(batch_rows)
+
+            if row_budget > 0:
+                remaining = row_budget - len(rows)
+                if remaining <= 0:
+                    hit_budget = True
+                    break
+                if len(batch_rows) > remaining:
+                    rows.extend(batch_rows[:remaining])
+                    hit_budget = True
+                else:
+                    rows.extend(batch_rows)
+            else:
+                rows.extend(batch_rows)
 
             done += len(chunk)
             elapsed = _t.time() - t0
             eta = (elapsed / done) * (total - done) if done else 0
             set_progress("fetching", done, total, len(rows), elapsed, eta)
             log.info("  %d/%d sensors — %d rows", done, total, len(rows))
+            if hit_budget:
+                break
 
         conn.close()
     except Exception as e:
@@ -611,6 +701,12 @@ def fetch_stats_sqlite(entity_ids, start_iso, end_iso=None):
 
     if not rows:
         return pd.DataFrame()
+    if hit_budget:
+        log.warning(
+            "Stats fetch row budget reached (sqlite): kept %d rows (budget=%d)",
+            len(rows),
+            row_budget,
+        )
     df = pd.DataFrame(rows, columns=["entity_id", "ts", "mean", "sum"])
     df["ts"] = pd.to_datetime(df["ts"], unit="s", utc=True)
     log.info("Fetched %d rows from SQLite | %s → %s", len(df), df["ts"].min().date(), df["ts"].max().date())
@@ -628,7 +724,23 @@ async def fetch_stats(entity_ids, start_iso, end_iso=None):
     if not entity_ids:
         return pd.DataFrame()
 
-    df_sql = fetch_stats_sqlite(entity_ids, start_iso, end_iso)
+    start_iso_eff, was_clamped, clamp_info = clamp_fetch_window_by_row_budget(
+        start_iso,
+        end_iso,
+        len(entity_ids),
+    )
+    if was_clamped:
+        log.warning(
+            "Stats fetch window clamped: budget=%s rows, entities=%s, requested=%sh, max=%sh, range=%s → %s",
+            clamp_info["row_budget"],
+            clamp_info["entity_count"],
+            clamp_info["requested_hours"],
+            clamp_info["max_hours"],
+            start_iso,
+            start_iso_eff,
+        )
+
+    df_sql = fetch_stats_sqlite(entity_ids, start_iso_eff, end_iso)
     if os.environ.get("HABITUS_FORCE_API", "").lower() != "true":
         return df_sql
 
@@ -639,6 +751,8 @@ async def fetch_stats(entity_ids, start_iso, end_iso=None):
 
     batch_size = int(os.environ.get("HABITUS_STATS_BATCH", "120"))
     max_retries = int(os.environ.get("HABITUS_STATS_RETRIES", "3"))
+    row_budget = max(0, int(_fetch_row_budget()))
+    hit_budget = False
 
     t0 = _t.time()
     for i in range(0, total, batch_size):
@@ -654,7 +768,7 @@ async def fetch_stats(entity_ids, start_iso, end_iso=None):
                         {
                             "id": 1,
                             "type": "recorder/statistics_during_period",
-                            "start_time": start_iso,
+                            "start_time": start_iso_eff,
                             "end_time": end_iso,
                             "statistic_ids": batch,
                             "period": "hour",
@@ -664,14 +778,20 @@ async def fetch_stats(entity_ids, start_iso, end_iso=None):
                 )
                 result = json.loads(await asyncio.wait_for(ws.recv(), timeout=90))
                 payload = result.get("result", {}) or {}
-                for sid, points in payload.items():
-                    for p in points:
+                for sid in sorted(payload.keys()):
+                    points = payload.get(sid) or []
+                    for p in sorted(points, key=lambda x: x.get("start", 0)):
                         ts = p["start"]
                         if ts > 1e10:
                             ts /= 1000
                         all_rows.append(
                             {"entity_id": sid, "ts": ts, "mean": p.get("mean"), "sum": p.get("sum")}
                         )
+                        if row_budget > 0 and len(all_rows) >= row_budget:
+                            hit_budget = True
+                            break
+                    if hit_budget:
+                        break
                 ok = True
                 break
             except Exception as e:
@@ -698,6 +818,13 @@ async def fetch_stats(entity_ids, start_iso, end_iso=None):
         set_progress("fetching", done, total, len(all_rows), elapsed, eta)
         if ok:
             log.info("  %d/%d sensors — %d rows", done, total, len(all_rows))
+        if hit_budget:
+            log.warning(
+                "Stats fetch row budget reached (api): kept %d rows (budget=%d)",
+                len(all_rows),
+                row_budget,
+            )
+            break
 
     if not all_rows:
         return pd.DataFrame()

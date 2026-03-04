@@ -160,7 +160,11 @@ days_history: 3650           # Training window — set high, HA limits to what i
 notify_service: notify.notify # HA notify service for anomaly alerts
 notify_on_anomaly: true       # Send notification when anomaly detected
 anomaly_threshold: 70         # Score threshold for anomaly notification (0–100)
+fetch_row_budget: 1000000     # Safety cap for stats rows per fetch (prevents OOM)
+fetch_min_window_days: 7      # Never clamp below this many days
 ```
+
+`fetch_row_budget` applies to both direct SQLite and WebSocket stats fetch paths. If a requested history window would exceed the budget, Habitus deterministically clamps to the newest window that fits and logs the clamp.
 
 ---
 

@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All existing API endpoints remain backward-compatible
 
 ### Fixed
+- Stats fetch now enforces a deterministic row-budget guard (`fetch_row_budget`) with adaptive window clamping for both SQLite and API paths, preventing large-history (`days_history=3650`) OOM/ingress-502 crashes; clamp decisions are logged with requested vs effective window
 - Recorder DB path resolution no longer assumes `/homeassistant/home-assistant_v2.db`; scene/appliance/routine/room plus correlation/sequence/Markov/HMM/energy/NILM/dynamic-training modules now honor `HABITUS_HA_DB`/`HA_DB_PATH` and common HA mount paths (restores learning pipelines on systems using `/config` mounts)
 - NILM aggregate-power auto-detection now works on both modern (`states_meta`) and legacy (`states.entity_id`) recorder schemas, preventing false "No power entity configured" failures on older HA databases
 

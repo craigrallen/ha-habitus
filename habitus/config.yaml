@@ -29,6 +29,8 @@ options:
   power_entity: ""
   kwh_price: 3.0
   currency: "kr"
+  fetch_row_budget: 1000000
+  fetch_min_window_days: 7
 schema:
   scan_interval_hours: int
   days_history: int?
@@ -41,3 +43,5 @@ schema:
   power_entity: str?
   kwh_price: float?
   currency: str?
+  fetch_row_budget: int?
+  fetch_min_window_days: int?
