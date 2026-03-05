@@ -48,8 +48,9 @@ def _load() -> dict[str, Any]:
 
 
 def _save(data: dict[str, Any]) -> None:
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(SUGGESTION_FEEDBACK_PATH, "w") as f:
+    path = SUGGESTION_FEEDBACK_PATH
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w") as f:
         json.dump(data, f, indent=2, default=str)
 
 
