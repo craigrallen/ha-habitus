@@ -256,9 +256,8 @@ def train_activity_model(entity_to_area: dict[str, str], days: int = 30) -> dict
         "next_state_predictions": next_state_probs[:5],
     }
 
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(HMM_PATH, "w") as f:
-        json.dump(result, f, indent=2, default=str)
+    from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+    _atomic_write(HMM_PATH, result)
 
     log.info("activity_hmm: %d states discovered, current=%s", len(states_info), current_label)
     return result
