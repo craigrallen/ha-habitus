@@ -880,6 +880,110 @@ pre.raw {
 
 </div>
 
+<!-- ======= NEW FEATURE SECTIONS ======= -->
+
+<!-- ONBOARDING WIZARD (full-screen modal) -->
+<div id="onboarding-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.8);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:var(--card);border-radius:16px;padding:32px;max-width:560px;width:90%;max-height:90vh;overflow-y:auto">
+    <div id="onboarding-progress" style="display:flex;gap:8px;margin-bottom:24px">
+      <div class="ob-step" style="flex:1;height:4px;background:var(--accent);border-radius:2px"></div>
+      <div class="ob-step" style="flex:1;height:4px;background:var(--border);border-radius:2px"></div>
+      <div class="ob-step" style="flex:1;height:4px;background:var(--border);border-radius:2px"></div>
+      <div class="ob-step" style="flex:1;height:4px;background:var(--border);border-radius:2px"></div>
+      <div class="ob-step" style="flex:1;height:4px;background:var(--border);border-radius:2px"></div>
+      <div class="ob-step" style="flex:1;height:4px;background:var(--border);border-radius:2px"></div>
+    </div>
+    <div id="onboarding-content">
+      <h2 style="margin:0 0 12px">👋 Welcome to Habitus</h2>
+      <p style="color:var(--text2);margin:0 0 24px">Habitus learns your home's behaviour and suggests automations — privately, locally, without cloud.</p>
+      <button onclick="obNext()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:12px 24px;font-size:1rem;cursor:pointer;width:100%">Get Started →</button>
+      <button onclick="obSkip()" style="background:none;color:var(--text3);border:none;padding:8px;cursor:pointer;width:100%;margin-top:8px;font-size:.85rem">Skip setup</button>
+    </div>
+  </div>
+</div>
+
+<!-- AUTOMATION HEALTH -->
+<div id="automation-health-section" class="sec" style="margin-top:12px">
+  <div class="sec-header"><h2>🏥 Automation Health</h2><span class="sec-sub">Dead, stale, and over-triggering automations</span></div>
+  <div id="automation-health-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+</div>
+
+<!-- AUTOMATION CONFLICTS (inter-automation) -->
+<div id="automation-conflicts-section" class="sec" style="margin-top:12px">
+  <div class="sec-header"><h2>⚔️ Automation Conflicts</h2><span class="sec-sub">Automations that fight each other</span></div>
+  <div id="automation-conflicts-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+</div>
+
+<!-- DETECTED ROUTINES (routine builder) -->
+<div id="detected-routines-section" class="sec" style="margin-top:12px">
+  <div class="sec-header"><h2>🔄 Detected Routines</h2><span class="sec-sub">Temporal sequences → chainable automations</span></div>
+  <div id="detected-routines-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+</div>
+
+<!-- GUEST MODE -->
+<div id="guest-mode-section" class="sec" style="margin-top:12px">
+  <div id="guest-mode-banner" style="display:none;background:var(--accent);color:#fff;border-radius:8px;padding:12px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
+    <span>👥 Guests may be present — <strong id="guest-prob-text">probability 0%</strong></span>
+    <button onclick="activateGuestMode()" style="background:#fff;color:var(--accent);border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-weight:600">Activate Guest Mode</button>
+  </div>
+  <div class="sec-header"><h2>👥 Guest Mode</h2><span class="sec-sub">Unusual activity pattern detection</span></div>
+  <div id="guest-mode-details"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+</div>
+
+<!-- SEASONAL SUGGESTIONS -->
+<div id="seasonal-section" class="sec" style="margin-top:12px">
+  <div class="sec-header"><h2>🌿 Seasonal Suggestions</h2><span class="sec-sub">Automations tuned to the current season</span><span id="season-badge" style="margin-left:8px;background:var(--accent);color:#fff;border-radius:12px;padding:2px 10px;font-size:.75rem"></span></div>
+  <div id="seasonal-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+</div>
+
+<!-- BATTERY STATUS -->
+<div id="battery-status-section" class="sec" style="margin-top:12px">
+  <div class="sec-header"><h2>🔋 Battery Status</h2><span class="sec-sub">Device batteries sorted by urgency</span></div>
+  <div id="battery-status-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+</div>
+
+<!-- INTEGRATION HEALTH -->
+<div id="integration-health-section" class="sec" style="margin-top:12px">
+  <div class="sec-header"><h2>🔌 Integration Health</h2><span class="sec-sub">Stale entities and integration scores</span><span id="health-score-badge" style="margin-left:8px;font-size:.8rem;color:var(--text3)"></span></div>
+  <div id="integration-health-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+</div>
+
+<!-- NL AUTOMATION CREATOR -->
+<div id="nl-automation-section" class="sec" style="margin-top:12px">
+  <div class="sec-header"><h2>✍️ Describe an Automation</h2><span class="sec-sub">Write in plain English — Habitus generates the YAML</span></div>
+  <div style="display:flex;gap:8px;margin-bottom:12px">
+    <input type="text" id="nl-input" placeholder='e.g. "Turn off lights at 11pm" or "When motion detected turn on hallway light"'
+      style="flex:1;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:.9rem"
+      oninput="nlPreview()" onkeydown="if(event.key==='Enter')nlPreview()">
+    <button onclick="nlPreview()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:10px 16px;cursor:pointer">Parse</button>
+  </div>
+  <div id="nl-preview" style="display:none">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <span id="nl-confidence" style="font-size:.8rem;color:var(--text3)"></span>
+      <button id="nl-add-btn" onclick="nlAddToHA()" style="background:var(--success,#4caf50);color:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:.85rem">Add to HA</button>
+    </div>
+    <div id="nl-clarifications" style="color:var(--warn,#ff9800);font-size:.82rem;margin-bottom:8px"></div>
+    <pre id="nl-yaml" style="background:var(--card2);border-radius:8px;padding:12px;font-size:.78rem;overflow-x:auto;max-height:300px;overflow-y:auto;white-space:pre-wrap"></pre>
+  </div>
+</div>
+
+<!-- DASHBOARD GENERATOR -->
+<div id="dashboard-generator-section" class="sec" style="margin-top:12px">
+  <div class="sec-header"><h2>🎨 Dashboard Generator</h2><span class="sec-sub">Optimised Lovelace dashboard from your usage patterns</span></div>
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+    <button onclick="generateDashboard()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 16px;cursor:pointer">Generate Dashboard</button>
+    <button onclick="copyDashboardYaml()" id="copy-dashboard-btn" style="display:none;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 16px;cursor:pointer">Copy YAML</button>
+    <button onclick="applyDashboard()" id="apply-dashboard-btn" style="display:none;background:var(--success,#4caf50);color:#fff;border:none;border-radius:8px;padding:8px 16px;cursor:pointer">Apply to HA</button>
+  </div>
+  <div id="dashboard-preview"><div style="color:var(--text3);font-size:.85rem">Click "Generate Dashboard" to create a Lovelace config from your usage patterns.</div></div>
+</div>
+
+<!-- RECENT ACTIVITY (changelog) -->
+<div id="changelog-section" class="sec" style="margin-top:12px">
+  <div class="sec-header"><h2>📋 Recent Activity</h2><span class="sec-sub">Automation changes and events</span></div>
+  <div id="changelog-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+</div>
+
 <!-- ENERGY & PATTERNS -->
 <div id="tab-energy" class="tab">
   <!-- Energy + Weather History -->
@@ -2508,7 +2612,245 @@ function filterEntities() {
 }
 loadEntities();
 
+// ══ New Feature Loaders ══════════════════════════════════════
+
+async function loadAutomationHealth() {
+  const data = await fetch('api/automation_health').then(r=>r.json()).catch(()=>({automations:[]}));
+  const el = document.getElementById('automation-health-list');
+  if (!el) return;
+  const autos = data.automations || [];
+  if (!autos.length) { el.innerHTML = '<div style="color:var(--text3);padding:12px">No automation health data yet. Run a full train first.</div>'; return; }
+  const statusColors = {healthy:'#4caf50',stale:'#ff9800',dead:'#f44336',over_triggering:'#9c27b0'};
+  el.innerHTML = autos.slice(0,20).map(a => `
+    <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
+      <span style="background:${statusColors[a.status]||'#999'};color:#fff;border-radius:12px;padding:2px 10px;font-size:.75rem;white-space:nowrap">${a.status}</span>
+      <div style="flex:1">
+        <div style="font-size:.9rem">${a.alias}</div>
+        <div style="color:var(--text3);font-size:.78rem">${a.recommendation}</div>
+      </div>
+      ${a.status==='dead'?`<button onclick="disableAutomation('${a.entity_id}')" style="background:#f44336;color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:.8rem">Disable</button>`:''}
+    </div>`).join('');
+}
+
+async function disableAutomation(entityId) {
+  if (!confirm('Disable ' + entityId + '?')) return;
+  const r = await fetch('api/automation_health/disable', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({entity_id:entityId})}).then(r=>r.json()).catch(()=>({}));
+  if (r.success) { toast('Disabled ' + entityId); loadAutomationHealth(); }
+  else toast('Error: ' + (r.error||'unknown'), 'err');
+}
+
+async function loadDetectedRoutines() {
+  const data = await fetch('api/routine_builder').then(r=>r.json()).catch(()=>({routines:[]}));
+  const el = document.getElementById('detected-routines-list');
+  if (!el) return;
+  const routines = data.routines || [];
+  if (!routines.length) { el.innerHTML = '<div style="color:var(--text3);padding:12px">No routines detected yet. Run a full train with sufficient history.</div>'; return; }
+  el.innerHTML = routines.slice(0,10).map(r => {
+    const steps = (r.steps||[]).map(s=>s.entity_id).join(' → ');
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <span style="background:var(--accent);color:#fff;border-radius:12px;padding:2px 10px;font-size:.75rem">${r.time_cluster}</span>
+        <span style="color:var(--text3);font-size:.78rem">${r.frequency_days} days · ${Math.round(r.confidence*100)}% confidence</span>
+      </div>
+      <div style="font-size:.85rem;color:var(--text2)">${steps}</div>
+      <button onclick="showYaml('routine-yaml-${r.time_cluster}-${r.frequency_days}')" style="background:var(--card2);border:1px solid var(--border);border-radius:6px;padding:3px 10px;font-size:.78rem;cursor:pointer;margin-top:4px">View YAML</button>
+      <button onclick="addRoutineToHA('${encodeURIComponent(r.generated_yaml||'')}')" style="background:var(--success,#4caf50);color:#fff;border:none;border-radius:6px;padding:3px 10px;font-size:.78rem;cursor:pointer;margin-top:4px;margin-left:4px">Create as Automation</button>
+      <pre id="routine-yaml-${r.time_cluster}-${r.frequency_days}" style="display:none;background:var(--card2);padding:8px;border-radius:6px;font-size:.75rem;margin-top:6px;overflow-x:auto;white-space:pre-wrap">${(r.generated_yaml||'').replace(/</g,'&lt;')}</pre>
+    </div>`;
+  }).join('');
+}
+
+async function loadGuestMode() {
+  const data = await fetch('api/guest_mode').then(r=>r.json()).catch(()=>({guest_probability:0}));
+  const banner = document.getElementById('guest-mode-banner');
+  const details = document.getElementById('guest-mode-details');
+  if (!banner || !details) return;
+  const prob = data.guest_probability || 0;
+  const pct = Math.round(prob * 100);
+  if (prob > 0.5 && banner) { banner.style.display = 'flex'; document.getElementById('guest-prob-text').textContent = 'probability ' + pct + '%'; }
+  const factors = data.factors || {};
+  const factorHtml = Object.entries(factors).map(([k,v])=>`<div style="display:flex;justify-content:space-between;font-size:.83rem;padding:3px 0"><span>${k.replace(/_/g,' ')}</span><span style="color:var(--accent)">${Math.round(v*100)}%</span></div>`).join('');
+  details.innerHTML = `<div style="margin-bottom:12px"><div style="font-size:1.2rem;font-weight:600;margin-bottom:4px">Guest Probability: ${pct}%</div><div style="background:var(--border);height:8px;border-radius:4px"><div style="background:var(--accent);height:100%;width:${pct}%;border-radius:4px;transition:.3s"></div></div></div>${factorHtml||'<div style="color:var(--text3)">Normal activity patterns detected.</div>'}`;
+}
+
+async function activateGuestMode() {
+  const data = await fetch('api/guest_mode').then(r=>r.json()).catch(()=>({}));
+  const suggestions = data.suggestions || [];
+  if (!suggestions.length) { toast('No guest mode suggestions available'); return; }
+  toast('Guest Mode suggestions ready — see seasonal/suggestions section');
+}
+
+async function loadSeasonalSuggestions() {
+  const data = await fetch('api/seasonal_suggestions').then(r=>r.json()).catch(()=>({suggestions:[]}));
+  const el = document.getElementById('seasonal-list');
+  const badge = document.getElementById('season-badge');
+  if (!el) return;
+  if (badge) badge.textContent = (data.season||'').toUpperCase();
+  const sugs = data.suggestions || [];
+  if (!sugs.length) { el.innerHTML = '<div style="color:var(--text3);padding:12px">No seasonal suggestions yet.</div>'; return; }
+  el.innerHTML = sugs.map(s => `
+    <div style="padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="font-weight:600;margin-bottom:2px">${s.title}</div>
+      <div style="color:var(--text3);font-size:.82rem;margin-bottom:4px">${s.seasonal_reason}</div>
+      <div style="color:var(--text3);font-size:.78rem">Confidence: ${Math.round((s.confidence||0)*100)}%</div>
+    </div>`).join('');
+}
+
+async function loadBatteryStatus() {
+  const data = await fetch('api/battery_status').then(r=>r.json()).catch(()=>({batteries:[]}));
+  const el = document.getElementById('battery-status-list');
+  if (!el) return;
+  const batteries = data.batteries || [];
+  if (!batteries.length) { el.innerHTML = '<div style="color:var(--text3);padding:12px">No battery sensors found.</div>'; return; }
+  const colors = {critical:'#f44336',low:'#ff9800',ok:'#4caf50'};
+  el.innerHTML = batteries.slice(0,15).map(b => `
+    <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <div style="flex:1">
+        <div style="font-size:.88rem">${b.friendly_name||b.entity_id}</div>
+        <div style="color:var(--text3);font-size:.75rem">${b.area||''} ${b.estimated_days_remaining?'· ~'+b.estimated_days_remaining+'d remaining':''}</div>
+      </div>
+      <div style="width:80px">
+        <div style="background:var(--border);height:6px;border-radius:3px">
+          <div style="background:${colors[b.alert]};height:100%;width:${b.level}%;border-radius:3px"></div>
+        </div>
+        <div style="text-align:right;font-size:.75rem;margin-top:2px;color:${colors[b.alert]}">${b.level}%</div>
+      </div>
+      <span style="background:${colors[b.alert]};color:#fff;border-radius:8px;padding:2px 8px;font-size:.72rem">${b.alert}</span>
+    </div>`).join('');
+}
+
+async function loadIntegrationHealth() {
+  const data = await fetch('api/integration_health').then(r=>r.json()).catch(()=>({overall_score:0}));
+  const el = document.getElementById('integration-health-list');
+  const badge = document.getElementById('health-score-badge');
+  if (!el) return;
+  const score = data.overall_score || 0;
+  if (badge) badge.textContent = 'Overall: ' + score + '%';
+  const scores = Object.values(data.integration_scores||{}).sort((a,b)=>a.score-b.score);
+  const stale = (data.stale_entities||[]).slice(0,10);
+  const unavail = (data.unavailable_entities||[]).slice(0,10);
+  el.innerHTML = `
+    <div style="margin-bottom:12px">
+      <div style="font-weight:600;margin-bottom:8px">Domain Scores</div>
+      ${scores.slice(0,8).map(s=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="width:120px;font-size:.82rem">${s.domain}</span><div style="flex:1;background:var(--border);height:6px;border-radius:3px"><div style="background:${s.score>90?'#4caf50':s.score>70?'#ff9800':'#f44336'};height:100%;width:${s.score}%;border-radius:3px"></div></div><span style="font-size:.78rem;color:var(--text3)">${s.score}%</span></div>`).join('')}
+    </div>
+    ${stale.length?`<div><div style="font-weight:600;margin-bottom:6px">⚠️ Stale Entities (${data.stale_count})</div>${stale.map(e=>`<div style="font-size:.82rem;padding:3px 0;color:var(--text2)">${e.entity_id} <span style="color:var(--text3)">(${e.age_hours?e.age_hours+'h ago':'unknown'})</span></div>`).join('')}</div>`:''}
+    ${unavail.length?`<div style="margin-top:8px"><div style="font-weight:600;margin-bottom:6px">❌ Unavailable (${data.unavailable_count})</div>${unavail.map(e=>`<div style="font-size:.82rem;padding:3px 0;color:var(--text2)">${e.entity_id}</div>`).join('')}</div>`:''}`;
+}
+
+async function loadChangelog() {
+  const data = await fetch('api/changelog?limit=15').then(r=>r.json()).catch(()=>({entries:[]}));
+  const el = document.getElementById('changelog-list');
+  if (!el) return;
+  const entries = data.entries || [];
+  if (!entries.length) { el.innerHTML = '<div style="color:var(--text3);padding:12px">No activity logged yet.</div>'; return; }
+  el.innerHTML = entries.map(e => {
+    const ts = e.timestamp ? new Date(e.timestamp).toLocaleString() : '';
+    return `<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:1.1rem">${e.icon||'📝'}</span>
+      <div style="flex:1"><div style="font-size:.87rem">${e.description||e.alias||''}</div><div style="color:var(--text3);font-size:.75rem">${ts}</div></div>
+    </div>`;
+  }).join('');
+}
+
+let _nlDebounce = null;
+async function nlPreview() {
+  clearTimeout(_nlDebounce);
+  _nlDebounce = setTimeout(async () => {
+    const text = document.getElementById('nl-input')?.value || '';
+    if (!text.trim()) { document.getElementById('nl-preview').style.display='none'; return; }
+    const data = await fetch('api/nl_automation', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})}).then(r=>r.json()).catch(()=>({}));
+    const preview = document.getElementById('nl-preview');
+    if (!preview) return;
+    preview.style.display = 'block';
+    document.getElementById('nl-confidence').textContent = 'Confidence: ' + Math.round((data.confidence||0)*100) + '%';
+    const clarifications = data.clarification_needed || [];
+    document.getElementById('nl-clarifications').textContent = clarifications.join(' | ');
+    document.getElementById('nl-yaml').textContent = data.generated_yaml || '';
+    document.getElementById('nl-add-btn').style.display = data.generated_yaml ? '' : 'none';
+    window._nlYaml = data.generated_yaml;
+  }, 300);
+}
+
+async function nlAddToHA() {
+  const yaml = window._nlYaml;
+  if (!yaml) { toast('No automation to add', 'err'); return; }
+  const data = await fetch('api/automations/add', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({yaml})}).then(r=>r.json()).catch(()=>({}));
+  if (data.status==='success'||data.ok) toast('Automation added!');
+  else toast('Error: '+(data.error||'Could not add'), 'err');
+}
+
+async function generateDashboard() {
+  const el = document.getElementById('dashboard-preview');
+  if (el) el.innerHTML = '<div style="color:var(--text3)">Generating...</div>';
+  const data = await fetch('api/dashboard_yaml').then(r=>r.json()).catch(()=>({yaml:''}));
+  if (!el) return;
+  const yaml = data.yaml || '';
+  window._dashboardYaml = yaml;
+  document.getElementById('copy-dashboard-btn').style.display = yaml ? '' : 'none';
+  document.getElementById('apply-dashboard-btn').style.display = yaml ? '' : 'none';
+  el.innerHTML = yaml ? `<pre style="background:var(--card2);border-radius:8px;padding:12px;font-size:.78rem;overflow-x:auto;max-height:400px;overflow-y:auto;white-space:pre-wrap">${yaml.replace(/</g,'&lt;')}</pre>` : '<div style="color:var(--text3)">Failed to generate dashboard.</div>';
+}
+
+function copyDashboardYaml() {
+  navigator.clipboard.writeText(window._dashboardYaml||'').then(()=>toast('Dashboard YAML copied!'));
+}
+
+async function applyDashboard() {
+  if (!confirm('Apply generated dashboard to HA? This will replace your existing dashboard.')) return;
+  const r = await fetch('api/lovelace/config', {method:'POST'}).then(r=>r.json()).catch(()=>({}));
+  if (r.success) toast('Dashboard applied to HA!');
+  else toast('Error: '+(r.error||'unknown'), 'err');
+}
+
+// Onboarding
+let _obStep = 0;
+async function checkOnboarding() {
+  const status = await fetch('api/onboarding/status').then(r=>r.json()).catch(()=>({complete:true}));
+  if (!status.complete) {
+    document.getElementById('onboarding-modal').style.display = 'flex';
+  }
+}
+
+function obNext() { _obStep++; if (_obStep >= 6) obComplete(); }
+function obSkip() { fetch('api/onboarding/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({skipped:true})}); document.getElementById('onboarding-modal').style.display = 'none'; }
+function obComplete() {
+  fetch('api/onboarding/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({skipped:false})});
+  document.getElementById('onboarding-modal').style.display = 'none';
+  toast('Setup complete! Running initial train...');
+  fullTrain();
+}
+
+function addRoutineToHA(yamlEncoded) {
+  const yaml = decodeURIComponent(yamlEncoded);
+  fetch('api/automations/add', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({yaml})})
+    .then(r=>r.json()).then(d=>{
+      if(d.status==='success'||d.ok) toast('Routine added to HA!');
+      else toast('Error: '+(d.error||'could not add'),'err');
+    }).catch(()=>toast('Network error','err'));
+}
+
+function showYaml(id) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+// Load all new feature sections
+async function loadNewFeatures() {
+  await Promise.all([
+    loadAutomationHealth(),
+    loadDetectedRoutines(),
+    loadGuestMode(),
+    loadSeasonalSuggestions(),
+    loadBatteryStatus(),
+    loadIntegrationHealth(),
+    loadChangelog(),
+  ]);
+}
+
 load();
+loadNewFeatures();
+checkOnboarding();
 // Fast-poll during training, normal refresh otherwise
 let _pollTimer = null;
 function schedulePoll() {
@@ -3214,6 +3556,161 @@ def api_entities():
         return jsonify(entities)
     except Exception as e:
         return jsonify([])
+
+
+@app.route("/api/automation_health")
+@app.route("/ingress/api/automation_health")
+def api_automation_health():
+    """Return automation health report (dead/stale/over-triggering)."""
+    from . import automation_health
+    return jsonify(automation_health.load_health())
+
+
+@app.route("/api/automation_health/disable", methods=["POST"])
+@app.route("/ingress/api/automation_health/disable", methods=["POST"])
+def api_disable_automation():
+    """Disable a HA automation by entity_id."""
+    import requests as req  # type: ignore[import-untyped]
+    data = request.get_json(silent=True) or {}
+    entity_id = data.get("entity_id", "")
+    if not entity_id:
+        return jsonify({"error": "entity_id required"}), 400
+    ha_url = os.environ.get("HA_URL", "http://supervisor/core")
+    token = os.environ.get("SUPERVISOR_TOKEN", os.environ.get("HABITUS_HA_TOKEN", ""))
+    try:
+        r = req.post(
+            f"{ha_url}/api/services/automation/turn_off",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"entity_id": entity_id},
+            timeout=10,
+        )
+        return jsonify({"success": r.status_code in (200, 201, 204)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/routine_builder")
+@app.route("/ingress/api/routine_builder")
+def api_routine_builder():
+    """Return detected routines from routine_builder."""
+    from . import routine_builder
+    return jsonify(routine_builder.load_routines())
+
+
+@app.route("/api/guest_mode")
+@app.route("/ingress/api/guest_mode")
+def api_guest_mode():
+    """Return guest mode analysis."""
+    from . import guest_mode
+    return jsonify(guest_mode.load_guest_mode())
+
+
+@app.route("/api/seasonal_suggestions")
+@app.route("/ingress/api/seasonal_suggestions")
+def api_seasonal_suggestions():
+    """Return seasonal automation suggestions."""
+    from . import seasonal_adapter
+    return jsonify(seasonal_adapter.load_seasonal_suggestions())
+
+
+@app.route("/api/battery_status")
+@app.route("/ingress/api/battery_status")
+def api_battery_status():
+    """Return battery watchdog status."""
+    from . import battery_watchdog
+    return jsonify(battery_watchdog.load_battery_status())
+
+
+@app.route("/api/integration_health")
+@app.route("/ingress/api/integration_health")
+def api_integration_health():
+    """Return integration health report."""
+    from . import integration_health
+    return jsonify(integration_health.load_integration_health())
+
+
+@app.route("/api/nl_automation", methods=["POST"])
+@app.route("/ingress/api/nl_automation", methods=["POST"])
+def api_nl_automation():
+    """Parse natural language automation description and return intent + YAML."""
+    from . import nl_automation
+    data = request.get_json(silent=True) or {}
+    text = data.get("text", "")
+    if not text:
+        return jsonify({"error": "text required"}), 400
+    intent = nl_automation.parse_intent(text)
+    return jsonify(intent)
+
+
+@app.route("/api/dashboard_yaml")
+@app.route("/ingress/api/dashboard_yaml")
+def api_dashboard_yaml():
+    """Return generated Lovelace dashboard YAML."""
+    from . import dashboard_generator
+    yaml_str = dashboard_generator.load_dashboard_yaml()
+    if not yaml_str:
+        result = dashboard_generator.run()
+        yaml_str = result.get("yaml", "")
+    return jsonify({"yaml": yaml_str})
+
+
+@app.route("/api/lovelace/config", methods=["POST"])
+@app.route("/ingress/api/lovelace/config", methods=["POST"])
+def api_apply_lovelace():
+    """Apply generated dashboard YAML to HA (POST to Lovelace config endpoint)."""
+    import requests as req  # type: ignore[import-untyped]
+    import yaml as _yaml
+    from . import dashboard_generator
+    yaml_str = dashboard_generator.load_dashboard_yaml()
+    if not yaml_str:
+        return jsonify({"error": "No dashboard YAML generated yet"}), 400
+    ha_url = os.environ.get("HA_URL", "http://supervisor/core")
+    token = os.environ.get("SUPERVISOR_TOKEN", os.environ.get("HABITUS_HA_TOKEN", ""))
+    try:
+        config = _yaml.safe_load(yaml_str)
+        r = req.post(
+            f"{ha_url}/api/lovelace/config",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json=config,
+            timeout=15,
+        )
+        return jsonify({"success": r.status_code in (200, 201)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/changelog")
+@app.route("/ingress/api/changelog")
+def api_changelog():
+    """Return automation changelog entries."""
+    from . import changelog
+    limit = request.args.get("limit", type=int)
+    entries = changelog.load_changelog(limit=limit)
+    return jsonify({"entries": entries, "total": len(entries)})
+
+
+@app.route("/api/onboarding/status")
+@app.route("/ingress/api/onboarding/status")
+def api_onboarding_status():
+    """Return onboarding status."""
+    from . import onboarding
+    return jsonify(onboarding.get_status())
+
+
+@app.route("/api/onboarding/complete", methods=["POST"])
+@app.route("/ingress/api/onboarding/complete", methods=["POST"])
+def api_onboarding_complete():
+    """Mark onboarding as complete."""
+    from . import onboarding
+    data = request.get_json(silent=True) or {}
+    record = onboarding.complete_onboarding(
+        tariff=data.get("tariff"),
+        tariff_peak=data.get("tariff_peak"),
+        tariff_offpeak=data.get("tariff_offpeak"),
+        notification_prefs=data.get("notification_prefs"),
+        skipped=data.get("skipped", False),
+    )
+    return jsonify({"success": True, "record": record})
 
 
 def start_web(port=8099):
