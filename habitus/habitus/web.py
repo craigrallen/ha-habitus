@@ -2395,18 +2395,21 @@ def api_progress():
             reason = None
             age = 0
 
-            if not _trainer.is_running():
-                recover = True
-                reason = "trainer_not_running"
-
             if os.path.exists(PROGRESS_PATH):
                 import time as _t
 
                 stale_sec = int(os.environ.get("HABITUS_PROGRESS_STALE_SEC", "600"))
+                dead_grace_sec = int(os.environ.get("HABITUS_PROGRESS_DEAD_GRACE_SEC", "120"))
                 age = int(_t.time() - os.path.getmtime(PROGRESS_PATH))
+
+                # Hard timeout always wins.
                 if age > stale_sec:
                     recover = True
                     reason = "stale_timeout"
+                # If trainer watchdog says not running, only recover after grace period.
+                elif not _trainer.is_running() and age > dead_grace_sec:
+                    recover = True
+                    reason = "trainer_not_running"
 
             if recover:
                 p["running"] = False
@@ -2516,14 +2519,22 @@ def api_rescan():
         from habitus import progressive as _prog  # noqa: PLC0415
 
         p = _read(PROGRESS_PATH) or {}
-        if p.get("running") and _trainer.is_running():
-            return jsonify({"ok": False, "error": "Training already running"}), 409
-        if p.get("running") and not _trainer.is_running():
+        if p.get("running"):
+            stale_sec = int(os.environ.get("HABITUS_PROGRESS_STALE_SEC", "600"))
+            age = 0
+            if os.path.exists(PROGRESS_PATH):
+                import time as _t
+
+                age = int(_t.time() - os.path.getmtime(PROGRESS_PATH))
+            if age <= stale_sec:
+                return jsonify({"ok": False, "error": "Training already running"}), 409
+
             # Stale progress file from a dead run; clear it so rescan can proceed.
             p["running"] = False
             p["phase"] = "idle"
             p["stale_recovered"] = True
-            p["stale_reason"] = "trainer_not_running"
+            p["stale_reason"] = "stale_timeout"
+            p["stale_age_sec"] = age
             try:
                 with open(PROGRESS_PATH, "w") as f:
                     json.dump(p, f)

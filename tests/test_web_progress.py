@@ -115,6 +115,10 @@ def test_api_progress_recovers_when_progress_says_running_but_trainer_isnt(
     )
     state_path.write_text("{}")
 
+    old = time.time() - 10
+    os.utime(progress_path, (old, old))
+
+    monkeypatch.setenv("HABITUS_PROGRESS_DEAD_GRACE_SEC", "1")
     monkeypatch.setattr(web, "PROGRESS_PATH", str(progress_path))
     monkeypatch.setattr(web, "STATE_PATH", str(state_path))
     monkeypatch.setattr(web._trainer, "is_running", lambda: False)
@@ -124,6 +128,38 @@ def test_api_progress_recovers_when_progress_says_running_but_trainer_isnt(
     assert payload["running"] is False
     assert payload["phase"] == "idle"
     assert payload["stale_recovered"] is True
+
+
+def test_api_progress_does_not_recover_immediately_when_file_is_fresh(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    progress_path = tmp_path / "progress.json"
+    state_path = tmp_path / "run_state.json"
+
+    progress_path.write_text(
+        json.dumps(
+            {
+                "running": True,
+                "phase": "fetching",
+                "pct": 30,
+                "done": 100,
+                "total": 300,
+                "rows": 12000,
+            }
+        )
+    )
+    state_path.write_text("{}")
+
+    monkeypatch.setenv("HABITUS_PROGRESS_DEAD_GRACE_SEC", "120")
+    monkeypatch.setattr(web, "PROGRESS_PATH", str(progress_path))
+    monkeypatch.setattr(web, "STATE_PATH", str(state_path))
+    monkeypatch.setattr(web._trainer, "is_running", lambda: False)
+
+    payload = web.app.test_client().get("/api/progress").get_json()
+
+    assert payload["running"] is True
+    assert payload["phase"] == "fetching"
 
 
 def test_api_full_train_returns_immediately_with_background_thread(monkeypatch) -> None:
