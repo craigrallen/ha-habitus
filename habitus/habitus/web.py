@@ -2491,10 +2491,6 @@ def api_sensor_health():
 @app.route("/ingress/api/full_train", methods=["POST"])
 def api_full_train():
     """Trigger a full training run using configured history depth."""
-    import asyncio
-    import threading
-
-    from .main import run
 
     # Resolve days from user settings first, then env default
     days = int(os.environ.get("HABITUS_DAYS", "365"))
@@ -2507,10 +2503,10 @@ def api_full_train():
     except Exception:
         pass
 
-    def do_train():
-        asyncio.run(run(days_history=days, mode="full"))
+    # Use central trainer manager so running-state and exception logging are consistent.
+    if not _trainer.start(days=days, mode="full"):
+        return jsonify({"ok": False, "error": "Training already running"}), 409
 
-    threading.Thread(target=do_train, daemon=True, name="habitus-full-train").start()
     return jsonify({"ok": True, "message": f"Full {days}d training started"})
 
 

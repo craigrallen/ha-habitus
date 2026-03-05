@@ -195,20 +195,16 @@ def test_api_progress_does_not_recover_immediately_when_file_is_fresh(
     assert payload["phase"] == "fetching"
 
 
-def test_api_full_train_returns_immediately_with_background_thread(monkeypatch) -> None:
-    started = {"count": 0}
+def test_api_full_train_uses_trainer_manager(monkeypatch) -> None:
+    called = {"days": None, "mode": None}
 
-    class _DummyThread:
-        def __init__(self, target=None, daemon=None, name=None):
-            self.target = target
-            self.daemon = daemon
-            self.name = name
-
-        def start(self):
-            started["count"] += 1
+    def _fake_start(days: int, mode: str = "full") -> bool:
+        called["days"] = days
+        called["mode"] = mode
+        return True
 
     monkeypatch.setenv("HABITUS_DAYS", "90")
-    monkeypatch.setattr("threading.Thread", _DummyThread)
+    monkeypatch.setattr(web._trainer, "start", _fake_start)
 
     client = web.app.test_client()
     resp = client.post("/api/full_train")
@@ -217,7 +213,19 @@ def test_api_full_train_returns_immediately_with_background_thread(monkeypatch) 
     assert resp.status_code == 200
     assert payload["ok"] is True
     assert "started" in payload["message"]
-    assert started["count"] == 1
+    assert called["days"] == 90
+    assert called["mode"] == "full"
+
+
+def test_api_full_train_returns_409_if_trainer_running(monkeypatch) -> None:
+    monkeypatch.setattr(web._trainer, "start", lambda days, mode="full": False)
+
+    resp = web.app.test_client().post("/api/full_train")
+    payload = resp.get_json()
+
+    assert resp.status_code == 409
+    assert payload["ok"] is False
+    assert "already running" in payload["error"].lower()
 
 
 def test_api_progress_normalizes_running_payload_and_clamps_metrics(
