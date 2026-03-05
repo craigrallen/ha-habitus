@@ -24,6 +24,7 @@ AUTO_SCORES_PATH = os.path.join(DATA_DIR, "automation_scores.json")
 GAP_PATH = os.path.join(DATA_DIR, "automation_gap.json")
 DATA_QUALITY_PATH = os.path.join(DATA_DIR, "data_quality.json")
 SCENES_PATH = os.path.join(DATA_DIR, "scenes.json")
+SCENE_ANALYSIS_PATH = os.path.join(DATA_DIR, "scene_analysis.json")
 SMART_SUGGESTIONS_PATH = os.path.join(DATA_DIR, "smart_suggestions.json")
 HA_AUTOMATIONS_PATH = os.path.join(DATA_DIR, "ha_automations.json")
 
@@ -801,6 +802,12 @@ pre.raw {
     <div id="scenes-list"><div style="color:var(--text3);padding:12px">Loading scenes...</div></div>
   </div>
 
+  <!-- Scene Improvements -->
+  <div class="sec" style="margin-top:16px" id="scene-improvements-sec">
+    <div class="sec-header"><h2>🔍 Scene Improvements</h2><span class="sec-sub">Missing entities and smart trigger suggestions for your HA scenes</span></div>
+    <div id="scene-improvements-list"><div style="color:var(--text3);padding:12px">Loading scene analysis...</div></div>
+  </div>
+
   <!-- Suggested Automations -->
   <div class="sec" style="margin-top:16px">
     <div class="sec-header"><h2>💡 Suggested Automations</h2><span class="sec-sub">Patterns we detected in your usage</span></div>
@@ -1501,7 +1508,7 @@ function updateTrainingLog(progress, state) {
 }
 
 async function load() {
-  const [state, baseline, progress, patterns, suggestions, anomalies, phantomData, driftData, autoScores, gapData, scenesData, smartSuggestions, haAutomations] = await Promise.all([
+  const [state, baseline, progress, patterns, suggestions, anomalies, phantomData, driftData, autoScores, gapData, scenesData, smartSuggestions, haAutomations, sceneAnalysis] = await Promise.all([
     fetch('api/state').then(r=>r.json()).catch(()=>({})),
     fetch('api/baseline').then(r=>r.json()).catch(()=>({})),
     fetch('api/progress').then(r=>r.json()).catch(()=>({})),
@@ -1515,6 +1522,7 @@ async function load() {
     fetch('api/scenes').then(r=>r.json()).catch(()=>({scenes:[]})),
     fetch('api/smart_suggestions').then(r=>r.json()).catch(()=>({suggestions:[]})),
     fetch('api/ha_automations').then(r=>r.json()).catch(()=>({automations:[]})),
+    fetch('api/scene_analysis').then(r=>r.json()).catch(()=>({suggestions:[]})),
   ]);
 
   // Always update visible training status + log
@@ -1860,6 +1868,40 @@ async function load() {
     }).join('');
   } else {
     document.getElementById('scenes-list').innerHTML = '<div style="color:var(--text3);padding:12px;font-size:.82rem">No implicit scenes yet. Give it a few days — signal comes before noise drops.</div>';
+  }
+
+  // Scene Improvements
+  const sceneImprovements = (sceneAnalysis && sceneAnalysis.suggestions) ? sceneAnalysis.suggestions : [];
+  const siEl = document.getElementById('scene-improvements-list');
+  if (siEl) {
+    if (sceneImprovements.length) {
+      siEl.innerHTML = sceneImprovements.map((si, idx) => {
+        const missingHtml = (si.missing_entities || []).map(me => `
+          <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)">
+            <span class="badge b-muted" style="font-size:.68rem">${me.confidence_pct}%</span>
+            <span style="font-size:.82rem;font-weight:500">${me.entity_id}</span>
+            <span style="font-size:.72rem;color:var(--text3);flex:1">${me.rationale || ''}</span>
+          </div>`).join('');
+        const triggerHtml = (si.suggested_triggers || []).map((tr, ti) => `
+          <div style="margin-top:8px">
+            <div style="font-size:.8rem;color:var(--text2);margin-bottom:4px">${tr.description || ''}</div>
+            ${tr.trigger_yaml ? `<details><summary style="cursor:pointer;color:var(--accent);font-size:.78rem">Show trigger YAML</summary><pre id="si-yaml-${idx}-${ti}" style="font-size:.72rem">${(tr.trigger_yaml||'').trim()}</pre><button class="btn btn-accent" style="margin-top:4px;padding:2px 8px;font-size:.72rem" onclick="addToHA(document.getElementById('si-yaml-${idx}-${ti}').textContent)">+ Add to HA</button></details>` : ''}
+          </div>`).join('');
+        const scoreColor = si.improvement_score >= 70 ? 'var(--accent)' : si.improvement_score >= 40 ? 'var(--warn)' : 'var(--text3)';
+        return `<div class="sug" style="margin-bottom:12px;border-left:3px solid ${scoreColor}">
+          <div class="sug-head">
+            <h3>🔍 ${si.scene_name || si.scene_id}</h3>
+            <span class="badge" style="background:${scoreColor};color:#fff;font-size:.72rem">${si.improvement_score}/100</span>
+          </div>
+          <div class="desc" style="font-size:.8rem;color:var(--text2);margin-bottom:8px">${si.why_suggested || ''}</div>
+          ${(si.scene_entities||[]).length ? `<div style="font-size:.74rem;color:var(--text3);margin-bottom:6px">Current entities: ${si.scene_entities.join(', ')}</div>` : ''}
+          ${missingHtml ? `<div style="margin-bottom:8px"><div style="font-size:.78rem;font-weight:600;color:var(--text2);margin-bottom:4px">Missing entities:</div>${missingHtml}</div>` : ''}
+          ${triggerHtml ? `<div><div style="font-size:.78rem;font-weight:600;color:var(--text2);margin-bottom:4px">Suggested triggers:</div>${triggerHtml}</div>` : ''}
+        </div>`;
+      }).join('');
+    } else {
+      siEl.innerHTML = '<div style="color:var(--text3);padding:12px;font-size:.82rem">No scene improvements yet — run a full training first, or add some HA scenes.</div>';
+    }
   }
 
   // HA Automations
@@ -2891,6 +2933,23 @@ def api_insights():
 def api_scenes():
     """Return discovered implicit scenes."""
     return jsonify(_read(SCENES_PATH) or {"scenes": [], "count": 0})
+
+
+@app.route("/api/scene_analysis")
+@app.route("/ingress/api/scene_analysis")
+def api_scene_analysis():
+    """Return scene improvement suggestions (cached; regenerated on full train)."""
+    force = request.args.get("force", "").lower() in ("1", "true", "yes")
+    cached = _read(SCENE_ANALYSIS_PATH)
+    if cached is not None and not force:
+        return jsonify({"suggestions": cached, "count": len(cached)})
+    try:
+        from . import scene_analysis as _sa
+        results = _sa.run_scene_analysis(force=True)
+        return jsonify({"suggestions": results, "count": len(results)})
+    except Exception as e:
+        log.warning("api_scene_analysis failed: %s", e)
+        return jsonify({"suggestions": [], "count": 0, "error": str(e)})
 
 
 @app.route("/api/ha_automations")

@@ -1898,6 +1898,15 @@ async def run(days_history: int, mode: str = "full") -> None:
                 scene_detector.save(scenes)
                 log.info("Detected %d implicit scenes", len(scenes))
 
+                log.info("Running scene analysis...")
+                try:
+                    from . import scene_analysis as _scene_analysis
+                    sa_results = _scene_analysis.analyse_scenes(discovered_scenes=scenes)
+                    _scene_analysis.save_analysis(sa_results)
+                    log.info("Scene analysis: %d improvement suggestions", len(sa_results))
+                except Exception as e:
+                    log.warning("Scene analysis failed: %s", e)
+
                 log.info("Running room prediction...")
                 try:
                     area_data = ha_areas._load_cache()
@@ -2144,6 +2153,15 @@ async def run(days_history: int, mode: str = "full") -> None:
             scenes = scene_detector.detect_scenes(days=min(days_history, 30))
             scene_detector.save(scenes)
             log.info("Detected %d implicit scenes", len(scenes))
+
+            log.info("Running scene analysis...")
+            try:
+                from . import scene_analysis as _scene_analysis
+                sa_results = _scene_analysis.analyse_scenes(discovered_scenes=scenes)
+                _scene_analysis.save_analysis(sa_results)
+                log.info("Scene analysis: %d improvement suggestions", len(sa_results))
+            except Exception as e:
+                log.warning("Scene analysis failed: %s", e)
 
             log.info("Running room prediction...")
             try:
