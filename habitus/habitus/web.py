@@ -1273,6 +1273,28 @@ async function addToHA(id) {
   } catch(e) { btn.disabled=false; btn.textContent='+ Add to HA'; toast('Network error','te'); }
 }
 
+async function addGapToHA(yamlId, btnId) {
+  const btn = document.getElementById(btnId);
+  const yaml = (document.getElementById(yamlId)?.textContent || '').trim();
+  if (!yaml) { toast('Missing YAML','te'); return; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
+  try {
+    const r = await fetch('api/add_automation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({yaml})});
+    const d = await r.json();
+    if (d.ok) {
+      if (btn) btn.textContent = '✓ Added';
+      toast('Automation added ✓');
+      setTimeout(()=>load(), 500);
+    } else {
+      if (btn) { btn.disabled = false; btn.textContent = '+ Add to HA'; }
+      toast('Failed: '+(d.error||'?'),'te');
+    }
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.textContent = '+ Add to HA'; }
+    toast('Network error','te');
+  }
+}
+
 async function removeFromHA(entityId, suggestionId='') {
   const btn = suggestionId ? document.getElementById('remove-'+suggestionId) : null;
   if (btn) { btn.disabled = true; btn.textContent = 'Removing…'; }
@@ -2131,9 +2153,14 @@ async function load() {
       html += `<div style="font-weight:600;margin-bottom:8px;color:var(--accent)">Missing automations (${missing.length})</div>`;
       missing.forEach((g,i)=>{
         const yid = 'gap-yaml-'+i;
+        const bid = 'gap-add-'+i;
         html += `<div class="sug" style="margin-bottom:10px">
           <div class="sug-head"><h3>${g.suggestion}</h3><span class="badge b-alert">missing</span></div>
-          ${g.ha_automation_yaml ? `<pre id="${yid}" style="font-size:.72rem">${g.ha_automation_yaml}</pre><button class="btn btn-accent" onclick="navigator.clipboard.writeText(document.getElementById('${yid}').textContent).then(()=>toast('Copied ✓'))">📋 Copy YAML</button>` : ''}
+          ${g.ha_automation_yaml ? `<pre id="${yid}" style="font-size:.72rem">${g.ha_automation_yaml}</pre>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-accent" onclick="navigator.clipboard.writeText(document.getElementById('${yid}').textContent).then(()=>toast('Copied ✓'))">📋 Copy YAML</button>
+              <button class="btn btn-success" id="${bid}" onclick="addGapToHA('${yid}','${bid}')">+ Add to HA</button>
+            </div>` : ''}
         </div>`;
       });
     }

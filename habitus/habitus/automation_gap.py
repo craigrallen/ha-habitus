@@ -118,23 +118,46 @@ def _extract_entities_from_text(text, known_entity_ids):
 
 
 def _parse_suggestion(suggestion, known_entity_ids):
-    """Parse a suggestion into a structured intent dict."""
+    """Parse a suggestion into a structured intent dict.
+
+    Prefers structured fields from suggestion dicts (title/description/entities/yaml)
+    so gap analysis can reuse concrete automations instead of generic templates.
+    """
     if isinstance(suggestion, dict):
         raw = suggestion.get("description", "") or suggestion.get("title", "")
+        title = suggestion.get("title", "")
         sug_id = suggestion.get("id", "")
+        sug_yaml = (suggestion.get("yaml", "") or "").strip()
+        explicit_entities = [
+            str(e).strip().lower()
+            for e in (suggestion.get("entities") or [])
+            if isinstance(e, str) and "." in e
+        ]
     else:
         raw = str(suggestion)
+        title = ""
         sug_id = ""
+        sug_yaml = ""
+        explicit_entities = []
 
-    intent_pat = _match_intent(raw)
+    intent_pat = _match_intent((title + "\n" + raw).strip())
     entities = _extract_entities_from_text(raw, known_entity_ids)
+
+    # Prefer explicit entities from structured suggestions when available.
+    if explicit_entities:
+        entities = explicit_entities
 
     if intent_pat and intent_pat["entity_domains"]:
         entities = [e for e in entities if e.split(".")[0] in intent_pat["entity_domains"]]
 
+    # Deduplicate while preserving order.
+    entities = list(dict.fromkeys(entities))
+
     return {
         "id": sug_id,
+        "title": title,
         "raw": raw,
+        "yaml": sug_yaml,
         "intent": intent_pat["intent"] if intent_pat else "unknown",
         "trigger_type": intent_pat["trigger_type"] if intent_pat else None,
         "action_type": intent_pat["action_type"] if intent_pat else None,
@@ -459,7 +482,8 @@ async def analyse(ha_url, ha_token, suggestions, auto_scores=None):
     for sug in suggestions:
         parsed = _parse_suggestion(sug, known_entity_ids)
 
-        if parsed["intent"] == "unknown":
+        # Keep unknown-intent suggestions if they include a concrete YAML snippet.
+        if parsed["intent"] == "unknown" and not parsed.get("yaml"):
             continue
 
         best_auto, match_score = _match_automation(parsed, automations)
@@ -473,7 +497,8 @@ async def analyse(ha_url, ha_token, suggestions, auto_scores=None):
         if best_auto is None or match_score < 25:
             gap["status"] = "missing"
             gap["opportunity"] = True
-            gap["ha_automation_yaml"] = _generate_yaml(parsed)
+            # Prefer concrete YAML from the suggestion itself when present.
+            gap["ha_automation_yaml"] = parsed.get("yaml") or _generate_yaml(parsed)
             counts["missing"] += 1
         else:
             auto_eid = best_auto.get("entity_id", "")
