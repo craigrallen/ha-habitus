@@ -61,9 +61,8 @@ def _save_changelog(entries: list[dict[str, Any]]) -> None:
     # Keep most recent entries
     if len(entries) > MAX_ENTRIES:
         entries = entries[-MAX_ENTRIES:]
-    os.makedirs(os.environ.get("DATA_DIR", "/data"), exist_ok=True)
-    with open(os.path.join(os.environ.get("DATA_DIR", "/data"), "changelog.json"), "w") as f:
-        json.dump(entries, f, indent=2, default=str)
+    from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+    _atomic_write(os.path.join(os.environ.get("DATA_DIR", "/data"), "changelog.json"), entries)
 
 
 def _automation_key(automation: dict[str, Any]) -> str:
@@ -238,9 +237,8 @@ def run_diff_and_log() -> list[dict[str, Any]]:
         append_entries(changes)
 
     # Save current as new previous snapshot
-    os.makedirs(os.environ.get("DATA_DIR", "/data"), exist_ok=True)
-    with open(os.path.join(os.environ.get("DATA_DIR", "/data"), "ha_automations_prev.json"), "w") as f:
-        json.dump(current, f, indent=2, default=str)
+    from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+    _atomic_write(os.path.join(os.environ.get("DATA_DIR", "/data"), "ha_automations_prev.json"), current)
 
     return changes
 

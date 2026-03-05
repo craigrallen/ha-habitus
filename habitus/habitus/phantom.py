@@ -235,8 +235,8 @@ async def _run_async() -> dict:
 
 def save(result: dict) -> None:
     try:
-        with open(PHANTOM_PATH, "w") as f:
-            json.dump(result, f, indent=2, default=str)
+        from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+        _atomic_write(PHANTOM_PATH, result)
     except Exception as e:
         log.warning("Could not save phantom data: %s", e)
 

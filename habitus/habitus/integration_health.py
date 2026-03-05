@@ -245,9 +245,8 @@ def _score_label(score: float) -> str:
 
 def save_integration_health(report: dict[str, Any]) -> None:
     """Save integration health report."""
-    os.makedirs(os.environ.get("DATA_DIR", "/data"), exist_ok=True)
-    with open(os.path.join(os.environ.get("DATA_DIR", "/data"), "integration_health.json"), "w") as f:
-        json.dump(report, f, indent=2, default=str)
+    from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+    _atomic_write(os.path.join(os.environ.get("DATA_DIR", "/data"), "integration_health.json"), report)
     log.info(
         "Integration health: score=%.1f%%, stale=%d, unavailable=%d",
         report["overall_score"],

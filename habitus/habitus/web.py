@@ -3105,7 +3105,11 @@ def api_rescan():
 @app.route("/api/training_status")
 @app.route("/ingress/api/training_status")
 def api_training_status():
-    return jsonify({"running": _trainer.is_running()})
+    state = _read(STATE_PATH) or {}
+    return jsonify({
+        "running": _trainer.is_running(),
+        "ha_reachable": state.get("ha_reachable", None),
+    })
 
 
 @app.route("/api/power_sensors")

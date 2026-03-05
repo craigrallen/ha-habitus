@@ -229,9 +229,8 @@ def run_health_check(
 
 def save_health(report: dict[str, Any]) -> None:
     """Save health report to cache file."""
-    os.makedirs(os.environ.get("DATA_DIR", "/data"), exist_ok=True)
-    with open(os.path.join(os.environ.get("DATA_DIR", "/data"), "automation_health.json"), "w") as f:
-        json.dump(report, f, indent=2, default=str)
+    from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+    _atomic_write(os.path.join(os.environ.get("DATA_DIR", "/data"), "automation_health.json"), report)
     log.info(
         "Automation health: %d total — %s",
         report["total"],

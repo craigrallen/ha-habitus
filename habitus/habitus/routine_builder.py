@@ -262,9 +262,8 @@ def run(events: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         "routines": routines,
     }
 
-    os.makedirs(os.environ.get("DATA_DIR", "/data"), exist_ok=True)
-    with open(os.path.join(os.environ.get("DATA_DIR", "/data"), "routines.json"), "w") as f:
-        json.dump(result, f, indent=2, default=str)
+    from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+    _atomic_write(os.path.join(os.environ.get("DATA_DIR", "/data"), "routines.json"), result)
 
     log.info("Routine builder: %d routines detected", len(routines))
     return result

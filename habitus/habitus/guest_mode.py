@@ -296,9 +296,8 @@ def run(
     result = compute_guest_probability(recent_events, baseline)
     result["timestamp"] = datetime.datetime.now(datetime.UTC).isoformat()
 
-    os.makedirs(os.environ.get("DATA_DIR", "/data"), exist_ok=True)
-    with open(os.path.join(os.environ.get("DATA_DIR", "/data"), "guest_mode.json"), "w") as f:
-        json.dump(result, f, indent=2, default=str)
+    from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+    _atomic_write(os.path.join(os.environ.get("DATA_DIR", "/data"), "guest_mode.json"), result)
 
     log.info("Guest mode: probability=%.2f, factors=%s", result["guest_probability"], result.get("factors", {}))
     return result

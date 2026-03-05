@@ -260,9 +260,8 @@ def run_battery_check(
 
 def save_battery_status(report: dict[str, Any]) -> None:
     """Save battery status report."""
-    os.makedirs(os.environ.get("DATA_DIR", "/data"), exist_ok=True)
-    with open(os.path.join(os.environ.get("DATA_DIR", "/data"), "battery_status.json"), "w") as f:
-        json.dump(report, f, indent=2, default=str)
+    from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+    _atomic_write(os.path.join(os.environ.get("DATA_DIR", "/data"), "battery_status.json"), report)
     log.info(
         "Battery watchdog: %d batteries — critical=%d, low=%d, ok=%d",
         report["total"],

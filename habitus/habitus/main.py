@@ -82,6 +82,83 @@ def _fetch_min_window_days() -> int:
     return _env_int("HABITUS_FETCH_MIN_WINDOW_DAYS", FETCH_MIN_WINDOW_DAYS)
 
 
+# ── Startup validation ─────────────────────────────────────────────────────────
+
+def _ha_get(url: str, *, token: str = "", timeout: float = 30.0, retries: int = 3) -> "requests.Response":
+    """GET *url* from HA with exponential backoff on transient errors.
+
+    Retries up to *retries* times with delays 1s → 2s → 4s before raising.
+    A 401/403 is considered permanent and is not retried.
+    """
+    import time as _t
+
+    headers = {"Authorization": f"Bearer {token or HA_TOKEN}"}
+    delays = [1, 2, 4]
+    last_exc: Exception | None = None
+
+    for attempt in range(retries):
+        try:
+            r = requests.get(url, headers=headers, timeout=timeout)
+            if r.status_code in (401, 403):
+                # Auth failure — no point retrying
+                log.error("HA API auth failure (HTTP %d) at %s", r.status_code, url)
+                r.raise_for_status()
+            if r.status_code < 500:
+                return r
+            # 5xx — transient, retry
+            last_exc = requests.HTTPError(f"HTTP {r.status_code}", response=r)
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            last_exc = exc
+
+        if attempt < retries - 1:
+            delay = delays[min(attempt, len(delays) - 1)]
+            log.warning(
+                "HA API call failed (attempt %d/%d) — retrying in %ds: %s",
+                attempt + 1, retries, delay, last_exc,
+            )
+            _t.sleep(delay)
+
+    raise last_exc or requests.RequestException(f"HA API unreachable after {retries} attempts")
+
+
+def check_ha_reachable(timeout: float = 5.0) -> bool:
+    """Probe the HA REST API to confirm connectivity.
+
+    Returns True if the /api/ endpoint responds with HTTP 200-299, False
+    otherwise.  The result is written into run_state.json under ``ha_reachable``
+    so the /api/status web endpoint can surface it without re-probing.
+    """
+    ha_url = os.environ.get("HA_URL", HA_URL)
+    token = os.environ.get("SUPERVISOR_TOKEN", os.environ.get("HABITUS_HA_TOKEN", HA_TOKEN))
+    try:
+        r = requests.get(
+            f"{ha_url}/api/",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=timeout,
+        )
+        reachable = r.status_code < 400
+    except Exception as exc:
+        log.warning("HA connectivity check failed: %s", exc)
+        reachable = False
+
+    if not reachable:
+        log.error(
+            "Home Assistant is unreachable at %s — training scheduler will not start "
+            "until HA is reachable. Check HA_URL and SUPERVISOR_TOKEN.",
+            ha_url,
+        )
+
+    # Persist reachability flag in state so web API can surface it
+    try:
+        state = load_state() or {}
+        state["ha_reachable"] = reachable
+        save_state(state)
+    except Exception:
+        pass
+
+    return reachable
+
+
 def summarize_perf_guardrail(
     stage: str,
     elapsed_seconds: float,
@@ -333,28 +410,24 @@ def load_state():
 
 
 def save_state(state):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(STATE_PATH, "w") as f:
-        json.dump(state, f, indent=2, default=str)
+    from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+    _atomic_write(STATE_PATH, state)
 
 
 def set_progress(phase, done=0, total=0, rows=0, elapsed=0.0, eta=0.0):
     try:
+        from .utils import atomic_write as _atomic_write  # noqa: PLC0415
         pct = round(done / total * 100) if total else 100
-        with open(PROGRESS_PATH, "w") as f:
-            json.dump(
-                {
-                    "running": True,
-                    "phase": phase,
-                    "done": done,
-                    "total": total,
-                    "pct": pct,
-                    "rows": rows,
-                    "elapsed_min": round(elapsed / 60, 1),
-                    "eta_min": round(eta / 60, 1),
-                },
-                f,
-            )
+        _atomic_write(PROGRESS_PATH, {
+            "running": True,
+            "phase": phase,
+            "done": done,
+            "total": total,
+            "pct": pct,
+            "rows": rows,
+            "elapsed_min": round(elapsed / 60, 1),
+            "eta_min": round(eta / 60, 1),
+        })
     except Exception:
         pass
 

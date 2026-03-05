@@ -1175,10 +1175,9 @@ def run(
     except Exception as e:
         log.warning("Cost enrichment for suggestions failed: %s", e)
 
-    with open(PATTERNS_PATH, "w") as f:
-        json.dump(patterns, f, indent=2, default=str)
-    with open(SUGGESTIONS_PATH, "w") as f:
-        json.dump(suggestions, f, indent=2, default=str)
+    from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+    _atomic_write(PATTERNS_PATH, patterns)
+    _atomic_write(SUGGESTIONS_PATH, suggestions)
     log.info(
         f"Patterns saved — {len(suggestions)} suggestions ({sum(1 for s in suggestions if s['applicable'])} applicable)"
     )

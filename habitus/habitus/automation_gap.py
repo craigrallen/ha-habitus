@@ -742,9 +742,8 @@ async def analyse(ha_url, ha_token, suggestions, auto_scores=None):
 
 def save(result):
     """Save gap analysis to disk."""
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(GAP_PATH, "w") as f:
-        json.dump(result, f, indent=2, default=str)
+    from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+    _atomic_write(GAP_PATH, result)
     log.info(
         "automation_gap: saved %d gaps — %s",
         len(result.get("gaps", [])),

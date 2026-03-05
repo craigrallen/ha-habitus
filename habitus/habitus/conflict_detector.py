@@ -337,14 +337,13 @@ def _build_conflict_yaml(
 
 def save_conflicts(conflicts: list[dict[str, Any]]) -> None:
     """Save detected conflicts."""
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(CONFLICTS_PATH, "w") as f:
-        json.dump({
-            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
-            "count": len(conflicts),
-            "total_est_waste_w": sum(c.get("est_waste_w", 0) for c in conflicts),
-            "conflicts": conflicts,
-        }, f, indent=2, default=str)
+    from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+    _atomic_write(CONFLICTS_PATH, {
+        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+        "count": len(conflicts),
+        "total_est_waste_w": sum(c.get("est_waste_w", 0) for c in conflicts),
+        "conflicts": conflicts,
+    })
     if conflicts:
         log.info("Conflict detector: %d active conflict(s), ~%dW estimated waste",
                  len(conflicts), sum(c.get("est_waste_w", 0) for c in conflicts))

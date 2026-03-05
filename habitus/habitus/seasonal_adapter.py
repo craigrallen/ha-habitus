@@ -386,9 +386,8 @@ def run(
     result = get_seasonal_suggestions(date, entities, hemisphere)
     result["timestamp"] = datetime.datetime.now(datetime.UTC).isoformat()
 
-    os.makedirs(os.environ.get("DATA_DIR", "/data"), exist_ok=True)
-    with open(os.path.join(os.environ.get("DATA_DIR", "/data"), "seasonal_suggestions.json"), "w") as f:
-        json.dump(result, f, indent=2, default=str)
+    from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+    _atomic_write(os.path.join(os.environ.get("DATA_DIR", "/data"), "seasonal_suggestions.json"), result)
 
     log.info("Seasonal adapter: season=%s, %d suggestions", result["season"], result["total"])
     return result
