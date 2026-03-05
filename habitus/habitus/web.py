@@ -678,6 +678,70 @@ pre.raw {
   display: none;
   line-height: 1.5;
 }
+
+/* ── Loading skeleton / shimmer ─────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg,
+    var(--bg2) 25%,
+    rgba(255,255,255,0.06) 50%,
+    var(--bg2) 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s infinite linear;
+  border-radius: 6px;
+  min-height: 16px;
+}
+.skeleton-line {
+  height: 14px;
+  border-radius: 4px;
+  margin: 6px 0;
+}
+.skeleton-block {
+  height: 60px;
+  border-radius: 8px;
+  margin: 8px 0;
+}
+
+/* ── Collapsible sections ────────────────────────────────────── */
+.sec-header.collapsible {
+  cursor: pointer;
+  user-select: none;
+}
+.sec-header.collapsible::after {
+  content: ' ▾';
+  font-size: .75rem;
+  color: var(--text3);
+  margin-left: 6px;
+}
+.sec-header.collapsible.collapsed::after {
+  content: ' ▸';
+}
+.sec-body { overflow: hidden; transition: max-height 0.28s ease, opacity 0.2s; }
+.sec-body.collapsed { max-height: 0 !important; opacity: 0; pointer-events: none; }
+
+/* ── Insight chips ───────────────────────────────────────────── */
+.insight-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: .8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity .15s;
+  text-decoration: none;
+  border: 1px solid transparent;
+}
+.insight-chip:hover { opacity: .8; }
+.chip-danger { background: rgba(239,68,68,.15); color: #ef4444; border-color: rgba(239,68,68,.3); }
+.chip-warn   { background: rgba(245,158,11,.15); color: var(--amber); border-color: rgba(245,158,11,.3); }
+.chip-ok     { background: rgba(34,197,94,.15); color: var(--green); border-color: rgba(34,197,94,.3); }
+.chip-info   { background: rgba(79,195,247,.15); color: #4fc3f7; border-color: rgba(79,195,247,.3); }
+.chip-muted  { background: var(--bg2); color: var(--text2); border-color: var(--border); }
 </style>
 </head>
 <body>
@@ -732,6 +796,17 @@ pre.raw {
       <div class="slabel">Season Model</div>
       <div class="sval" id="season-active" style="font-size:1.1rem">—</div>
       <div class="ssub" id="season-sub"></div>
+    </div>
+  </div>
+
+  <!-- ── Insights Summary Card ──────────────────────────────── -->
+  <div class="sec" id="insights-summary-card" style="margin-bottom:16px">
+    <div class="sec-header">
+      <h2>🔍 Insights</h2>
+      <span class="sec-sub" id="insights-sub">Click any chip to jump to that section</span>
+    </div>
+    <div id="insights-chips" style="display:flex;flex-wrap:wrap;gap:8px;padding:4px 0 8px">
+      <div style="color:var(--text3);font-size:.82rem">Loading insights...</div>
     </div>
   </div>
 
@@ -827,7 +902,7 @@ pre.raw {
   <!-- Your HA Automations -->
   <div class="sec" style="margin-top:16px">
     <div class="sec-header"><h2>🤖 Your Automations</h2><span class="sec-sub">Existing automations from Home Assistant</span></div>
-    <div id="ha-automations-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+    <div id="ha-automations-list"><div class="skeleton skeleton-block"></div></div>
   </div>
 
   <!-- Entity Picker -->
@@ -856,27 +931,27 @@ pre.raw {
   <!-- Insights (moved from old tab) -->
   <div class="sec" style="margin-top:16px">
     <div class="sec-header"><h2>🔌 Appliance Detection</h2><span class="sec-sub">Devices identified by power signature</span></div>
-    <div id="appliance-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+    <div id="appliance-list"><div class="skeleton skeleton-block"></div></div>
   </div>
   <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>🕐 Predicted Routines</h2><span class="sec-sub">Recurring activities detected from sensor patterns</span></div>
-    <div id="routines-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+    <div id="routines-list"><div class="skeleton skeleton-block"></div></div>
   </div>
   <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>📊 Phantom Loads</h2><span class="sec-sub">Devices drawing power 24/7</span></div>
-    <div id="phantom-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+    <div id="phantom-list"><div class="skeleton skeleton-block"></div></div>
   </div>
   <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>📈 Routine Drift</h2><span class="sec-sub">Changes in daily patterns</span></div>
-    <div id="drift-info"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+    <div id="drift-info"><div class="skeleton skeleton-block"></div></div>
   </div>
   <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>⚡ Automation Health</h2><span class="sec-sub">How well your automations work</span></div>
-    <div id="auto-scores"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+    <div id="auto-scores"><div class="skeleton skeleton-block"></div></div>
   </div>
   <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>🔧 Automation Gaps</h2><span class="sec-sub">Suggestions vs existing automations</span></div>
-    <div id="auto-gap"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+    <div id="auto-gap"><div class="skeleton skeleton-block"></div></div>
   </div>
 
 </div>
@@ -906,19 +981,19 @@ pre.raw {
 <!-- AUTOMATION HEALTH -->
 <div id="automation-health-section" class="sec" style="margin-top:12px">
   <div class="sec-header"><h2>🏥 Automation Health</h2><span class="sec-sub">Dead, stale, and over-triggering automations</span></div>
-  <div id="automation-health-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+  <div id="automation-health-list"><div class="skeleton skeleton-block"></div></div>
 </div>
 
 <!-- AUTOMATION CONFLICTS (inter-automation) -->
 <div id="automation-conflicts-section" class="sec" style="margin-top:12px">
   <div class="sec-header"><h2>⚔️ Automation Conflicts</h2><span class="sec-sub">Automations that fight each other</span></div>
-  <div id="automation-conflicts-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+  <div id="automation-conflicts-list"><div class="skeleton skeleton-block"></div></div>
 </div>
 
 <!-- DETECTED ROUTINES (routine builder) -->
 <div id="detected-routines-section" class="sec" style="margin-top:12px">
   <div class="sec-header"><h2>🔄 Detected Routines</h2><span class="sec-sub">Temporal sequences → chainable automations</span></div>
-  <div id="detected-routines-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+  <div id="detected-routines-list"><div class="skeleton skeleton-block"></div></div>
 </div>
 
 <!-- GUEST MODE -->
@@ -928,25 +1003,25 @@ pre.raw {
     <button onclick="activateGuestMode()" style="background:#fff;color:var(--accent);border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-weight:600">Activate Guest Mode</button>
   </div>
   <div class="sec-header"><h2>👥 Guest Mode</h2><span class="sec-sub">Unusual activity pattern detection</span></div>
-  <div id="guest-mode-details"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+  <div id="guest-mode-details"><div class="skeleton skeleton-block"></div></div>
 </div>
 
 <!-- SEASONAL SUGGESTIONS -->
 <div id="seasonal-section" class="sec" style="margin-top:12px">
   <div class="sec-header"><h2>🌿 Seasonal Suggestions</h2><span class="sec-sub">Automations tuned to the current season</span><span id="season-badge" style="margin-left:8px;background:var(--accent);color:#fff;border-radius:12px;padding:2px 10px;font-size:.75rem"></span></div>
-  <div id="seasonal-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+  <div id="seasonal-list"><div class="skeleton skeleton-block"></div></div>
 </div>
 
 <!-- BATTERY STATUS -->
 <div id="battery-status-section" class="sec" style="margin-top:12px">
   <div class="sec-header"><h2>🔋 Battery Status</h2><span class="sec-sub">Device batteries sorted by urgency</span></div>
-  <div id="battery-status-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+  <div id="battery-status-list"><div class="skeleton skeleton-block"></div></div>
 </div>
 
 <!-- INTEGRATION HEALTH -->
 <div id="integration-health-section" class="sec" style="margin-top:12px">
   <div class="sec-header"><h2>🔌 Integration Health</h2><span class="sec-sub">Stale entities and integration scores</span><span id="health-score-badge" style="margin-left:8px;font-size:.8rem;color:var(--text3)"></span></div>
-  <div id="integration-health-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+  <div id="integration-health-list"><div class="skeleton skeleton-block"></div></div>
 </div>
 
 <!-- NL AUTOMATION CREATOR -->
@@ -982,7 +1057,7 @@ pre.raw {
 <!-- RECENT ACTIVITY (changelog) -->
 <div id="changelog-section" class="sec" style="margin-top:12px">
   <div class="sec-header"><h2>📋 Recent Activity</h2><span class="sec-sub">Automation changes and events</span></div>
-  <div id="changelog-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+  <div id="changelog-list"><div class="skeleton skeleton-block"></div></div>
 </div>
 
 <!-- ENERGY & PATTERNS -->
@@ -1959,6 +2034,24 @@ async function load() {
   fetch('api/conflicts').then(r=>r.json()).catch(()=>({conflicts:[]})).then(cd => {
     const el = document.getElementById('conflicts-list');
     const sec = document.getElementById('conflicts-section');
+    // Also populate the automation-conflicts-list section
+    const acListEl = document.getElementById('automation-conflicts-list');
+    if (acListEl) {
+      if (!cd.conflicts || cd.conflicts.length === 0) {
+        acListEl.innerHTML = '<div style="color:var(--text3);padding:12px;font-size:.82rem">✓ No conflicts detected — your automations are working well together.</div>';
+      } else {
+        const sevColors = {critical:'#ff4444',high:'#ff8800',medium:'#ffbb33',low:'var(--text3)'};
+        acListEl.innerHTML = cd.conflicts.map(c => `
+          <div class="card" style="padding:12px;margin-bottom:8px;border-left:3px solid ${sevColors[c.severity]||'var(--border)'}">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div><span style="font-size:1.2rem">${c.icon||'⚠️'}</span> <b>${c.title||'Conflict'}</b></div>
+              <span style="font-size:.75rem;color:${sevColors[c.severity]};text-transform:uppercase">${c.severity||''}</span>
+            </div>
+            <div style="font-size:.82rem;color:var(--text3);margin-top:4px">${c.description||''}</div>
+            <div style="font-size:.82rem;margin-top:6px">💡 ${c.suggestion||''}</div>
+          </div>`).join('');
+      }
+    }
     if (!cd.conflicts || cd.conflicts.length === 0) { sec.style.display='none'; return; }
     sec.style.display='';
     const sevColors = {critical:'#ff4444',high:'#ff8800',medium:'#ffbb33',low:'var(--text3)'};
@@ -2478,6 +2571,112 @@ async function load() {
 
   // Settings
   document.getElementById('raw-state').textContent = JSON.stringify(state,null,2);
+
+  // ── 5a) Unified Insights Summary ────────────────────────────────────────
+  (async () => {
+    const [conflictsData, healthData, batteryData, gapD, guestData] = await Promise.all([
+      fetch('api/conflicts').then(r=>r.json()).catch(()=>({})),
+      fetch('api/automation_health').then(r=>r.json()).catch(()=>({})),
+      fetch('api/battery_status').then(r=>r.json()).catch(()=>({})),
+      Promise.resolve(gapData),
+      fetch('api/guest_mode').then(r=>r.json()).catch(()=>({})),
+    ]);
+
+    const chips = [];
+
+    // Conflicts
+    const nConflicts = conflictsData?.count ?? (conflictsData?.conflicts?.length ?? 0);
+    if (nConflicts > 0) {
+      chips.push(`<a href="#" class="insight-chip chip-danger" onclick="gotoTab('tab-smarthome',null);return false;" title="Jump to Conflicts">⚡ ${nConflicts} conflict${nConflicts!==1?'s':''}</a>`);
+    }
+
+    // Dead automations
+    const deadCount = (healthData?.automations || []).filter(a => a.status === 'dead').length;
+    if (deadCount > 0) {
+      chips.push(`<a href="#" class="insight-chip chip-warn" onclick="gotoTab('tab-smarthome',null);return false;" title="Jump to Automation Health">💤 ${deadCount} dead automation${deadCount!==1?'s':''}</a>`);
+    }
+
+    // Battery alerts
+    const batteryAlerts = (batteryData?.batteries || []).filter(b => b.level_pct !== null && b.level_pct < 20).length;
+    if (batteryAlerts > 0) {
+      chips.push(`<a href="#" class="insight-chip chip-danger" onclick="gotoTab('tab-smarthome',null);return false;" title="Jump to Battery Status">🔋 ${batteryAlerts} battery alert${batteryAlerts!==1?'s':''}</a>`);
+    }
+
+    // Missing automation gaps
+    const missingGaps = (gapD?.gaps || []).filter(g => g.status === 'missing').length;
+    if (missingGaps > 0) {
+      chips.push(`<a href="#" class="insight-chip chip-info" onclick="gotoTab('tab-smarthome',null);return false;" title="Jump to Automation Gaps">🔧 ${missingGaps} missing automation${missingGaps!==1?'s':''}</a>`);
+    }
+
+    // Cost saving potential
+    const totalSaving = [...(gapD?.gaps||[]), ...(Array.isArray(smartSuggestions?.suggestions) ? smartSuggestions.suggestions : [])]
+      .reduce((sum, item) => sum + (item?.cost_estimate?.monthly_saving_eur || 0), 0);
+    if (totalSaving > 0) {
+      chips.push(`<a href="#" class="insight-chip chip-ok" onclick="gotoTab('tab-smarthome',null);return false;" title="Potential monthly energy savings">€${totalSaving.toFixed(1)}/month savings</a>`);
+    }
+
+    // Guest mode
+    const guestProb = guestData?.guest_probability ?? 0;
+    if (guestProb > 0.4) {
+      chips.push(`<span class="insight-chip chip-info">👥 Guests may be present (${Math.round(guestProb*100)}%)</span>`);
+    }
+
+    const container = document.getElementById('insights-chips');
+    if (container) {
+      if (chips.length) {
+        container.innerHTML = chips.join('');
+      } else {
+        container.innerHTML = '<span style="color:var(--green);font-size:.82rem">✓ No issues detected</span>';
+      }
+    }
+  })();
+
+  // ── 5d) Section collapse/expand (backed by localStorage) ─────────────────
+  document.querySelectorAll('.sec-header').forEach(hdr => {
+    const sec = hdr.closest('.sec');
+    if (!sec) return;
+    const body = sec.querySelector('.sec-body, :scope > :not(.sec-header)');
+    if (!body) return;
+
+    // Make the next sibling a .sec-body if not already
+    const sectionId = hdr.querySelector('h2')?.textContent?.trim().replace(/[^a-z0-9]/gi,'_').toLowerCase();
+    if (!sectionId) return;
+    const storageKey = 'habitus_collapsed_' + sectionId;
+
+    hdr.classList.add('collapsible');
+    // Wrap content in a .sec-body div if it isn't already
+    const secBody = (() => {
+      let el = hdr.nextElementSibling;
+      if (el && !el.classList.contains('sec-body')) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'sec-body';
+        while (hdr.nextElementSibling) {
+          wrapper.appendChild(hdr.nextElementSibling);
+        }
+        sec.appendChild(wrapper);
+        return wrapper;
+      }
+      return el;
+    })();
+    if (!secBody) return;
+
+    const collapsed = localStorage.getItem(storageKey) === '1';
+    if (collapsed) {
+      hdr.classList.add('collapsed');
+      secBody.classList.add('collapsed');
+      secBody.style.maxHeight = '0';
+    } else {
+      secBody.style.maxHeight = secBody.scrollHeight + 'px';
+    }
+
+    hdr.addEventListener('click', () => {
+      const isNowCollapsed = !hdr.classList.contains('collapsed');
+      hdr.classList.toggle('collapsed', isNowCollapsed);
+      secBody.classList.toggle('collapsed', isNowCollapsed);
+      secBody.style.maxHeight = isNowCollapsed ? '0' : secBody.scrollHeight + 'px';
+      localStorage.setItem(storageKey, isNowCollapsed ? '1' : '0');
+    });
+  });
 
   // Schedule info
   const schedule = '{{ schedule }}' || state.schedule || 'overnight';

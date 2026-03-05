@@ -53,8 +53,10 @@ class TestPhantomLoad:
             "months": [],
             "analysed_at": "2025-01-01T00:00:00",
         }
-        phantom.save(data)
-        loaded = phantom.load()
+        phantom_path = str(tmp_data_dir / "phantom_loads.json")
+        with patch.object(phantom, "PHANTOM_PATH", phantom_path):
+            phantom.save(data)
+            loaded = phantom.load()
         assert loaded["grid_entity"] == "sensor.grid"
         assert loaded["total_12mo_kwh"] == 1234.5
 
@@ -134,17 +136,21 @@ class TestRoomPredictor:
 
     def test_run_returns_empty_without_db(self, tmp_data_dir: Path):
         """run_room_prediction returns empty if DB is missing."""
-        with patch("habitus.habitus.room_predictor.resolve_ha_db_path", return_value=None):
-            from habitus.habitus.room_predictor import run_room_prediction
-            result = run_room_prediction({})
+        import habitus.habitus.room_predictor as rp
+        pred_path = str(tmp_data_dir / "room_predictions.json")
+        with patch("habitus.habitus.room_predictor.resolve_ha_db_path", return_value=None), \
+             patch.object(rp, "PREDICTIONS_PATH", pred_path):
+            result = rp.run_room_prediction({})
         assert isinstance(result, dict)
-        assert result.get("total_rooms", 0) == 0
+        assert result.get("room_count", 0) == 0
 
     def test_run_with_empty_entity_area_map(self, tmp_data_dir: Path):
         """run_room_prediction with empty area map returns gracefully."""
-        with patch("habitus.habitus.room_predictor.resolve_ha_db_path", return_value=None):
-            from habitus.habitus.room_predictor import run_room_prediction
-            result = run_room_prediction({})
+        import habitus.habitus.room_predictor as rp
+        pred_path = str(tmp_data_dir / "room_predictions.json")
+        with patch("habitus.habitus.room_predictor.resolve_ha_db_path", return_value=None), \
+             patch.object(rp, "PREDICTIONS_PATH", pred_path):
+            result = rp.run_room_prediction({})
         assert isinstance(result, dict)
 
     def test_load_predictions_missing_file(self, tmp_data_dir: Path):
@@ -346,15 +352,20 @@ class TestMainFetchFunctions:
 
     def test_save_and_load_state(self, tmp_data_dir: Path):
         """save_state() writes to disk and load_state() reads it back."""
+        import habitus.habitus.main as main_mod
         from habitus.habitus.main import save_state, load_state
+        state_path = str(tmp_data_dir / "run_state.json")
         state = {"phase": "idle", "last_run": "2025-01-01T00:00:00Z", "score": 0.85}
-        save_state(state)
-        loaded = load_state()
+        with patch.object(main_mod, "STATE_PATH", state_path):
+            save_state(state)
+            loaded = load_state()
         assert loaded["phase"] == "idle"
         assert loaded["score"] == pytest.approx(0.85)
 
     def test_load_state_missing_file(self, tmp_data_dir: Path):
         """load_state returns empty dict when state file is missing."""
+        import habitus.habitus.main as main_mod
         from habitus.habitus.main import load_state
-        result = load_state()
+        with patch.object(main_mod, "STATE_PATH", str(tmp_data_dir / "nonexistent_state.json")):
+            result = load_state()
         assert isinstance(result, dict)

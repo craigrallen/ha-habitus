@@ -146,8 +146,13 @@ class TestPatternsCostIntegration:
 
             import pandas as pd
             import numpy as np
+            import habitus.habitus.patterns as _pe_mod
             df = pd.DataFrame({"hour": pd.date_range("2025-01-01", periods=10, freq="h")})
-            pattern_engine.run(df, stat_ids=["light.living_room"])
+            patterns_path = str(tmp_data_dir / "patterns.json")
+            suggestions_path = str(tmp_data_dir / "suggestions.json")
+            with patch.object(_pe_mod, "PATTERNS_PATH", patterns_path), \
+                 patch.object(_pe_mod, "SUGGESTIONS_PATH", suggestions_path):
+                pattern_engine.run(df, stat_ids=["light.living_room"])
             # enrich_with_cost should have been called
             assert mock_enrich.called
 

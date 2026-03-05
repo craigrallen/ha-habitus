@@ -379,9 +379,11 @@ def run_room_prediction(entity_to_area: dict[str, str], days: int = DEFAULT_DAYS
         "prediction_count": len(automations),
     }
 
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(PREDICTIONS_PATH, "w") as f:
-        json.dump(result, f, indent=2, default=str)
+    try:
+        from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+        _atomic_write(PREDICTIONS_PATH, result)
+    except Exception as e:
+        log.warning("room_predictor: could not save predictions: %s", e)
 
     if automations:
         log.info("Room predictor: %d predictions across %d rooms from %d entry events",
