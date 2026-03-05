@@ -297,11 +297,25 @@ def analyse_scenes(
             best_match.get("confidence", 40) if best_match else 40,
         )
 
+        # Enrich with room context
+        try:
+            from . import room_clustering
+            rooms = room_clustering.get_rooms_for_entities(list(scene_entities))
+        except Exception:
+            rooms = []
+        room_label = (
+            rooms[0] if len(rooms) == 1
+            else " and ".join(rooms[:2]) if len(rooms) == 2
+            else ", ".join(rooms[:2]) + " and more" if rooms
+            else ""
+        )
+
         why = []
         if missing_list:
+            room_ctx = f" in {room_label}" if room_label else ""
             why.append(
                 f"{len(missing_list)} entity/entities frequently activated "
-                f"with this scene but not included"
+                f"with this scene{room_ctx} but not included"
             )
         if suggested_triggers:
             why.append(
@@ -314,6 +328,8 @@ def analyse_scenes(
             "scene_id": scene_id,
             "scene_name": scene_name,
             "scene_entities": sorted(scene_entities),
+            "rooms": rooms,
+            "room_label": room_label,
             "missing_entities": missing_list,
             "suggested_triggers": suggested_triggers,
             "improvement_score": score,
