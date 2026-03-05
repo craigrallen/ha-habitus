@@ -1167,6 +1167,14 @@ def run(
     stat_ids = stat_ids or []
     patterns = discover_patterns(features)
     suggestions = generate_suggestions(patterns, features, stat_ids)
+
+    # Enrich suggestions with cost estimates for energy-consuming entities
+    try:
+        from . import cost_estimator as _ce
+        suggestions = _ce.enrich_with_cost(suggestions)
+    except Exception as e:
+        log.warning("Cost enrichment for suggestions failed: %s", e)
+
     with open(PATTERNS_PATH, "w") as f:
         json.dump(patterns, f, indent=2, default=str)
     with open(SUGGESTIONS_PATH, "w") as f:

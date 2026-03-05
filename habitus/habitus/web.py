@@ -47,6 +47,7 @@ _ACTIVE_PROGRESS_PHASES = {
     "training",
     "seasonal_training",
     "pattern_analysis",
+    "post_analysis",
     "scoring",
 }
 
@@ -1409,6 +1410,9 @@ function renderSuggestions() {
     const whyHtml = s.why_suggested ? `<div style="font-size:.78rem;color:var(--text2);margin:6px 0">🧠 Why now: ${s.why_suggested}</div>` : '';
     const confidenceWhyHtml = s.confidence_rationale ? `<div style="font-size:.74rem;color:var(--text3)">${s.confidence_rationale}</div>` : '';
     const benefitHtml = s.expected_benefit ? `<div style="font-size:.74rem;color:var(--green)">Expected benefit: ${s.expected_benefit}</div>` : '';
+    const costBadge = (s.cost_estimate && s.cost_estimate.monthly_saving_eur > 0)
+      ? `<span class="badge b-ok" style="background:var(--green);color:#fff;font-size:.72rem">Saves ~€${s.cost_estimate.monthly_saving_eur.toFixed(1)}/month</span>`
+      : '';
     const badgeStyleByName = {
       'high-confidence':'b-ok',
       'solid-confidence':'b-info',
@@ -1439,6 +1443,7 @@ function renderSuggestions() {
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
           <span class="badge ${bc}">${ic} ${s.category}</span>
           ${existsBadge}
+          ${costBadge}
         </div>
       </div>
       <div class="sug-meta">
@@ -2425,8 +2430,11 @@ async function load() {
       missing.forEach((g,i)=>{
         const yid = 'gap-yaml-'+i;
         const bid = 'gap-add-'+i;
+        const costBadge = (g.cost_estimate && g.cost_estimate.monthly_saving_eur > 0)
+          ? `<span class="badge b-ok" style="background:var(--green);color:#fff;font-size:.72rem">Saves ~€${g.cost_estimate.monthly_saving_eur.toFixed(1)}/month</span>`
+          : '';
         html += `<div class="sug" style="margin-bottom:10px">
-          <div class="sug-head"><h3>${g.suggestion}</h3><span class="badge b-alert">missing</span></div>
+          <div class="sug-head"><h3>${g.suggestion}</h3><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="badge b-alert">missing</span>${costBadge}</div></div>
           ${g.ha_automation_yaml ? `<pre id="${yid}" style="font-size:.72rem">${g.ha_automation_yaml}</pre>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               <button class="btn btn-accent" onclick="navigator.clipboard.writeText(document.getElementById('${yid}').textContent).then(()=>toast('Copied ✓'))">📋 Copy YAML</button>

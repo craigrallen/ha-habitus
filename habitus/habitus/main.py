@@ -25,6 +25,15 @@ from . import (activity_hmm, appliance_fingerprint, automation_builder, conflict
                 markov_chain, nilm_disaggregator, room_predictor, routine_predictor,
                 scene_detector, sequence_miner)
 from . import patterns as pattern_engine
+from . import (
+    routine_builder as _routine_builder,
+    battery_watchdog as _battery_watchdog,
+    integration_health as _integration_health,
+    changelog as _changelog,
+    automation_health as _automation_health,
+    guest_mode as _guest_mode,
+    seasonal_adapter as _seasonal_adapter,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("habitus")
@@ -1508,6 +1517,50 @@ def publish_dashboard_entities(
         pass
 
 
+# ── Post-train analysis pipeline ──────────────────────────────────────────────
+
+def _run_post_analysis(state: dict, stat_ids: list[str]) -> None:
+    """Run all secondary feature modules after the main training pipeline completes.
+
+    Each module is wrapped in try/except so a failure in one never aborts the
+    overall training pipeline.  Timing follows the existing Perf log pattern.
+    """
+    import time as _t
+
+    set_progress("post_analysis", 0, 8, 0, 0, 0)
+
+    _steps = [
+        ("routine_builder",     lambda: _routine_builder.run()),
+        ("battery_watchdog",    lambda: _battery_watchdog.save_battery_status(_battery_watchdog.run_battery_check())),
+        ("integration_health",  lambda: _integration_health.save_integration_health(_integration_health.run_integration_health_check())),
+        ("changelog",           lambda: _changelog.run_diff_and_log()),
+        ("conflict_detector",   lambda: conflict_detector.save_conflicts(conflict_detector.detect_conflicts())),
+        ("automation_health",   lambda: _automation_health.save_health(_automation_health.run_health_check())),
+        ("guest_mode",          lambda: _guest_mode.run()),
+        ("seasonal_adapter",    lambda: _seasonal_adapter.run()),
+    ]
+
+    for i, (name, fn) in enumerate(_steps, 1):
+        t0 = _t.time()
+        try:
+            fn()
+            elapsed = _t.time() - t0
+            log.info("Perf[post_analysis/%s]: %.0fms", name, elapsed * 1000)
+        except Exception as exc:
+            log.warning("post_analysis/%s failed (non-fatal): %s", name, exc)
+        set_progress("post_analysis", i, len(_steps), 0, 0, 0)
+
+    mark_last_completed_progress(
+        state,
+        "post_analysis",
+        done=len(_steps),
+        total=len(_steps),
+        pct=100,
+    )
+    save_state(state)
+    log.info("Post-analysis pipeline complete")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 async def run(days_history: int, mode: str = "full") -> None:
     """Main Habitus run loop — fetch, train (if needed), score, publish.
@@ -2260,6 +2313,9 @@ async def run(days_history: int, mode: str = "full") -> None:
         # if not df.empty and "hour" in df.columns:
         #     actual_start = df["hour"].min().strftime("%Y-%m-%dT%H:%M:%S+00:00")
         #     state["data_from"] = actual_start
+
+    # ── Post-analysis pipeline — runs secondary feature modules ──────────────
+    _run_post_analysis(state, stat_ids)
 
     # Per-entity and activity scoring
     entity_anomalies = anomaly_breakdown.score_entities()

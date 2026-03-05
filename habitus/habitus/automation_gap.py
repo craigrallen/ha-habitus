@@ -714,6 +714,25 @@ async def analyse(ha_url, ha_token, suggestions, auto_scores=None):
 
     summary = ", ".join(summary_parts) if summary_parts else "No actionable suggestions found"
 
+    # Enrich gaps with cost estimates for energy-consuming entities
+    try:
+        from . import cost_estimator as _ce
+        gaps = _ce.enrich_with_cost(gaps, entity_field="entities", default_hours=1.0)
+        # Also try primary entity from entities list
+        for gap in gaps:
+            if "cost_estimate" not in gap:
+                ents = gap.get("entities", [])
+                if ents:
+                    enriched = _ce.enrich_with_cost(
+                        [{"entity_id": ents[0]}],
+                        entity_field="entity_id",
+                        default_hours=1.0,
+                    )
+                    if enriched and "cost_estimate" in enriched[0]:
+                        gap["cost_estimate"] = enriched[0]["cost_estimate"]
+    except Exception as e:
+        log.warning("Cost enrichment for gaps failed: %s", e)
+
     return {
         "analysed_at": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S"),
         "gaps": gaps,
