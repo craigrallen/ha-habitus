@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 
 import yaml as _yaml  # type: ignore[import-untyped]
 from flask import Flask, jsonify, render_template_string, request
@@ -61,6 +62,89 @@ def _float_or_default(value, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return default
+
+
+def _normalize_automation_id(text: str) -> str:
+    value = (text or "").strip().lower()
+    value = value.replace("automation.", "", 1)
+    value = re.sub(r"[^a-z0-9_]+", "_", value)
+    value = re.sub(r"_+", "_", value)
+    return value.strip("_")
+
+
+def _extract_automation_from_yaml(yaml_str: str) -> tuple[dict | None, str | None]:
+    try:
+        parsed = _yaml.safe_load(yaml_str)
+    except Exception as e:
+        return None, f"invalid YAML: {e}"
+
+    if parsed is None:
+        return None, "empty YAML"
+
+    if isinstance(parsed, list) and parsed:
+        parsed = parsed[0]
+
+    if not isinstance(parsed, dict):
+        return None, "YAML must decode to a mapping"
+
+    auto = parsed.get("automation", parsed)
+    if isinstance(auto, list):
+        auto = auto[0] if auto else {}
+    if not isinstance(auto, dict):
+        return None, "automation payload must be an object"
+
+    alias = (auto.get("alias") or "").strip()
+    if not alias:
+        return None, "automation alias is required"
+
+    trigger = auto.get("trigger")
+    action = auto.get("action")
+    if trigger is None or action is None:
+        return None, "automation must include trigger and action"
+
+    if isinstance(trigger, dict):
+        auto["trigger"] = [trigger]
+    elif not isinstance(trigger, list):
+        return None, "trigger must be a list or object"
+
+    if isinstance(action, dict):
+        auto["action"] = [action]
+    elif not isinstance(action, list):
+        return None, "action must be a list or object"
+
+    auto.setdefault("mode", "single")
+    return auto, None
+
+
+def _existing_automation_ids(ha_url: str, token: str) -> set[str]:
+    import requests as req
+
+    ids: set[str] = set()
+    try:
+        r = req.get(
+            f"{ha_url}/api/states",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            timeout=10,
+        )
+        if r.status_code != 200:
+            return ids
+        for entry in r.json():
+            eid = entry.get("entity_id", "")
+            if isinstance(eid, str) and eid.startswith("automation."):
+                ids.add(_normalize_automation_id(eid))
+    except Exception:
+        return ids
+    return ids
+
+
+def _unique_alias_id(alias: str, existing: set[str]) -> str:
+    base = _normalize_automation_id(alias) or "habitus_automation"
+    candidate = base
+    idx = 2
+    while candidate in existing:
+        candidate = f"{base}_{idx}"
+        idx += 1
+    return candidate
 
 
 def _normalize_progress_payload(progress: dict | None, state: dict | None) -> dict:
@@ -2673,31 +2757,41 @@ def api_settings():
 def api_add_automation():
     import requests as req
 
-    data = request.get_json()
-    yaml_str = data.get("yaml", "")
+    data = request.get_json() or {}
+    yaml_str = (data.get("yaml", "") or "").strip()
+    if not yaml_str:
+        return jsonify({"ok": False, "error": "missing yaml payload"}), 400
+
+    auto, err = _extract_automation_from_yaml(yaml_str)
+    if err or not auto:
+        return jsonify({"ok": False, "error": err or "invalid automation YAML"}), 400
+
     ha_url = os.environ.get("HA_URL", "http://supervisor/core")
     token = os.environ.get("SUPERVISOR_TOKEN", "")
+    existing = _existing_automation_ids(ha_url, token)
+    alias_id = _unique_alias_id(str(auto.get("alias", "habitus_automation")), existing)
+
     try:
-        parsed = _yaml.safe_load(yaml_str)
-        auto = parsed.get("automation", parsed)
-        alias = (
-            auto.get("alias", "habitus_auto")
-            .lower()
-            .replace(" ", "_")
-            .replace("—", "")
-            .replace("–", "")
-        )
         r = req.post(
-            f"{ha_url}/api/config/automation/config/{alias}",
+            f"{ha_url}/api/config/automation/config/{alias_id}",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             json=auto,
             timeout=10,
         )
         if r.status_code in (200, 201, 204):
-            return jsonify({"ok": True})
-        return jsonify({"ok": False, "error": f"HA {r.status_code}"}), 400
+            return jsonify({"ok": True, "automation_id": alias_id, "alias": auto.get("alias", "")})
+
+        detail = ""
+        try:
+            detail = (r.text or "")[:240]
+        except Exception:
+            detail = ""
+        msg = f"HA {r.status_code}"
+        if detail:
+            msg += f": {detail}"
+        return jsonify({"ok": False, "error": msg, "automation_id": alias_id}), 400
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "error": f"failed to add automation: {e}"}), 500
 
 
 @app.route("/api/remove_automation", methods=["POST"])
@@ -2707,17 +2801,9 @@ def api_remove_automation():
 
     data = request.get_json() or {}
     entity_id = (data.get("entity_id") or "").strip()
-    alias = (data.get("alias") or "").strip().lower()
+    alias = (data.get("alias") or "").strip()
 
-    if entity_id.startswith("automation."):
-        automation_id = entity_id.split(".", 1)[1]
-    else:
-        automation_id = (
-            alias.replace(" ", "_").replace("—", "").replace("–", "")
-            if alias
-            else ""
-        )
-
+    automation_id = _normalize_automation_id(entity_id or alias)
     if not automation_id:
         return jsonify({"ok": False, "error": "missing entity_id/alias"}), 400
 
@@ -2731,10 +2817,20 @@ def api_remove_automation():
             timeout=10,
         )
         if r.status_code in (200, 201, 204):
-            return jsonify({"ok": True})
-        return jsonify({"ok": False, "error": f"HA {r.status_code}"}), 400
+            return jsonify({"ok": True, "automation_id": automation_id})
+        if r.status_code == 404:
+            return jsonify({"ok": False, "error": f"automation not found: {automation_id}"}), 404
+        detail = ""
+        try:
+            detail = (r.text or "")[:240]
+        except Exception:
+            detail = ""
+        msg = f"HA {r.status_code}"
+        if detail:
+            msg += f": {detail}"
+        return jsonify({"ok": False, "error": msg}), 400
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "error": f"failed to remove automation: {e}"}), 500
 
 
 @app.route("/api/phantom")
