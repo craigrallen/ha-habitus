@@ -270,6 +270,51 @@ class TestNewSuggestions:
                 assert parsed is not None, f"YAML parse failed for {s['id']}"
 
 
+class TestHomeProfilePrioritization:
+    def test_home_profile_ranks_home_suggestions_above_boat(self, sample_features):
+        patterns = discover_patterns(sample_features)
+        stat_ids = [
+            "sensor.total_home_power_w",
+            "binary_sensor.hallway_motion",
+            "light.living_room_ceiling",
+            "person.craig",
+            "climate.living_room_thermostat",
+        ]
+        suggestions = generate_suggestions(patterns, sample_features, stat_ids)
+        assert suggestions
+
+        top_ids = [s["id"] for s in suggestions[:10]]
+        assert "occupancy_lights" in top_ids
+        assert "climate_preheat" in top_ids
+
+        away_idx = next(i for i, s in enumerate(suggestions) if s["id"] == "away_mode")
+        boat_idx = [i for i, s in enumerate(suggestions) if s.get("category") == "boat"]
+        if boat_idx:
+            assert away_idx < min(boat_idx)
+
+        boat = [s for s in suggestions if s.get("category") == "boat"]
+        assert all(s.get("applicable") is False for s in boat)
+
+    def test_home_core_routines_present_when_entities_available(self, sample_features):
+        patterns = discover_patterns(sample_features)
+        stat_ids = [
+            "sensor.total_home_power_w",
+            "binary_sensor.hallway_motion",
+            "light.living_room_ceiling",
+            "person.craig",
+            "climate.living_room_thermostat",
+        ]
+        suggestions = generate_suggestions(patterns, sample_features, stat_ids)
+        ids = {s["id"] for s in suggestions}
+        assert "occupancy_lights" in ids
+        assert "away_mode" in ids
+        assert "overnight_standby" in ids
+        assert "climate_preheat" in ids
+        assert "peak_tariff_alert" in ids
+        assert "sensor_watchdog" in ids
+        assert "anomaly_alert" in ids
+
+
 class TestRunFunction:
     def test_run_writes_patterns_and_suggestions(self, sample_features, tmp_data_dir):
         import habitus.habitus.patterns as pat

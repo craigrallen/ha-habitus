@@ -23,6 +23,80 @@ def _has(stat_ids: list[str], *keywords: str) -> bool:
     return any(k in joined for k in keywords)
 
 
+def _pick_entity(
+    stat_ids: list[str],
+    domains: list[str] | tuple[str, ...],
+    include_keywords: list[str] | tuple[str, ...] = (),
+    exclude_keywords: list[str] | tuple[str, ...] = (),
+) -> str | None:
+    """Pick a best-effort entity from stat_ids by domain + keyword preference."""
+    include = [k.lower() for k in include_keywords]
+    exclude = [k.lower() for k in exclude_keywords]
+    candidates: list[tuple[int, str]] = []
+    for eid in stat_ids:
+        if "." not in eid:
+            continue
+        domain, _obj = eid.split(".", 1)
+        if domain not in domains:
+            continue
+        lower = eid.lower()
+        if exclude and any(k in lower for k in exclude):
+            continue
+        score = 0
+        if include:
+            score += sum(4 for k in include if k in lower)
+        if "living_room" in lower or "hallway" in lower:
+            score += 2
+        if "main" in lower or "total" in lower:
+            score += 2
+        candidates.append((score, eid))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda t: (-t[0], t[1]))
+    return candidates[0][1]
+
+
+def _detect_profile(stat_ids: list[str]) -> dict[str, Any]:
+    """Infer environment profile from detected entities/domains."""
+    joined = " ".join(stat_ids).lower()
+    boat_hits = sum(
+        1
+        for kw in (
+            "bilge",
+            "shore",
+            "battery_soc",
+            "house_battery",
+            "inverter",
+            "mastervolt",
+            "mppt",
+            "epever",
+            "marine",
+            "tank",
+        )
+        if kw in joined
+    )
+    home_hits = sum(
+        1
+        for kw in (
+            "light.",
+            "person.",
+            "device_tracker",
+            "binary_sensor",
+            "climate.",
+            "thermostat",
+            "room",
+            "door",
+        )
+        if kw in joined
+    )
+    profile = "boat" if boat_hits >= 2 and boat_hits >= home_hits else "home-default"
+    return {
+        "name": profile,
+        "boat_signal": boat_hits,
+        "home_signal": home_hits,
+    }
+
+
 def _max_consecutive_zeros(series: pd.Series) -> int:
     """Return the maximum number of consecutive zero-valued entries in a series.
 
@@ -184,6 +258,20 @@ def generate_suggestions(
     has_solar = _has(stat_ids, "solar", "pv", "mppt", "epever", "scm")
     has_inverter = _has(stat_ids, "inverter", "mastervolt", "load")
 
+    profile = _detect_profile(stat_ids)
+    is_boat_profile = profile["name"] == "boat"
+
+    motion_entity = _pick_entity(stat_ids, ["binary_sensor"], ["motion", "occupancy", "presence"])
+    light_entity = _pick_entity(stat_ids, ["light"], ["living", "hall", "kitchen", "ceiling"])
+    person_entity = _pick_entity(stat_ids, ["person", "device_tracker"])
+    climate_entity = _pick_entity(stat_ids, ["climate"], ["heat", "thermostat", "hvac"])
+    power_entity = _pick_entity(
+        stat_ids,
+        ["sensor"],
+        ["total_load", "power", "consumption", "watt", "mastervolt", "load"],
+        ["temperature", "humidity", "battery_soc"],
+    ) or "sensor.mastervolt_total_load"
+
     # ── ROUTINE ───────────────────────────────────────────────────────────────
     if wakeup:
         suggestions.append(
@@ -255,6 +343,91 @@ def generate_suggestions(
         }
     )
 
+    if motion_entity and light_entity:
+        suggestions.append(
+            {
+                "id": "occupancy_lights",
+                "title": "Occupancy Lights",
+                "description": "Motion/presence activity suggests an occupancy-based lighting routine for key rooms.",
+                "confidence": 86,
+                "category": "routine",
+                "applicable": True,
+                "entities": [motion_entity, light_entity],
+                "yaml": f"""automation:
+  alias: "Habitus — Occupancy lights"
+  trigger:
+    - platform: state
+      entity_id: {motion_entity}
+      to: "on"
+  action:
+    - service: light.turn_on
+      target:
+        entity_id: {light_entity}""",
+            }
+        )
+
+    if person_entity:
+        controllable = [
+            e
+            for e in stat_ids
+            if e.startswith(("light.", "switch.", "media_player.", "climate.", "fan."))
+        ][:8]
+        if controllable:
+            actions = "\n".join(
+                [
+                    "    - service: homeassistant.turn_off\n      target:\n        entity_id: " + eid
+                    for eid in controllable
+                ]
+            )
+            suggestions.append(
+                {
+                    "id": "away_mode",
+                    "title": "Away Mode",
+                    "description": "Presence patterns show clear home/away transitions. Turn off non-essential loads when leaving.",
+                    "confidence": 84,
+                    "category": "routine",
+                    "applicable": True,
+                    "entities": [person_entity] + controllable,
+                    "yaml": f"""automation:
+  alias: "Habitus — Away mode"
+  trigger:
+    - platform: state
+      entity_id: {person_entity}
+      to: "not_home"
+      for:
+        minutes: 10
+  action:
+{actions}""",
+                }
+            )
+
+    if climate_entity and wakeup is not None:
+        suggestions.append(
+            {
+                "id": "climate_preheat",
+                "title": "Climate Preheat",
+                "description": "Detected wake-up pattern and climate controls. Preheat shortly before normal morning activity.",
+                "confidence": 82,
+                "category": "energy",
+                "applicable": True,
+                "entities": [climate_entity],
+                "yaml": f"""automation:
+  alias: "Habitus — Climate preheat"
+  trigger:
+    - platform: time
+      at: "{max(0, wakeup - 1):02d}:30:00"
+  condition:
+    - condition: time
+      weekday: [mon, tue, wed, thu, fri]
+  action:
+    - service: climate.set_temperature
+      target:
+        entity_id: {climate_entity}
+      data:
+        temperature: 21""",
+            }
+        )
+
     # ── ENERGY ────────────────────────────────────────────────────────────────
     suggestions.append(
         {
@@ -268,7 +441,7 @@ def generate_suggestions(
   alias: "Habitus — High power alert"
   trigger:
     - platform: numeric_state
-      entity_id: sensor.mastervolt_total_load
+      entity_id: {power_entity}
       above: {int(peak_w*1.3)}
       for:
         minutes: 10
@@ -276,7 +449,7 @@ def generate_suggestions(
     - service: {NOTIFY}
       data:
         title: "⚡ High Power Usage"
-        message: "Load has exceeded {int(peak_w*1.3)}W for 10+ minutes. Current: {{{{ states('sensor.mastervolt_total_load') }}}}W" """,
+        message: "Load has exceeded {int(peak_w*1.3)}W for 10+ minutes. Current: {{{{ states('{power_entity}') }}}}W" """,
         }
     )
 
@@ -292,7 +465,7 @@ def generate_suggestions(
   alias: "Habitus — Overnight power anomaly"
   trigger:
     - platform: numeric_state
-      entity_id: sensor.mastervolt_total_load
+      entity_id: {power_entity}
       above: {int(night_w*1.4)}
   condition:
     - condition: time
@@ -302,7 +475,7 @@ def generate_suggestions(
     - service: {NOTIFY}
       data:
         title: "🌙 Unusual Overnight Power"
-        message: "Power is {{{{ states('sensor.mastervolt_total_load') }}}}W at night — something may be left on." """,
+        message: "Power is {{{{ states('{power_entity}') }}}}W at night — something may be left on." """,
         }
     )
 
@@ -441,20 +614,22 @@ def generate_suggestions(
             }
         )
 
-    suggestions.append(
-        {
-            "id": "harbor_mode",
-            "title": "Harbor Mode (Away Profile)",
-            "description": "Automatically reduce non-essential loads when no presence is detected for extended periods — keeps standby power minimal while away.",
-            "confidence": 72,
-            "category": "boat",
-            "applicable": True,
-            "yaml": """automation:
+    if is_boat_profile and person_entity:
+        suggestions.append(
+            {
+                "id": "harbor_mode",
+                "title": "Harbor Mode (Away Profile)",
+                "description": "Automatically reduce non-essential loads when no presence is detected for extended periods — keeps standby power minimal while away.",
+                "confidence": 72,
+                "category": "boat",
+                "applicable": True,
+                "entities": [person_entity],
+                "yaml": f"""automation:
   alias: "Habitus — Harbor mode"
   description: "Activates low-power profile when away for >2h"
   trigger:
     - platform: state
-      entity_id: person.craig  # replace with your person entity
+      entity_id: {person_entity}
       to: "not_home"
       for:
         hours: 2
@@ -462,8 +637,8 @@ def generate_suggestions(
     - service: scene.turn_on
       target:
         entity_id: scene.harbor_mode  # create this scene""",
-        }
-    )
+            }
+        )
 
     # ── ANOMALY ───────────────────────────────────────────────────────────────
     suggestions.append(
@@ -595,7 +770,7 @@ def generate_suggestions(
   alias: "Habitus — Peak tariff alert"
   trigger:
     - platform: numeric_state
-      entity_id: sensor.mastervolt_total_load  # adjust entity
+      entity_id: {power_entity}
       above: 800
   condition:
     - condition: time
@@ -607,7 +782,7 @@ def generate_suggestions(
       data:
         title: "\u26a1 Peak Tariff \u2014 High Usage"
         message: >
-          Power is {{{{ states('sensor.mastervolt_total_load') }}}}W during peak tariff hours
+          Power is {{{{ states('{power_entity}') }}}}W during peak tariff hours
           (07:00\u201308:30). Consider delaying high-load appliances.""",
         }
     )
@@ -750,8 +925,24 @@ cards:
     )
 
     for s in suggestions:
+        category = s.get("category", "")
+        base_conf = int(s.get("confidence", 0))
+        profile_boost = 0
+        if profile["name"] == "home-default":
+            if category in ("routine", "energy", "anomaly"):
+                profile_boost += 10
+            if category == "boat":
+                profile_boost -= 35
+                s["applicable"] = False
+        elif profile["name"] == "boat" and category == "boat":
+            profile_boost += 12
+
+        s["profile"] = profile["name"]
+        s["profile_boost"] = profile_boost
+        s["rank_score"] = max(0, min(100, base_conf + profile_boost))
         s["generated_at"] = datetime.datetime.now(datetime.UTC).isoformat()
 
+    suggestions.sort(key=lambda x: x.get("rank_score", x.get("confidence", 0)), reverse=True)
     return suggestions
 
 

@@ -117,6 +117,29 @@ def _extract_entities_from_text(text, known_entity_ids):
     return matches
 
 
+def _pick_known_entity(known_entity_ids, domains=None, keywords=None):
+    """Pick best entity from known IDs to avoid generic placeholders."""
+    domains = domains or []
+    keywords = [k.lower() for k in (keywords or [])]
+    candidates = []
+    for eid in known_entity_ids:
+        if "." not in eid:
+            continue
+        domain, _obj = eid.split(".", 1)
+        if domains and domain not in domains:
+            continue
+        lower = eid.lower()
+        score = 0
+        score += sum(4 for kw in keywords if kw in lower)
+        if "living" in lower or "hall" in lower or "main" in lower:
+            score += 1
+        candidates.append((score, eid.lower()))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda t: (-t[0], t[1]))
+    return candidates[0][1]
+
+
 def _parse_suggestion(suggestion, known_entity_ids):
     """Parse a suggestion into a structured intent dict.
 
@@ -124,8 +147,8 @@ def _parse_suggestion(suggestion, known_entity_ids):
     so gap analysis can reuse concrete automations instead of generic templates.
     """
     if isinstance(suggestion, dict):
-        raw = suggestion.get("description", "") or suggestion.get("title", "")
-        title = suggestion.get("title", "")
+        title = (suggestion.get("title", "") or "").strip()
+        raw = (suggestion.get("description", "") or title).strip()
         sug_id = suggestion.get("id", "")
         sug_yaml = (suggestion.get("yaml", "") or "").strip()
         explicit_entities = [
@@ -134,21 +157,39 @@ def _parse_suggestion(suggestion, known_entity_ids):
             if isinstance(e, str) and "." in e
         ]
     else:
-        raw = str(suggestion)
+        raw = str(suggestion).strip()
         title = ""
         sug_id = ""
         sug_yaml = ""
         explicit_entities = []
 
     intent_pat = _match_intent((title + "\n" + raw).strip())
-    entities = _extract_entities_from_text(raw, known_entity_ids)
+    entities = _extract_entities_from_text((title + " " + raw).strip(), known_entity_ids)
 
     # Prefer explicit entities from structured suggestions when available.
     if explicit_entities:
         entities = explicit_entities
 
-    if intent_pat and intent_pat["entity_domains"]:
+    if intent_pat and intent_pat["entity_domains"] and not explicit_entities:
         entities = [e for e in entities if e.split(".")[0] in intent_pat["entity_domains"]]
+
+    if not entities and intent_pat and intent_pat.get("entity_domains"):
+        inferred = _pick_known_entity(
+            known_entity_ids,
+            domains=intent_pat["entity_domains"],
+            keywords=[intent_pat["intent"], title, raw],
+        )
+        if inferred:
+            entities = [inferred]
+
+    if not entities:
+        fallback = _pick_known_entity(
+            known_entity_ids,
+            domains=["light", "switch", "climate", "media_player", "fan", "lock", "input_boolean"],
+            keywords=[title, raw],
+        )
+        if fallback:
+            entities = [fallback]
 
     # Deduplicate while preserving order.
     entities = list(dict.fromkeys(entities))
@@ -156,6 +197,7 @@ def _parse_suggestion(suggestion, known_entity_ids):
     return {
         "id": sug_id,
         "title": title,
+        "display": title or raw,
         "raw": raw,
         "yaml": sug_yaml,
         "intent": intent_pat["intent"] if intent_pat else "unknown",
@@ -295,10 +337,10 @@ def _generate_yaml(parsed_sug):
     entities = parsed_sug["entities"]
     raw = parsed_sug["raw"]
 
-    light_entity = entities[0] if entities else "light.your_light"
-    switch_entity = entities[0] if entities else "switch.your_switch"
-    climate_entity = entities[0] if entities else "climate.your_thermostat"
-    lock_entity = entities[0] if entities else "lock.your_lock"
+    light_entity = next((e for e in entities if e.startswith("light.")), None) or "light.your_light"
+    switch_entity = next((e for e in entities if e.startswith("switch.")), None) or "switch.your_switch"
+    climate_entity = next((e for e in entities if e.startswith("climate.")), None) or "climate.your_thermostat"
+    lock_entity = next((e for e in entities if e.startswith("lock.")), None) or "lock.your_lock"
 
     alias = raw[:60].strip().rstrip(".")
 
@@ -322,6 +364,12 @@ def _generate_yaml(parsed_sug):
         )
 
     elif intent == "reduce_standby":
+        standby_target = (
+            next((e for e in entities if e.startswith("switch.")), None)
+            or next((e for e in entities if e.startswith("media_player.")), None)
+            or switch_entity
+        )
+        service = "media_player.turn_off" if standby_target.startswith("media_player.") else "switch.turn_off"
         return (
             f'alias: "{alias}"\n'
             "trigger:\n"
@@ -329,9 +377,9 @@ def _generate_yaml(parsed_sug):
             '    at: "23:00:00"\n'
             "condition: []\n"
             "action:\n"
-            "  - service: switch.turn_off\n"
+            f"  - service: {service}\n"
             "    target:\n"
-            f"      entity_id: {switch_entity}\n"
+            f"      entity_id: {standby_target}\n"
             "mode: single"
         )
 
@@ -411,6 +459,15 @@ def _generate_yaml(parsed_sug):
 
     else:
         target = entities[0] if entities else "switch.your_device"
+        service = "homeassistant.toggle"
+        if target.startswith("light."):
+            service = "light.toggle"
+        elif target.startswith("switch."):
+            service = "switch.toggle"
+        elif target.startswith("media_player."):
+            service = "media_player.turn_off"
+        elif target.startswith("climate."):
+            service = "climate.turn_off"
         return (
             f'alias: "{alias}"\n'
             "trigger:\n"
@@ -418,7 +475,7 @@ def _generate_yaml(parsed_sug):
             f"    entity_id: {target}\n"
             "condition: []\n"
             "action:\n"
-            "  - service: homeassistant.toggle\n"
+            f"  - service: {service}\n"
             "    target:\n"
             f"      entity_id: {target}\n"
             "mode: single"
@@ -489,7 +546,8 @@ async def analyse(ha_url, ha_token, suggestions, auto_scores=None):
         best_auto, match_score = _match_automation(parsed, automations)
 
         gap = {
-            "suggestion": parsed["raw"],
+            "suggestion": parsed.get("display") or parsed["raw"],
+            "title": parsed.get("title", ""),
             "intent": parsed["intent"],
             "entities": parsed["entities"],
         }
