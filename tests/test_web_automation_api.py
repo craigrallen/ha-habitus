@@ -87,3 +87,9 @@ def test_remove_automation_normalizes_entity_id(monkeypatch) -> None:
     assert payload["ok"] is True
     assert payload["automation_id"] == "habitus_evening_mode"
     assert called["url"].endswith("/api/config/automation/config/habitus_evening_mode")
+
+
+def test_suggestion_ui_renders_why_and_badges() -> None:
+    assert "Why now:" in web.PAGE
+    assert "confidence_rationale" in web.PAGE
+    assert "status_badges" in web.PAGE

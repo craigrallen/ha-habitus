@@ -1295,6 +1295,22 @@ function renderSuggestions() {
     const overlapHtml = s.overlap_automation ? `<div style="font-size:.75rem;color:var(--amber);margin:4px 0">⚠ Possible overlap with: ${s.overlap_automation}</div>` : '';
     const entitiesHtml = (s.entities && s.entities.length) ? `<div style="margin:6px 0;display:flex;flex-wrap:wrap;gap:3px">${s.entities.map(e=>`<span class="badge b-info" style="font-size:.68rem;margin:1px">${e}</span>`).join('')}</div>` : '';
     const timeHtml = s.time_pattern ? `<div style="font-size:.72rem;color:var(--text3)">⏰ ${(s.time_pattern.peak_hour||'').toString().padStart(2,'0')}:00 · ${s.time_pattern.days||'daily'}</div>` : '';
+    const whyHtml = s.why_suggested ? `<div style="font-size:.78rem;color:var(--text2);margin:6px 0">🧠 Why now: ${s.why_suggested}</div>` : '';
+    const confidenceWhyHtml = s.confidence_rationale ? `<div style="font-size:.74rem;color:var(--text3)">${s.confidence_rationale}</div>` : '';
+    const benefitHtml = s.expected_benefit ? `<div style="font-size:.74rem;color:var(--green)">Expected benefit: ${s.expected_benefit}</div>` : '';
+    const badgeStyleByName = {
+      'high-confidence':'b-ok',
+      'solid-confidence':'b-info',
+      'exploratory':'b-warn',
+      'high-relevance':'b-purple',
+      'relevant':'b-info',
+      'low-relevance':'b-muted',
+      'high-usefulness':'b-ok',
+      'needs-entities':'b-alert',
+    };
+    const statusBadgesHtml = Array.isArray(s.status_badges) && s.status_badges.length
+      ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px">${s.status_badges.map(b=>`<span class="badge ${badgeStyleByName[b]||'b-muted'}">${b.replace(/-/g,' ')}</span>`).join('')}</div>`
+      : '';
 
     const alias = extractAliasFromYaml(s.yaml || '') || s.title || '';
     const key = normalizeAutomationId(alias);
@@ -1319,6 +1335,10 @@ function renderSuggestions() {
         ${s.applicable===false?'<span class="badge b-alert">⚠ Entity not in your system</span>':''}
       </div>
       <div class="desc">${s.description}</div>
+      ${whyHtml}
+      ${confidenceWhyHtml}
+      ${benefitHtml}
+      ${statusBadgesHtml}
       ${entitiesHtml}
       ${timeHtml}
       ${overlapHtml}
