@@ -268,9 +268,8 @@ def run_dynamic_analysis(entity_to_area: dict[str, str], days: int = 30) -> dict
         "calendar_events_found": len(calendar_events),
     }
 
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(DYNAMIC_PATH, "w") as f:
-        json.dump(result, f, indent=2, default=str)
+    from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+    _atomic_write(DYNAMIC_PATH, result)
 
     log.info("dynamic: %d timing drifts detected, %d calendar insights", len(drifts), len(calendar_insights))
     return result

@@ -197,9 +197,8 @@ def _add_seconds(iso_str: str, seconds: int) -> str:
 
 def save(results: list) -> None:
     """Save automation scores to disk."""
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(SCORES_PATH, "w") as f:
-        json.dump(results, f, indent=2, default=str)
+    from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+    _atomic_write(SCORES_PATH, results)
     log.info("Automation scores saved: %d automations scored", len(results))
 
 
