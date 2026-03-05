@@ -7,6 +7,8 @@ import logging
 import os
 import re
 
+import yaml
+
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 GAP_PATH = os.path.join(DATA_DIR, "automation_gap.json")
@@ -194,6 +196,8 @@ def _parse_suggestion(suggestion, known_entity_ids):
     # Deduplicate while preserving order.
     entities = list(dict.fromkeys(entities))
 
+    semantics = _extract_yaml_semantics(sug_yaml)
+
     return {
         "id": sug_id,
         "title": title,
@@ -204,6 +208,7 @@ def _parse_suggestion(suggestion, known_entity_ids):
         "trigger_type": intent_pat["trigger_type"] if intent_pat else None,
         "action_type": intent_pat["action_type"] if intent_pat else None,
         "entities": entities,
+        "semantics": semantics,
     }
 
 
@@ -294,6 +299,14 @@ def _extract_entity_refs(obj, refs=None):
     return refs
 
 
+def _normalize_id(text: str) -> str:
+    norm = (text or "").strip().lower()
+    norm = norm.replace("automation.", "", 1)
+    norm = re.sub(r"[^a-z0-9_]+", "_", norm)
+    norm = re.sub(r"_+", "_", norm)
+    return norm.strip("_")
+
+
 def _keyword_overlap(auto_alias, intent):
     """Score keyword overlap between automation alias and intent name (0-40)."""
     alias_words = set(re.split(r"[\W_]+", auto_alias.lower()))
@@ -302,30 +315,123 @@ def _keyword_overlap(auto_alias, intent):
     return min(40, len(common) * 15)
 
 
+def _extract_yaml_semantics(sug_yaml: str) -> dict[str, set[str]]:
+    if not sug_yaml:
+        return {"trigger_entities": set(), "action_entities": set(), "services": set(), "platforms": set()}
+
+    try:
+        parsed = yaml.safe_load(sug_yaml)
+    except Exception:
+        return {"trigger_entities": set(), "action_entities": set(), "services": set(), "platforms": set()}
+
+    if isinstance(parsed, list) and parsed:
+        parsed = parsed[0]
+    if not isinstance(parsed, dict):
+        return {"trigger_entities": set(), "action_entities": set(), "services": set(), "platforms": set()}
+
+    auto = parsed.get("automation", parsed)
+    if isinstance(auto, list) and auto:
+        auto = auto[0]
+    if not isinstance(auto, dict):
+        return {"trigger_entities": set(), "action_entities": set(), "services": set(), "platforms": set()}
+
+    trigger = auto.get("trigger", [])
+    action = auto.get("action", [])
+    if isinstance(trigger, dict):
+        trigger = [trigger]
+    if isinstance(action, dict):
+        action = [action]
+
+    trigger_entities = _extract_entity_refs(trigger)
+    action_entities = _extract_entity_refs(action)
+    services = {
+        str(a.get("service", "")).lower()
+        for a in action
+        if isinstance(a, dict) and a.get("service")
+    }
+    platforms = {
+        str(t.get("platform", "")).lower()
+        for t in trigger
+        if isinstance(t, dict) and t.get("platform")
+    }
+    return {
+        "trigger_entities": trigger_entities,
+        "action_entities": action_entities,
+        "services": services,
+        "platforms": platforms,
+    }
+
+
 def _match_automation(parsed_sug, automations):
     """Find the best matching automation. Returns (automation, score 0-100)."""
     best = None
     best_score = 0
     sug_entities = {e.lower() for e in parsed_sug["entities"]}
+    semantics = parsed_sug.get("semantics", {})
+    sug_trigger_entities = set(semantics.get("trigger_entities", set()))
+    sug_action_entities = set(semantics.get("action_entities", set()))
+    sug_services = set(semantics.get("services", set()))
+    sug_platforms = set(semantics.get("platforms", set()))
+    sug_alias_norm = _normalize_id(parsed_sug.get("title") or parsed_sug.get("display") or "")
 
     for auto in automations:
         score = 0
-        auto_entities = _extract_entity_refs(auto["trigger"]) | _extract_entity_refs(auto["action"])
+        auto_trigger = auto.get("trigger", [])
+        auto_action = auto.get("action", [])
+        auto_trigger_entities = _extract_entity_refs(auto_trigger)
+        auto_action_entities = _extract_entity_refs(auto_action)
+        auto_entities = auto_trigger_entities | auto_action_entities
+
         if sug_entities and auto_entities:
             overlap = sug_entities & auto_entities
             if overlap:
-                score += min(60, len(overlap) * 30)
+                score += min(55, len(overlap) * 22)
+
+        if sug_trigger_entities and auto_trigger_entities:
+            trigger_overlap = sug_trigger_entities & auto_trigger_entities
+            if trigger_overlap:
+                score += min(20, len(trigger_overlap) * 10)
+
+        if sug_action_entities and auto_action_entities:
+            action_overlap = sug_action_entities & auto_action_entities
+            if action_overlap:
+                score += min(20, len(action_overlap) * 10)
+
+        auto_services = {
+            str(a.get("service", "")).lower()
+            for a in auto_action
+            if isinstance(a, dict) and a.get("service")
+        }
+        if sug_services and auto_services:
+            service_overlap = sug_services & auto_services
+            if service_overlap:
+                score += min(15, len(service_overlap) * 8)
+
+        auto_platforms = {
+            str(t.get("platform", "")).lower()
+            for t in auto_trigger
+            if isinstance(t, dict) and t.get("platform")
+        }
+        if sug_platforms and auto_platforms:
+            platform_overlap = sug_platforms & auto_platforms
+            if platform_overlap:
+                score += min(10, len(platform_overlap) * 5)
 
         alias = auto.get("alias", auto.get("entity_id", ""))
         if parsed_sug["intent"] != "unknown":
             score += _keyword_overlap(alias, parsed_sug["intent"])
 
-        auto_action_text = json.dumps(auto.get("action", [])).lower()
+        auto_alias_norm = _normalize_id(alias)
+        auto_entity_norm = _normalize_id(auto.get("entity_id", ""))
+        if sug_alias_norm and sug_alias_norm in {auto_alias_norm, auto_entity_norm}:
+            score += 30
+
+        auto_action_text = json.dumps(auto_action).lower()
         if parsed_sug["action_type"] and parsed_sug["action_type"] in auto_action_text:
-            score += 20
+            score += 15
 
         if score > best_score:
-            best_score = score
+            best_score = min(score, 100)
             best = auto
 
     return best, best_score
@@ -566,6 +672,9 @@ async def analyse(ha_url, ha_token, suggestions, auto_scores=None):
 
             gap["matched_automation"] = auto_eid
             gap["match_score"] = match_score
+            gap["match_quality"] = (
+                "strong" if match_score >= 70 else "moderate" if match_score >= 45 else "weak"
+            )
 
             if auto_state == "off":
                 gap["status"] = "exists_disabled"

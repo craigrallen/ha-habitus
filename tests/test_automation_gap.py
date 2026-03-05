@@ -60,6 +60,62 @@ async def test_gap_missing_items_include_ha_yaml(monkeypatch):
     assert "switch.living_room_tv_plug" in result["gaps"][0]["ha_automation_yaml"]
 
 
+@pytest.mark.asyncio
+async def test_gap_matches_existing_by_yaml_semantics(monkeypatch):
+    suggestions = [
+        {
+            "id": "occupancy_lights",
+            "title": "Occupancy Lights",
+            "description": "Turn on hallway light when motion is detected",
+            "entities": ["binary_sensor.hallway_motion", "light.hallway_ceiling"],
+            "yaml": (
+                "alias: \"Occupancy Lights\"\n"
+                "trigger:\n"
+                "  - platform: state\n"
+                "    entity_id: binary_sensor.hallway_motion\n"
+                "    to: \"on\"\n"
+                "action:\n"
+                "  - service: light.turn_on\n"
+                "    target:\n"
+                "      entity_id: light.hallway_ceiling\n"
+            ),
+        }
+    ]
+
+    monkeypatch.setattr(
+        automation_gap,
+        "_fetch_automations",
+        lambda *_: [
+            {
+                "entity_id": "automation.evening_hallway",
+                "alias": "Evening Hallway",
+                "trigger": [
+                    {"platform": "state", "entity_id": "binary_sensor.hallway_motion", "to": "on"}
+                ],
+                "action": [
+                    {"service": "light.turn_on", "target": {"entity_id": "light.hallway_ceiling"}}
+                ],
+                "state": "on",
+                "last_triggered": None,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        automation_gap,
+        "_fetch_all_states",
+        lambda *_: [
+            {"entity_id": "binary_sensor.hallway_motion"},
+            {"entity_id": "light.hallway_ceiling"},
+        ],
+    )
+
+    result = await automation_gap.analyse("http://ha.local", "token", suggestions, auto_scores=[])
+    gap = result["gaps"][0]
+    assert gap["status"] == "exists_working"
+    assert gap["matched_automation"] == "automation.evening_hallway"
+    assert gap["match_score"] >= 45
+
+
 def test_gap_cards_keep_add_to_ha_flow():
     assert "function addGapToHA(yamlId, btnId)" in web.PAGE
     assert "onclick=\"addGapToHA('" in web.PAGE
