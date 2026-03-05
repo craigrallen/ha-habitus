@@ -143,9 +143,8 @@ def build_markov_model(entity_to_area: dict[str, str], days: int = 30) -> dict[s
         "predictions": predictions[:30],
     }
 
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(MARKOV_PATH, "w") as f:
-        json.dump(result, f, indent=2, default=str)
+    from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+    _atomic_write(MARKOV_PATH, result)
 
     log.info("markov: %d transition states, %d actionable predictions from %d events",
              len(transitions), len(predictions), len(rows))

@@ -313,9 +313,8 @@ def run_energy_forecast(days_history: int = 90) -> dict[str, Any]:
         },
     }
 
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(FORECAST_PATH, "w") as f:
-        json.dump(result, f, indent=2, default=str)
+    from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+    _atomic_write(FORECAST_PATH, result)
 
     log.info("energy_forecast: %s model, %d-day forecast, weekly=%.1f kWh",
              model_type, len(forecast_days), total_forecast)

@@ -163,9 +163,8 @@ def mine_sequences(entity_to_area: dict[str, str], days: int = 30) -> dict[str, 
         "sequences": results,
     }
 
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(SEQUENCES_PATH, "w") as f:
-        json.dump(result, f, indent=2, default=str)
+    from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+    _atomic_write(SEQUENCES_PATH, result)
 
     log.info("sequence_miner: found %d frequent patterns from %d sessions", len(results), len(sessions))
     return result
