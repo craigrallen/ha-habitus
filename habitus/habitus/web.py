@@ -1354,6 +1354,7 @@ function renderSuggestions() {
         ${s.category!=='lovelace' ? (!existing
           ? `<button class="btn btn-success" id="add-${s.id}" onclick="addToHA('${s.id}')">+ Add to HA</button>`
           : `<button class="btn btn-danger" id="remove-${s.id}" onclick="removeFromHA('${(existing.entity_id || '').replace(/'/g, "\\'")}', '${s.id}')">🗑 Remove from HA</button>`) : ''}
+        <button class="btn" style="color:var(--text3);border-color:var(--border)" onclick="dismissSuggestion('${s.id}')" title="Dismiss — won't suppress permanently, but records feedback">✕ Dismiss</button>
       </div>
       <details><summary style="cursor:pointer;color:var(--accent);font-size:.82rem;margin:6px 0">Show YAML</summary>
         <pre id="yaml-${s.id}">${(s.yaml||'').trim()}</pre>
@@ -1367,6 +1368,24 @@ function copyYaml(id) {
     .then(()=>toast('Copied to clipboard ✓'));
 }
 
+async function recordFeedback(suggestionId, action) {
+  if (!suggestionId) return;
+  try {
+    await fetch('api/feedback', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({suggestion_id: suggestionId, action})
+    });
+  } catch(e) { /* non-fatal */ }
+}
+
+async function dismissSuggestion(suggestionId) {
+  await recordFeedback(suggestionId, 'dismiss');
+  const el = document.getElementById('sug-card-'+suggestionId);
+  if (el) { el.style.opacity = '0.4'; el.style.pointerEvents = 'none'; }
+  toast('Suggestion dismissed');
+}
+
 async function addToHA(id) {
   const btn = document.getElementById('add-'+id);
   const yaml = document.getElementById('yaml-'+id).textContent;
@@ -1377,6 +1396,7 @@ async function addToHA(id) {
     if (d.ok) {
       btn.textContent = '✓ Added';
       toast('Automation added ✓');
+      recordFeedback(id, 'add');
       setTimeout(()=>load(), 500);
     } else {
       btn.disabled=false; btn.textContent='+ Add to HA'; toast('Failed: '+(d.error||'?'),'te');
@@ -1418,6 +1438,7 @@ async function removeFromHA(entityId, suggestionId='') {
     const d = await r.json();
     if (d.ok) {
       toast('Automation removed ✓');
+      if (suggestionId) recordFeedback(suggestionId, 'remove');
       load();
     } else {
       if (btn) { btn.disabled = false; btn.textContent = '🗑 Remove from HA'; }
@@ -2962,8 +2983,21 @@ def api_ha_automations():
 @app.route("/api/smart_suggestions")
 @app.route("/ingress/api/smart_suggestions")
 def api_smart_suggestions():
-    """Return merged smart suggestions with confidence, YAML, and overlap info."""
-    return jsonify(_read(SMART_SUGGESTIONS_PATH) or {"suggestions": [], "count": 0})
+    """Return merged smart suggestions with confidence, YAML, and overlap info.
+
+    Applies feedback adjustments (boost/suppress) before returning.
+    """
+    data = _read(SMART_SUGGESTIONS_PATH) or {"suggestions": [], "count": 0}
+    suggestions = data.get("suggestions", [])
+    if suggestions:
+        try:
+            from . import suggestion_feedback as _sf
+            suggestions = _sf.apply_feedback_to_suggestions(list(suggestions))
+            data["suggestions"] = suggestions
+            data["count"] = len(suggestions)
+        except Exception as e:
+            log.warning("suggestion_feedback apply failed: %s", e)
+    return jsonify(data)
 
 
 @app.route("/api/energy_weather_history")
@@ -2988,6 +3022,26 @@ def api_nilm_run():
         days=data.get("days", 7),
     )
     return jsonify(result)
+
+@app.route("/api/feedback", methods=["POST"])
+@app.route("/ingress/api/feedback", methods=["POST"])
+def api_feedback():
+    """Record user feedback on a suggestion (add / dismiss / remove)."""
+    from . import suggestion_feedback as _sf
+    data = request.get_json() or {}
+    suggestion_id = (data.get("suggestion_id") or "").strip()
+    action = (data.get("action") or "").strip()
+    if not suggestion_id:
+        return jsonify({"ok": False, "error": "suggestion_id is required"}), 400
+    try:
+        entry = _sf.record_feedback(suggestion_id, action)
+        summary = _sf.get_feedback_summary()
+        return jsonify({"ok": True, "entry": entry, "summary": summary})
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"feedback error: {e}"}), 500
+
 
 @app.route("/api/anomaly_feedback", methods=["POST"])
 @app.route("/ingress/api/anomaly_feedback", methods=["POST"])
