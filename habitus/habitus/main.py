@@ -1746,14 +1746,27 @@ async def run(days_history: int, mode: str = "full") -> None:
             raw_days = min(days_history, raw_max_days)
             raw_from = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=raw_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
             raw_to = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-            df_raw = fetch_recent_raw_history(non_stat_ids, raw_from, raw_to)
+            raw_entity_limit = max(1, _env_int("HABITUS_RAW_MAX_ENTITIES", 300))
+            if len(non_stat_ids) > raw_entity_limit:
+                log.warning(
+                    "Skipping raw history: %d non-stat entities exceeds limit %d",
+                    len(non_stat_ids),
+                    raw_entity_limit,
+                )
+                df_raw = pd.DataFrame()
+            else:
+                log.info("Fetching raw history for %d non-stat entities (%dd)", len(non_stat_ids), raw_days)
+                df_raw = fetch_recent_raw_history(non_stat_ids, raw_from, raw_to)
+                log.info("Raw history fetch complete (%d rows)", len(df_raw))
 
             frames = [x for x in (df_stats, df_raw) if x is not None and not x.empty]
             if not frames:
                 log.warning("No data")
                 return
             df = pd.concat(frames, ignore_index=True)
+            log.info("Post-fetch: computing unique entity count...")
             unique_entity_count = int(df["entity_id"].nunique())
+            log.info("Post-fetch: unique entities=%d", unique_entity_count)
             mark_last_completed_progress(
                 state,
                 "fetching",
@@ -1763,7 +1776,9 @@ async def run(days_history: int, mode: str = "full") -> None:
                 pct=100,
                 extra={"unique_entities": unique_entity_count},
             )
+            log.info("Post-fetch: saving run state checkpoint...")
             save_state(state)
+            log.info("Post-fetch: state checkpoint saved")
 
             set_progress("building_baselines", len(stat_ids), len(stat_ids), len(df), 0, 0)
             log.info("Building entity baselines...")
@@ -1990,14 +2005,27 @@ async def run(days_history: int, mode: str = "full") -> None:
         raw_days = min(days_history, raw_max_days)
         raw_from = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=raw_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
         raw_to = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-        df_raw = fetch_recent_raw_history(non_stat_ids, raw_from, raw_to)
+        raw_entity_limit = max(1, _env_int("HABITUS_RAW_MAX_ENTITIES", 300))
+        if len(non_stat_ids) > raw_entity_limit:
+            log.warning(
+                "Skipping raw history: %d non-stat entities exceeds limit %d",
+                len(non_stat_ids),
+                raw_entity_limit,
+            )
+            df_raw = pd.DataFrame()
+        else:
+            log.info("Fetching raw history for %d non-stat entities (%dd)", len(non_stat_ids), raw_days)
+            df_raw = fetch_recent_raw_history(non_stat_ids, raw_from, raw_to)
+            log.info("Raw history fetch complete (%d rows)", len(df_raw))
 
         frames = [x for x in (df_stats, df_raw) if x is not None and not x.empty]
         if not frames:
             log.warning("No data returned")
             return
         df = pd.concat(frames, ignore_index=True)
+        log.info("Post-fetch: computing unique entity count...")
         unique_entity_count = int(df["entity_id"].nunique())
+        log.info("Post-fetch: unique entities=%d", unique_entity_count)
         mark_last_completed_progress(
             state,
             "fetching",
@@ -2007,7 +2035,9 @@ async def run(days_history: int, mode: str = "full") -> None:
             pct=100,
             extra={"unique_entities": unique_entity_count},
         )
+        log.info("Post-fetch: saving run state checkpoint...")
         save_state(state)
+        log.info("Post-fetch: state checkpoint saved")
 
         set_progress("building_baselines", len(stat_ids), len(stat_ids), len(df), 0, 0)
         log.info("Building entity baselines...")
