@@ -97,6 +97,130 @@ def _detect_profile(stat_ids: list[str]) -> dict[str, Any]:
     }
 
 
+def _window_label(hour: int | None) -> str:
+    if hour is None:
+        return "daily"
+    if 5 <= hour <= 10:
+        return "morning"
+    if 11 <= hour <= 15:
+        return "midday"
+    if 16 <= hour <= 21:
+        return "evening"
+    return "night"
+
+
+def _infer_household_rhythm(features: pd.DataFrame) -> dict[str, Any]:
+    """Infer practical household rhythm signals from learned hourly features."""
+    hourly = features.groupby("hour_of_day").agg(
+        motion=("motion_events", "mean"),
+        lights=("lights_on", "mean"),
+        presence=("people_home_pct", "mean"),
+        power=("total_power_w", "mean"),
+    )
+
+    weekday = features[features["is_weekend"] == 0]
+    weekend = features[features["is_weekend"] == 1]
+
+    def _best_window(df: pd.DataFrame, metric: str) -> tuple[int | None, float]:
+        if df.empty:
+            return None, 0.0
+        h = (
+            df.groupby("hour_of_day")[metric]
+            .mean()
+            .sort_values(ascending=False)
+        )
+        if h.empty:
+            return None, 0.0
+        return int(h.index[0]), float(h.iloc[0])
+
+    weekday_peak_h, weekday_peak_motion = _best_window(weekday, "motion_events")
+    weekend_peak_h, weekend_peak_motion = _best_window(weekend, "motion_events")
+
+    homecoming_h = None
+    if "people_home_pct" in features.columns:
+        by_hour = features.groupby("hour_of_day")["people_home_pct"].mean()
+        diff = by_hour.diff().fillna(0)
+        if not diff.empty:
+            homecoming_h = int(diff.idxmax())
+
+    room_hint = "living_room"
+    if features.get("lights_on", pd.Series(dtype=float)).mean() < 0.05:
+        room_hint = "hallway"
+
+    weekday_window = _window_label(weekday_peak_h)
+    weekend_window = _window_label(weekend_peak_h)
+    return {
+        "weekday_peak_hour": weekday_peak_h,
+        "weekday_peak_motion": round(weekday_peak_motion, 3),
+        "weekday_window": weekday_window,
+        "weekend_peak_hour": weekend_peak_h,
+        "weekend_peak_motion": round(weekend_peak_motion, 3),
+        "weekend_window": weekend_window,
+        "homecoming_hour": homecoming_h,
+        "power_baseline_w": round(float(hourly["power"].min()), 1) if not hourly.empty else 0.0,
+        "power_peak_w": round(float(hourly["power"].max()), 1) if not hourly.empty else 0.0,
+        "room_hint": room_hint,
+        "sample_hours": int(len(features)),
+    }
+
+
+def _status_badges(suggestion: dict[str, Any], rhythm: dict[str, Any]) -> list[str]:
+    badges: list[str] = []
+    conf = int(suggestion.get("confidence", 0))
+    rank = int(suggestion.get("rank_score", conf))
+    if conf >= 85:
+        badges.append("high-confidence")
+    elif conf >= 70:
+        badges.append("solid-confidence")
+    else:
+        badges.append("exploratory")
+
+    if rank >= 90:
+        badges.append("high-relevance")
+    elif rank >= 75:
+        badges.append("relevant")
+    else:
+        badges.append("low-relevance")
+
+    if suggestion.get("applicable") is False:
+        badges.append("needs-entities")
+
+    if suggestion.get("category") in ("routine", "energy") and rhythm.get("sample_hours", 0) >= 72:
+        badges.append("high-usefulness")
+    return badges
+
+
+def _enrich_suggestion_copy(suggestion: dict[str, Any], rhythm: dict[str, Any]) -> None:
+    """Attach explanation fields used by UI and gap scoring."""
+    why_now = []
+    weekday_h = rhythm.get("weekday_peak_hour")
+    weekend_h = rhythm.get("weekend_peak_hour")
+    if weekday_h is not None:
+        why_now.append(f"weekday peak activity around {weekday_h:02d}:00")
+    if weekend_h is not None and weekend_h != weekday_h:
+        why_now.append(f"weekend rhythm shifts to {weekend_h:02d}:00")
+    homecoming_h = rhythm.get("homecoming_hour")
+    if homecoming_h is not None and suggestion.get("category") in ("routine", "energy"):
+        why_now.append(f"home occupancy often rises near {homecoming_h:02d}:00")
+
+    if not why_now:
+        why_now.append("consistent usage pattern detected")
+
+    conf = int(suggestion.get("confidence", 0))
+    benefit = "lower manual steps"
+    if suggestion.get("category") == "energy":
+        benefit = "lower energy waste"
+    elif suggestion.get("category") == "anomaly":
+        benefit = "faster detection of unusual behavior"
+
+    suggestion["why_suggested"] = "; ".join(why_now[:3])
+    suggestion["confidence_rationale"] = (
+        f"Confidence {conf}% based on {rhythm.get('sample_hours', 0)} learned hourly samples"
+    )
+    suggestion["expected_benefit"] = benefit
+    suggestion["status_badges"] = _status_badges(suggestion, rhythm)
+
+
 def _max_consecutive_zeros(series: pd.Series) -> int:
     """Return the maximum number of consecutive zero-valued entries in a series.
 
@@ -260,6 +384,7 @@ def generate_suggestions(
 
     profile = _detect_profile(stat_ids)
     is_boat_profile = profile["name"] == "boat"
+    rhythm = _infer_household_rhythm(features)
 
     motion_entity = _pick_entity(stat_ids, ["binary_sensor"], ["motion", "occupancy", "presence"])
     light_entity = _pick_entity(stat_ids, ["light"], ["living", "hall", "kitchen", "ceiling"])
@@ -320,19 +445,23 @@ def generate_suggestions(
             }
         )
 
+    weekend_hour = rhythm.get("weekend_peak_hour") if rhythm.get("weekend_peak_hour") is not None else 9
     suggestions.append(
         {
             "id": "weekend_mode",
-            "title": "Weekend Mode",
-            "description": "Weekend power profile differs significantly from weekdays — suggest separate scene/mode for Saturday/Sunday.",
+            "title": f"Weekend Mode ({int(weekend_hour):02d}:00)",
+            "description": (
+                "Weekend activity rhythm differs from weekdays "
+                f"(peak around {int(weekend_hour):02d}:00). Build a Saturday/Sunday variant to match that pace."
+            ),
             "confidence": 70,
             "category": "routine",
             "applicable": True,
-            "yaml": """automation:
+            "yaml": f"""automation:
   alias: "Habitus — Weekend mode"
   trigger:
     - platform: time
-      at: "09:00:00"
+      at: "{int(weekend_hour):02d}:00:00"
   condition:
     - condition: time
       weekday: [sat, sun]
@@ -807,7 +936,7 @@ def generate_suggestions(
   alias: "Habitus \u2014 Extended vacancy alert"
   trigger:
     - platform: state
-      entity_id: binary_sensor.hallway_motion  # adjust to your motion sensor
+      entity_id: {motion_entity or 'binary_sensor.hallway_motion'}
       to: "off"
       for:
         hours: 24
@@ -940,6 +1069,12 @@ cards:
         s["profile"] = profile["name"]
         s["profile_boost"] = profile_boost
         s["rank_score"] = max(0, min(100, base_conf + profile_boost))
+        s["household_rhythm"] = {
+            "weekday_window": rhythm.get("weekday_window"),
+            "weekend_window": rhythm.get("weekend_window"),
+            "homecoming_hour": rhythm.get("homecoming_hour"),
+        }
+        _enrich_suggestion_copy(s, rhythm)
         s["generated_at"] = datetime.datetime.now(datetime.UTC).isoformat()
 
     suggestions.sort(key=lambda x: x.get("rank_score", x.get("confidence", 0)), reverse=True)

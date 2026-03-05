@@ -98,6 +98,16 @@ class TestGenerateSuggestions:
                 parsed = yaml.safe_load(s["yaml"])
                 assert parsed is not None
 
+    def test_personalization_explanation_fields_present(self, sample_features):
+        patterns = discover_patterns(sample_features)
+        suggestions = generate_suggestions(patterns, sample_features, ["person.craig"])
+        assert suggestions
+        for s in suggestions[:5]:
+            assert "why_suggested" in s and s["why_suggested"]
+            assert "confidence_rationale" in s and "Confidence" in s["confidence_rationale"]
+            assert "expected_benefit" in s and s["expected_benefit"]
+            assert "status_badges" in s and isinstance(s["status_badges"], list)
+
 
 class TestMaxConsecutiveZeros:
     def test_all_zeros(self):
@@ -313,6 +323,14 @@ class TestHomeProfilePrioritization:
         assert "peak_tariff_alert" in ids
         assert "sensor_watchdog" in ids
         assert "anomaly_alert" in ids
+
+        first = suggestions[0]
+        assert "household_rhythm" in first
+        assert set(first["household_rhythm"].keys()) == {
+            "weekday_window",
+            "weekend_window",
+            "homecoming_hour",
+        }
 
 
 class TestRunFunction:
