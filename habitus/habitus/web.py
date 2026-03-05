@@ -2384,20 +2384,35 @@ def api_baseline():
 def api_progress():
     """Return training progress with stale-run auto-recovery.
 
-    If progress.json says running but hasn't been updated for a long time,
-    mark it as not running so the UI doesn't stay blocked forever.
+    If progress.json says running but the trainer is not actually running,
+    or progress has not updated for a long time, mark it idle so the UI
+    doesn't stay blocked forever.
     """
     p = _read(PROGRESS_PATH) or {}
     try:
-        if p.get("running") and os.path.exists(PROGRESS_PATH):
-            import time as _t
+        if p.get("running"):
+            recover = False
+            reason = None
+            age = 0
 
-            stale_sec = int(os.environ.get("HABITUS_PROGRESS_STALE_SEC", "600"))
-            age = int(_t.time() - os.path.getmtime(PROGRESS_PATH))
-            if age > stale_sec:
+            if not _trainer.is_running():
+                recover = True
+                reason = "trainer_not_running"
+
+            if os.path.exists(PROGRESS_PATH):
+                import time as _t
+
+                stale_sec = int(os.environ.get("HABITUS_PROGRESS_STALE_SEC", "600"))
+                age = int(_t.time() - os.path.getmtime(PROGRESS_PATH))
+                if age > stale_sec:
+                    recover = True
+                    reason = "stale_timeout"
+
+            if recover:
                 p["running"] = False
                 p["phase"] = "idle"
                 p["stale_recovered"] = True
+                p["stale_reason"] = reason
                 p["stale_age_sec"] = age
                 try:
                     with open(PROGRESS_PATH, "w") as f:
@@ -2460,9 +2475,9 @@ def api_sensor_health():
 def api_full_train():
     """Trigger a full training run using configured history depth."""
     import asyncio
-    from concurrent.futures import ThreadPoolExecutor
+    import threading
 
-    from habitus.main import run
+    from .main import run
 
     # Resolve days from user settings first, then env default
     days = int(os.environ.get("HABITUS_DAYS", "365"))
@@ -2478,8 +2493,7 @@ def api_full_train():
     def do_train():
         asyncio.run(run(days_history=days, mode="full"))
 
-    with ThreadPoolExecutor() as pool:
-        pool.submit(do_train)
+    threading.Thread(target=do_train, daemon=True, name="habitus-full-train").start()
     return jsonify({"ok": True, "message": f"Full {days}d training started"})
 
 
@@ -2502,8 +2516,19 @@ def api_rescan():
         from habitus import progressive as _prog  # noqa: PLC0415
 
         p = _read(PROGRESS_PATH) or {}
-        if p.get("running"):
+        if p.get("running") and _trainer.is_running():
             return jsonify({"ok": False, "error": "Training already running"}), 409
+        if p.get("running") and not _trainer.is_running():
+            # Stale progress file from a dead run; clear it so rescan can proceed.
+            p["running"] = False
+            p["phase"] = "idle"
+            p["stale_recovered"] = True
+            p["stale_reason"] = "trainer_not_running"
+            try:
+                with open(PROGRESS_PATH, "w") as f:
+                    json.dump(p, f)
+            except Exception:
+                pass
         if _prog.is_expanding():
             return jsonify({"ok": False, "error": "Progressive training already running"}), 409
         _prog.start_progressive(max_days=days)

@@ -94,6 +94,63 @@ def test_api_progress_normalizes_idle_payload_from_state_when_file_missing(
     assert payload["last_completed_progress"]["phase"] == "training"
 
 
+def test_api_progress_recovers_when_progress_says_running_but_trainer_isnt(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    progress_path = tmp_path / "progress.json"
+    state_path = tmp_path / "run_state.json"
+
+    progress_path.write_text(
+        json.dumps(
+            {
+                "running": True,
+                "phase": "fetching",
+                "pct": 100,
+                "done": 891,
+                "total": 891,
+                "rows": 1798126,
+            }
+        )
+    )
+    state_path.write_text("{}")
+
+    monkeypatch.setattr(web, "PROGRESS_PATH", str(progress_path))
+    monkeypatch.setattr(web, "STATE_PATH", str(state_path))
+    monkeypatch.setattr(web._trainer, "is_running", lambda: False)
+
+    payload = web.app.test_client().get("/api/progress").get_json()
+
+    assert payload["running"] is False
+    assert payload["phase"] == "idle"
+    assert payload["stale_recovered"] is True
+
+
+def test_api_full_train_returns_immediately_with_background_thread(monkeypatch) -> None:
+    started = {"count": 0}
+
+    class _DummyThread:
+        def __init__(self, target=None, daemon=None, name=None):
+            self.target = target
+            self.daemon = daemon
+            self.name = name
+
+        def start(self):
+            started["count"] += 1
+
+    monkeypatch.setenv("HABITUS_DAYS", "90")
+    monkeypatch.setattr("threading.Thread", _DummyThread)
+
+    client = web.app.test_client()
+    resp = client.post("/api/full_train")
+    payload = resp.get_json()
+
+    assert resp.status_code == 200
+    assert payload["ok"] is True
+    assert "started" in payload["message"]
+    assert started["count"] == 1
+
+
 def test_api_progress_normalizes_running_payload_and_clamps_metrics(
     tmp_path: Path,
     monkeypatch,
@@ -119,6 +176,7 @@ def test_api_progress_normalizes_running_payload_and_clamps_metrics(
 
     monkeypatch.setattr(web, "PROGRESS_PATH", str(progress_path))
     monkeypatch.setattr(web, "STATE_PATH", str(state_path))
+    monkeypatch.setattr(web._trainer, "is_running", lambda: True)
 
     payload = web.app.test_client().get("/api/progress").get_json()
 
