@@ -108,6 +108,25 @@ class TestGenerateSuggestions:
             assert "expected_benefit" in s and s["expected_benefit"]
             assert "status_badges" in s and isinstance(s["status_badges"], list)
 
+    def test_automation_yaml_is_stabilized_for_add_to_ha(self, sample_features):
+        import yaml
+
+        patterns = discover_patterns(sample_features)
+        suggestions = generate_suggestions(patterns, sample_features, ["person.craig"])
+        seen_ids = set()
+        for s in suggestions:
+            if s.get("category") == "lovelace":
+                continue
+            parsed = yaml.safe_load(s["yaml"])
+            auto = parsed.get("automation", parsed)
+            assert auto.get("alias")
+            assert auto.get("id")
+            assert auto.get("mode") == "single"
+            assert isinstance(auto.get("trigger"), list)
+            assert isinstance(auto.get("action"), list)
+            assert auto["id"] not in seen_ids
+            seen_ids.add(auto["id"])
+
 
 class TestMaxConsecutiveZeros:
     def test_all_zeros(self):

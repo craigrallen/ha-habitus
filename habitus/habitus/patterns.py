@@ -7,6 +7,7 @@ import os
 from typing import Any
 
 import pandas as pd
+import yaml
 
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
@@ -219,6 +220,74 @@ def _enrich_suggestion_copy(suggestion: dict[str, Any], rhythm: dict[str, Any]) 
     )
     suggestion["expected_benefit"] = benefit
     suggestion["status_badges"] = _status_badges(suggestion, rhythm)
+
+
+def _normalize_slug(value: str) -> str:
+    clean = "".join(ch.lower() if ch.isalnum() else "_" for ch in (value or ""))
+    while "__" in clean:
+        clean = clean.replace("__", "_")
+    return clean.strip("_")
+
+
+def _stabilize_suggestion_yaml(
+    suggestion: dict[str, Any], used_aliases: set[str]
+) -> None:
+    raw_yaml = (suggestion.get("yaml") or "").strip()
+    if not raw_yaml:
+        return
+    try:
+        parsed = yaml.safe_load(raw_yaml)
+    except Exception:
+        return
+
+    if not isinstance(parsed, dict):
+        return
+
+    if "automation" not in parsed and not ({"trigger", "action"} <= set(parsed.keys())):
+        return
+
+    auto = parsed.get("automation", parsed)
+    if isinstance(auto, list):
+        auto = auto[0] if auto else {}
+    if not isinstance(auto, dict):
+        return
+
+    alias = str(auto.get("alias") or suggestion.get("title") or "Habitus automation").strip()
+    alias_slug = _normalize_slug(alias) or _normalize_slug(str(suggestion.get("id", "habitus_auto")))
+    if not alias_slug:
+        alias_slug = "habitus_auto"
+
+    candidate_slug = alias_slug
+    idx = 2
+    while candidate_slug in used_aliases:
+        candidate_slug = f"{alias_slug}_{idx}"
+        idx += 1
+    used_aliases.add(candidate_slug)
+
+    if candidate_slug != alias_slug:
+        alias = f"{alias} ({idx - 1})"
+
+    auto["alias"] = alias
+    auto.setdefault("id", candidate_slug)
+
+    trigger = auto.get("trigger")
+    if isinstance(trigger, dict):
+        auto["trigger"] = [trigger]
+    elif trigger is None:
+        auto["trigger"] = []
+
+    action = auto.get("action")
+    if isinstance(action, dict):
+        auto["action"] = [action]
+    elif action is None:
+        auto["action"] = []
+
+    auto.setdefault("mode", "single")
+
+    # Keep top-level shape stable with current API expectations.
+    suggestion["yaml"] = yaml.safe_dump(
+        {"automation": auto}, sort_keys=False, allow_unicode=True
+    ).strip()
 
 
 def _max_consecutive_zeros(series: pd.Series) -> int:
@@ -1053,6 +1122,7 @@ cards:
         }
     )
 
+    used_aliases: set[str] = set()
     for s in suggestions:
         category = s.get("category", "")
         base_conf = int(s.get("confidence", 0))
@@ -1074,6 +1144,7 @@ cards:
             "weekend_window": rhythm.get("weekend_window"),
             "homecoming_hour": rhythm.get("homecoming_hour"),
         }
+        _stabilize_suggestion_yaml(s, used_aliases)
         _enrich_suggestion_copy(s, rhythm)
         s["generated_at"] = datetime.datetime.now(datetime.UTC).isoformat()
 
