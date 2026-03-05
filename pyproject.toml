@@ -67,6 +67,8 @@ source = ["habitus/habitus"]
 omit = ["tests/*", "*/web.py"]
 
 [tool.coverage.report]
+show_missing = true
+fail_under = 60
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
