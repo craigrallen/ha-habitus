@@ -130,6 +130,39 @@ def test_api_progress_recovers_when_progress_says_running_but_trainer_isnt(
     assert payload["stale_recovered"] is True
 
 
+def test_api_progress_recovers_immediately_when_fetch_complete_and_trainer_not_running(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    progress_path = tmp_path / "progress.json"
+    state_path = tmp_path / "run_state.json"
+
+    progress_path.write_text(
+        json.dumps(
+            {
+                "running": True,
+                "phase": "fetching",
+                "pct": 100,
+                "done": 891,
+                "total": 891,
+                "rows": 1798126,
+            }
+        )
+    )
+    state_path.write_text("{}")
+
+    monkeypatch.setenv("HABITUS_PROGRESS_DEAD_GRACE_SEC", "120")
+    monkeypatch.setattr(web, "PROGRESS_PATH", str(progress_path))
+    monkeypatch.setattr(web, "STATE_PATH", str(state_path))
+    monkeypatch.setattr(web._trainer, "is_running", lambda: False)
+
+    payload = web.app.test_client().get("/api/progress").get_json()
+
+    assert payload["running"] is False
+    assert payload["phase"] == "idle"
+    assert payload["stale_recovered"] is True
+
+
 def test_api_progress_does_not_recover_immediately_when_file_is_fresh(
     tmp_path: Path,
     monkeypatch,

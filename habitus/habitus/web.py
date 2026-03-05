@@ -2394,6 +2394,20 @@ def api_progress():
             recover = False
             reason = None
             age = 0
+            trainer_running = _trainer.is_running()
+
+            try:
+                done_i = int(p.get("done", 0) or 0)
+                total_i = int(p.get("total", 0) or 0)
+                pct_i = int(float(p.get("pct", 0) or 0))
+            except Exception:
+                done_i, total_i, pct_i = 0, 0, 0
+
+            # If fetch is already reported complete but trainer is not running,
+            # recover immediately (don't wait for grace timeout).
+            if (not trainer_running) and total_i > 0 and done_i >= total_i and pct_i >= 100:
+                recover = True
+                reason = "completed_no_trainer"
 
             if os.path.exists(PROGRESS_PATH):
                 import time as _t
@@ -2407,7 +2421,7 @@ def api_progress():
                     recover = True
                     reason = "stale_timeout"
                 # If trainer watchdog says not running, only recover after grace period.
-                elif not _trainer.is_running() and age > dead_grace_sec:
+                elif (not trainer_running) and age > dead_grace_sec:
                     recover = True
                     reason = "trainer_not_running"
 
