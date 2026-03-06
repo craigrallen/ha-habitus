@@ -71,6 +71,7 @@ def test_fetch_stats_sqlite_respects_row_budget(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("HABITUS_HA_DB", str(db))
     monkeypatch.setenv("HABITUS_FETCH_ROW_BUDGET", "50")
     monkeypatch.setenv("HABITUS_FETCH_MIN_WINDOW_DAYS", "1")
+    monkeypatch.setenv("HABITUS_DAYS", "1")  # pin so HABITUS_DAYS floor doesn't override test budget
 
     df = main.fetch_stats_sqlite(
         ["sensor.a", "sensor.b"],
@@ -109,6 +110,7 @@ async def test_fetch_stats_api_respects_row_budget(monkeypatch) -> None:
     monkeypatch.setenv("HABITUS_FORCE_API", "true")
     monkeypatch.setenv("HABITUS_FETCH_ROW_BUDGET", "10")
     monkeypatch.setenv("HABITUS_FETCH_MIN_WINDOW_DAYS", "1")
+    monkeypatch.setenv("HABITUS_DAYS", "1")  # pin so HABITUS_DAYS floor doesn't override test budget
     monkeypatch.setattr(main, "ws_connect", _fake_ws_connect)
 
     df = await main.fetch_stats(

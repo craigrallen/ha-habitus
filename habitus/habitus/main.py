@@ -79,7 +79,10 @@ def _fetch_row_budget() -> int:
 
 
 def _fetch_min_window_days() -> int:
-    return _env_int("HABITUS_FETCH_MIN_WINDOW_DAYS", FETCH_MIN_WINDOW_DAYS)
+    explicit_min = _env_int("HABITUS_FETCH_MIN_WINDOW_DAYS", FETCH_MIN_WINDOW_DAYS)
+    # Never clamp below the user-requested history depth (set from settings as HABITUS_DAYS).
+    history_days = _env_int("HABITUS_DAYS", 90)
+    return max(explicit_min, history_days)
 
 
 # ── Startup validation ─────────────────────────────────────────────────────────

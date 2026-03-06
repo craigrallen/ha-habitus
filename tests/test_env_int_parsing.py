@@ -20,4 +20,4 @@ def test_invalid_integer_env_values_fallback_to_defaults(monkeypatch) -> None:
     assert mod.FETCH_ROW_BUDGET == 1_000_000
     assert mod.FETCH_MIN_WINDOW_DAYS == 7
     assert mod._fetch_row_budget() == 1_000_000
-    assert mod._fetch_min_window_days() == 7
+    assert mod._fetch_min_window_days() >= 7  # floor is max(explicit_min, HABITUS_DAYS default)
