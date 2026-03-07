@@ -290,7 +290,7 @@ nav button {
   background: none;
   border: none;
   color: var(--text3);
-  padding: 8px 16px;
+  padding: 8px 14px;
   cursor: pointer;
   font-size: 0.82rem;
   font-weight: 500;
@@ -421,7 +421,7 @@ tr:hover td { background: var(--bg2); }
 /* ── Responsive tables ── */
 .table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .table-wrap table { min-width: 720px; }
-#tab-breakdown .table-wrap table { min-width: 860px; }
+#tab-health .table-wrap table { min-width: 860px; }
 
 @media (max-width: 700px) {
   .tab { padding: 0 10px 20px; }
@@ -435,18 +435,18 @@ tr:hover td { background: var(--bg2); }
   .table-wrap table { min-width: 0; width: 100%; table-layout: fixed; }
   .table-wrap th, .table-wrap td { white-space: normal; word-break: break-word; }
 
-  /* Breakdown table: hide secondary columns on mobile, keep core signal */
-  #tab-breakdown th, #tab-breakdown td { white-space: normal; word-break: break-word; }
-  #tab-breakdown .bd-col-current,
-  #tab-breakdown .bd-col-baseline,
-  #tab-breakdown .bd-col-confidence {
+  /* Health anomaly table: hide secondary columns on mobile */
+  #tab-health th, #tab-health td { white-space: normal; word-break: break-word; }
+  #tab-health .bd-col-current,
+  #tab-health .bd-col-baseline,
+  #tab-health .bd-col-confidence {
     display: none;
   }
-  #tab-breakdown .bd-col-sensor { width: 58%; }
-  #tab-breakdown .bd-col-deviation { width: 24%; }
-  #tab-breakdown .bd-col-bar { width: 18%; }
+  #tab-health .bd-col-sensor { width: 58%; }
+  #tab-health .bd-col-deviation { width: 24%; }
+  #tab-health .bd-col-bar { width: 18%; }
 
-  /* Automation health: reduce columns on mobile to avoid viewport cut-off */
+  /* Automation health: reduce columns on mobile */
   .auto-health-table th:nth-child(3), .auto-health-table td:nth-child(3),
   .auto-health-table th:nth-child(5), .auto-health-table td:nth-child(5) {
     display: none;
@@ -747,6 +747,21 @@ pre.raw {
 .yaml-block { font-size:.72rem; overflow-x:auto; background:var(--card2); border-radius:6px; padding:10px; margin-bottom:6px; }
 .yaml-actions { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
 .empty-state { color:var(--text3); text-align:center; padding:24px; font-size:.9rem; }
+
+/* ── Advanced/Geek collapsible ── */
+details.geek-block > summary {
+  cursor: pointer;
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--text2);
+  padding: 10px 0;
+  user-select: none;
+  list-style: none;
+}
+details.geek-block > summary::before { content: '🔬 '; }
+details.geek-block > summary::-webkit-details-marker { display: none; }
+details.geek-block[open] > summary::after { content: ' ▾'; color: var(--text3); font-size: .72rem; }
+details.geek-block:not([open]) > summary::after { content: ' ▸'; color: var(--text3); font-size: .72rem; }
 </style>
 </head>
 <body>
@@ -765,16 +780,18 @@ pre.raw {
 </div>
 
 <nav>
-  <button class="active" onclick="gotoTab('overview',this)">Overview</button>
-  <button onclick="gotoTab('breakdown',this)">Anomaly Breakdown</button>
-  <button onclick="gotoTab('smarthome',this)">Smart Home</button>
-  <button onclick="gotoTab('energy',this)">Energy & Patterns</button>
-  <button onclick="gotoTab('settings',this)">Settings</button>
-  <button onclick="gotoTab('geek',this)">🔬 Geek</button>
+  <button class="active" onclick="gotoTab('home',this)">🏠 Home</button>
+  <button onclick="gotoTab('suggestions',this)">💡 Suggestions</button>
+  <button onclick="gotoTab('automations',this)">🤖 Automations</button>
+  <button onclick="gotoTab('energy',this)">⚡ Energy</button>
+  <button onclick="gotoTab('health',this)">🏥 Health</button>
+  <button onclick="gotoTab('settings',this)">⚙️ Settings</button>
 </nav>
 
-<!-- OVERVIEW -->
-<div id="tab-overview" class="tab active">
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- TAB 1: HOME                                                    -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="tab-home" class="tab active">
   <div class="metrics">
     <div class="score-card card" id="score-card">
       <div class="gauge-wrap">
@@ -804,7 +821,7 @@ pre.raw {
     </div>
   </div>
 
-  <!-- ── Insights Summary Card ──────────────────────────────── -->
+  <!-- Insights Summary -->
   <div class="sec" id="insights-summary-card" style="margin-bottom:16px">
     <div class="sec-header">
       <h2>🔍 Insights</h2>
@@ -817,12 +834,12 @@ pre.raw {
 
   <div class="two-col">
     <div class="sec">
-      <div class="sec-header"><h2>Patterns Discovered</h2></div>
-      <div id="pat-summary"><div style="color:var(--text3)">Loading...</div></div>
-    </div>
-    <div class="sec">
       <div class="sec-header"><h2>Top Anomalies Now</h2></div>
       <div id="top-anomalies"><div style="color:var(--text3)">Loading...</div></div>
+    </div>
+    <div class="sec">
+      <div class="sec-header"><h2>Patterns Discovered</h2></div>
+      <div id="pat-summary"><div style="color:var(--text3)">Loading...</div></div>
     </div>
   </div>
 
@@ -835,62 +852,13 @@ pre.raw {
   </div>
 </div>
 
-<!-- ANOMALY BREAKDOWN -->
-<div id="tab-breakdown" class="tab">
-  <div class="sec">
-    <div class="sec-header">
-      <h2>Per-Entity Anomaly Scores</h2>
-      <span class="sec-sub" id="bd-ts"></span>
-    </div>
-    <div class="table-wrap"><table>
-      <thead><tr><th class="bd-col-sensor">Sensor</th><th class="bd-col-current">Current</th><th class="bd-col-baseline">Baseline</th><th class="bd-col-deviation">Deviation</th><th class="bd-col-confidence">Confidence</th><th class="bd-col-bar" style="width:90px"></th></tr></thead>
-      <tbody id="bd-table"><tr><td colspan="6" style="color:var(--text3);padding:16px">No entity data yet.</td></tr></tbody>
-    </table></div>
-  </div>
-</div>
-
-<!-- SMART HOME (merged Automations + Insights) -->
-<div id="tab-smarthome" class="tab">
-
-  <!-- Active Conflicts -->
-  <div class="sec" id="conflicts-section" style="display:none">
-    <div class="sec-header"><h2>⚠️ Active Conflicts</h2><span class="sec-sub">Things that don't make sense right now</span></div>
-    <div id="conflicts-list"></div>
-  </div>
-
-  <!-- Energy Forecast -->
-  <div class="sec" id="forecast-section" style="display:none">
-    <div class="sec-header"><h2>⚡ Energy Forecast</h2><span class="sec-sub">Weather-aware 7-day prediction</span></div>
-    <div id="forecast-summary" style="margin-bottom:8px"></div>
-    <div id="forecast-days"></div>
-  </div>
-
-  <!-- Behaviour Drift -->
-  <div class="sec" id="drift-section" style="display:none">
-    <div class="sec-header"><h2>📈 Behaviour Drift</h2><span class="sec-sub">Your habits are shifting</span></div>
-    <div id="drift-list"></div>
-  </div>
-
-  <!-- Room Predictions -->
-  <div class="sec" id="predictions-section" style="display:none">
-    <div class="sec-header"><h2>🧠 Room Predictions</h2><span class="sec-sub">What you'll probably want when you enter a room</span></div>
-    <div id="predictions-list"></div>
-  </div>
-
-  <!-- Discovered Scenes -->
-  <div class="sec">
-    <div class="sec-header"><h2>🎬 Discovered Scenes</h2><span class="sec-sub">Entity groups that activate together</span></div>
-    <div id="scenes-list"><div style="color:var(--text3);padding:12px">Loading scenes...</div></div>
-  </div>
-
-  <!-- Scene Improvements -->
-  <div class="sec" style="margin-top:16px" id="scene-improvements-sec">
-    <div class="sec-header"><h2>🔍 Scene Improvements</h2><span class="sec-sub">Missing entities and smart trigger suggestions for your HA scenes</span></div>
-    <div id="scene-improvements-list"><div style="color:var(--text3);padding:12px">Loading scene analysis...</div></div>
-  </div>
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- TAB 2: SUGGESTIONS                                             -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="tab-suggestions" class="tab">
 
   <!-- Suggested Automations -->
-  <div class="sec" style="margin-top:16px">
+  <div class="sec">
     <div class="sec-header"><h2>💡 Suggested Automations</h2><span class="sec-sub">Patterns we detected in your usage</span></div>
     <div class="ftabs">
       <button class="ftab active" onclick="filterSug('all',this)">All</button>
@@ -904,14 +872,122 @@ pre.raw {
     <div id="sug-list"><div style="color:var(--text3);padding:12px">Loading suggestions...</div></div>
   </div>
 
+  <!-- Automation Gaps -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>🔧 Automation Gaps</h2><span class="sec-sub">Suggestions vs existing automations</span></div>
+    <div id="auto-gap"><div class="skeleton skeleton-block"></div></div>
+  </div>
+
+  <!-- Scene Improvements -->
+  <div class="sec" style="margin-top:12px" id="scene-improvements-sec">
+    <div class="sec-header"><h2>🔍 Scene Improvements</h2><span class="sec-sub">Missing entities and smart trigger suggestions for your HA scenes</span></div>
+    <div id="scene-improvements-list"><div style="color:var(--text3);padding:12px">Loading scene analysis...</div></div>
+  </div>
+
+  <!-- Discovered Scenes -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>🎬 Discovered Scenes</h2><span class="sec-sub">Entity groups that activate together</span></div>
+    <div id="scenes-list"><div style="color:var(--text3);padding:12px">Loading scenes...</div></div>
+  </div>
+
+  <!-- Detected Routines (routine builder) -->
+  <div id="detected-routines-section" class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>🔄 Detected Routines</h2><span class="sec-sub">Temporal sequences → chainable automations</span></div>
+    <div id="detected-routines-list"><div class="skeleton skeleton-block"></div></div>
+  </div>
+
+  <!-- Predicted Routines (sensor-pattern routines) -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>🕐 Predicted Routines</h2><span class="sec-sub">Recurring activities detected from sensor patterns</span></div>
+    <div id="routines-list"><div class="skeleton skeleton-block"></div></div>
+  </div>
+
+  <!-- Seasonal Suggestions -->
+  <div id="seasonal-section" class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>🌿 Seasonal Suggestions</h2><span class="sec-sub">Automations tuned to the current season</span><span id="season-badge" style="margin-left:8px;background:var(--accent);color:#fff;border-radius:12px;padding:2px 10px;font-size:.75rem"></span></div>
+    <div id="seasonal-list"><div class="skeleton skeleton-block"></div></div>
+  </div>
+
+  <!-- Guest Mode -->
+  <div id="guest-mode-section" class="sec" style="margin-top:12px">
+    <div id="guest-mode-banner" style="display:none;background:var(--accent);color:#fff;border-radius:8px;padding:12px 16px;margin-bottom:12px;align-items:center;justify-content:space-between">
+      <span>👥 Guests may be present — <strong id="guest-prob-text">probability 0%</strong></span>
+      <button onclick="activateGuestMode()" style="background:#fff;color:var(--accent);border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-weight:600">Activate Guest Mode</button>
+    </div>
+    <div class="sec-header"><h2>👥 Guest Mode</h2><span class="sec-sub">Unusual activity pattern detection</span></div>
+    <div id="guest-mode-details"><div class="skeleton skeleton-block"></div></div>
+  </div>
+
+  <!-- Behaviour Drift -->
+  <div class="sec" id="drift-section" style="margin-top:12px;display:none">
+    <div class="sec-header"><h2>📈 Behaviour Drift</h2><span class="sec-sub">Your habits are shifting</span></div>
+    <div id="drift-list"></div>
+  </div>
+
+  <!-- Room Predictions -->
+  <div class="sec" id="predictions-section" style="margin-top:12px;display:none">
+    <div class="sec-header"><h2>🧠 Room Predictions</h2><span class="sec-sub">What you'll probably want when you enter a room</span></div>
+    <div id="predictions-list"></div>
+  </div>
+
+  <!-- NL Automation Creator -->
+  <div id="nl-automation-section" class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>✍️ Describe an Automation</h2><span class="sec-sub">Write in plain English — Habitus generates the YAML</span></div>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <input type="text" id="nl-input" placeholder='e.g. "Turn off lights at 11pm" or "When motion detected turn on hallway light"'
+        style="flex:1;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:.9rem"
+        oninput="nlPreview()" onkeydown="if(event.key==='Enter')nlPreview()">
+      <button onclick="nlPreview()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:10px 16px;cursor:pointer">Parse</button>
+    </div>
+    <div id="nl-preview" style="display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span id="nl-confidence" style="font-size:.8rem;color:var(--text3)"></span>
+        <button id="nl-add-btn" onclick="nlAddToHA()" style="background:var(--success,#4caf50);color:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:.85rem">Add to HA</button>
+      </div>
+      <div id="nl-clarifications" style="color:var(--warn,#ff9800);font-size:.82rem;margin-bottom:8px"></div>
+      <pre id="nl-yaml" style="background:var(--card2);border-radius:8px;padding:12px;font-size:.78rem;overflow-x:auto;max-height:300px;overflow-y:auto;white-space:pre-wrap"></pre>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- TAB 3: AUTOMATIONS                                             -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="tab-automations" class="tab">
+
+  <!-- Automation Health (full dead/stale/over-triggering report) -->
+  <div id="automation-health-section" class="sec">
+    <div class="sec-header"><h2>🏥 Automation Health</h2><span class="sec-sub">Dead, stale, and over-triggering automations</span></div>
+    <div id="automation-health-list"><div class="skeleton skeleton-block"></div></div>
+  </div>
+
+  <!-- Automation Conflicts (inter-automation) -->
+  <div id="automation-conflicts-section" class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>⚔️ Automation Conflicts</h2><span class="sec-sub">Automations that fight each other</span></div>
+    <div id="automation-conflicts-list"><div class="skeleton skeleton-block"></div></div>
+  </div>
+
   <!-- Your HA Automations -->
-  <div class="sec" style="margin-top:16px">
+  <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>🤖 Your Automations</h2><span class="sec-sub">Existing automations from Home Assistant</span></div>
     <div id="ha-automations-list"><div class="skeleton skeleton-block"></div></div>
   </div>
 
+  <!-- Automation Health Scores -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>⚡ Automation Health Scores</h2><span class="sec-sub">How well your automations perform</span></div>
+    <div id="auto-scores"><div class="skeleton skeleton-block"></div></div>
+  </div>
+
+  <!-- Appliance Detection -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>🔌 Appliance Detection</h2><span class="sec-sub">Devices identified by power signature</span></div>
+    <div id="appliance-list"><div class="skeleton skeleton-block"></div></div>
+  </div>
+
   <!-- Entity Picker -->
-  <div class="sec" style="margin-top:16px">
+  <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>🔍 Entity Picker</h2><span class="sec-sub">Find entities for your automations</span></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
       <input type="text" id="entity-search" placeholder="Search entities (e.g. light, kitchen)..."
@@ -933,87 +1009,21 @@ pre.raw {
     <div id="entity-results" style="max-height:300px;overflow-y:auto"></div>
   </div>
 
-  <!-- Insights (moved from old tab) -->
-  <div class="sec" style="margin-top:16px">
-    <div class="sec-header"><h2>🔌 Appliance Detection</h2><span class="sec-sub">Devices identified by power signature</span></div>
-    <div id="appliance-list"><div class="skeleton skeleton-block"></div></div>
-  </div>
-  <div class="sec" style="margin-top:12px">
-    <div class="sec-header"><h2>🕐 Predicted Routines</h2><span class="sec-sub">Recurring activities detected from sensor patterns</span></div>
-    <div id="routines-list"><div class="skeleton skeleton-block"></div></div>
-  </div>
-  <div class="sec" style="margin-top:12px">
-    <div class="sec-header"><h2>📊 Phantom Loads</h2><span class="sec-sub">Devices drawing power 24/7</span></div>
-    <div id="phantom-list"><div class="skeleton skeleton-block"></div></div>
-  </div>
-  <div class="sec" style="margin-top:12px">
-    <div class="sec-header"><h2>📈 Routine Drift</h2><span class="sec-sub">Changes in daily patterns</span></div>
-    <div id="drift-info"><div class="skeleton skeleton-block"></div></div>
-  </div>
-  <div id="auto-scores" style="display:none"></div>
-  <div class="sec" style="margin-top:12px">
-    <div class="sec-header"><h2>🔧 Automation Gaps</h2><span class="sec-sub">Suggestions vs existing automations</span></div>
-    <div id="auto-gap"><div class="skeleton skeleton-block"></div></div>
-  </div>
-
-  <!-- AUTOMATION HEALTH -->
-  <div id="automation-health-section" class="sec" style="margin-top:12px">
-    <div class="sec-header"><h2>🏥 Automation Health</h2><span class="sec-sub">Dead, stale, and over-triggering automations</span></div>
-    <div id="automation-health-list"><div class="skeleton skeleton-block"></div></div>
-  </div>
-  <!-- AUTOMATION CONFLICTS (inter-automation) -->
-  <div id="automation-conflicts-section" class="sec" style="margin-top:12px">
-    <div class="sec-header"><h2>⚔️ Automation Conflicts</h2><span class="sec-sub">Automations that fight each other</span></div>
-    <div id="automation-conflicts-list"><div class="skeleton skeleton-block"></div></div>
-  </div>
-  <!-- DETECTED ROUTINES (routine builder) -->
-  <div id="detected-routines-section" class="sec" style="margin-top:12px">
-    <div class="sec-header"><h2>🔄 Detected Routines</h2><span class="sec-sub">Temporal sequences → chainable automations</span></div>
-    <div id="detected-routines-list"><div class="skeleton skeleton-block"></div></div>
-  </div>
-  <!-- GUEST MODE -->
-  <div id="guest-mode-section" class="sec" style="margin-top:12px">
-    <div id="guest-mode-banner" style="display:none;background:var(--accent);color:#fff;border-radius:8px;padding:12px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
-      <span>👥 Guests may be present — <strong id="guest-prob-text">probability 0%</strong></span>
-      <button onclick="activateGuestMode()" style="background:#fff;color:var(--accent);border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-weight:600">Activate Guest Mode</button>
-    </div>
-    <div class="sec-header"><h2>👥 Guest Mode</h2><span class="sec-sub">Unusual activity pattern detection</span></div>
-    <div id="guest-mode-details"><div class="skeleton skeleton-block"></div></div>
-  </div>
-  <!-- SEASONAL SUGGESTIONS -->
-  <div id="seasonal-section" class="sec" style="margin-top:12px">
-    <div class="sec-header"><h2>🌿 Seasonal Suggestions</h2><span class="sec-sub">Automations tuned to the current season</span><span id="season-badge" style="margin-left:8px;background:var(--accent);color:#fff;border-radius:12px;padding:2px 10px;font-size:.75rem"></span></div>
-    <div id="seasonal-list"><div class="skeleton skeleton-block"></div></div>
-  </div>
-  <!-- NL AUTOMATION CREATOR -->
-  <div id="nl-automation-section" class="sec" style="margin-top:12px">
-    <div class="sec-header"><h2>✍️ Describe an Automation</h2><span class="sec-sub">Write in plain English — Habitus generates the YAML</span></div>
-    <div style="display:flex;gap:8px;margin-bottom:12px">
-      <input type="text" id="nl-input" placeholder='e.g. "Turn off lights at 11pm" or "When motion detected turn on hallway light"'
-        style="flex:1;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:.9rem"
-        oninput="nlPreview()" onkeydown="if(event.key==='Enter')nlPreview()">
-      <button onclick="nlPreview()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:10px 16px;cursor:pointer">Parse</button>
-    </div>
-    <div id="nl-preview" style="display:none">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <span id="nl-confidence" style="font-size:.8rem;color:var(--text3)"></span>
-        <button id="nl-add-btn" onclick="nlAddToHA()" style="background:var(--success,#4caf50);color:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:.85rem">Add to HA</button>
-      </div>
-      <div id="nl-clarifications" style="color:var(--warn,#ff9800);font-size:.82rem;margin-bottom:8px"></div>
-      <pre id="nl-yaml" style="background:var(--card2);border-radius:8px;padding:12px;font-size:.78rem;overflow-x:auto;max-height:300px;overflow-y:auto;white-space:pre-wrap"></pre>
-    </div>
-  </div>
-  <!-- RECENT ACTIVITY (changelog) -->
-  <div id="changelog-section" class="sec" style="margin-top:12px">
-    <div class="sec-header"><h2>📋 Recent Activity</h2><span class="sec-sub">Automation changes and events</span></div>
-    <div id="changelog-list"><div class="skeleton skeleton-block"></div></div>
-  </div>
-
 </div>
 
-<!-- ENERGY & PATTERNS -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- TAB 4: ENERGY                                                  -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
 <div id="tab-energy" class="tab">
-  <!-- Energy + Weather History -->
+
+  <!-- Energy Forecast (weather-aware) -->
+  <div class="sec" id="forecast-section" style="display:none">
+    <div class="sec-header"><h2>⚡ Energy Forecast</h2><span class="sec-sub">Weather-aware 7-day prediction</span></div>
+    <div id="forecast-summary" style="margin-bottom:8px"></div>
+    <div id="forecast-days"></div>
+  </div>
+
+  <!-- Energy vs Weather History -->
   <div class="sec" id="energy-weather-section">
     <div class="sec-header">
       <h2>📊 Energy vs Weather</h2>
@@ -1041,7 +1051,7 @@ pre.raw {
   </div>
 
   <!-- NILM Disaggregation -->
-  <div class="sec" id="nilm-section" style="display:none">
+  <div class="sec" id="nilm-section" style="display:none;margin-top:12px">
     <div class="sec-header">
       <h2>🔌 Power Disaggregation (NILM)</h2>
       <button class="btn btn-accent" onclick="runNilm()" style="font-size:.75rem">⚡ Re-analyse</button>
@@ -1050,7 +1060,8 @@ pre.raw {
     <div id="nilm-appliances"></div>
     <div id="nilm-energy" style="margin-top:8px"></div>
   </div>
-  <div class="two-col">
+
+  <div class="two-col" style="margin-top:12px">
     <div class="sec">
       <div class="sec-header"><h2>Weekly Profile</h2></div>
       <table>
@@ -1063,6 +1074,7 @@ pre.raw {
       <div class="season-grid" id="season-cards"></div>
     </div>
   </div>
+
   <div class="sec">
     <div class="sec-header"><h2>Monthly Overview</h2><span class="sec-sub">Average power & temperature per month</span></div>
     <table>
@@ -1070,23 +1082,64 @@ pre.raw {
       <tbody id="mo-table"></tbody>
     </table>
   </div>
-  <!-- BATTERY STATUS -->
-  <div id="battery-status-section" class="sec" style="margin-top:12px">
+
+  <!-- Phantom Loads -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>📊 Phantom Loads</h2><span class="sec-sub">Devices drawing power 24/7</span></div>
+    <div id="phantom-list"><div class="skeleton skeleton-block"></div></div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- TAB 5: HEALTH                                                  -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="tab-health" class="tab">
+
+  <!-- Battery Status -->
+  <div id="battery-status-section" class="sec">
     <div class="sec-header"><h2>🔋 Battery Status</h2><span class="sec-sub">Device batteries sorted by urgency</span></div>
     <div id="battery-status-list"><div class="skeleton skeleton-block"></div></div>
   </div>
-  <!-- INTEGRATION HEALTH -->
+
+  <!-- Integration Health -->
   <div id="integration-health-section" class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>🔌 Integration Health</h2><span class="sec-sub">Stale entities and integration scores</span><span id="health-score-badge" style="margin-left:8px;font-size:.8rem;color:var(--text3)"></span></div>
     <div id="integration-health-list"><div class="skeleton skeleton-block"></div></div>
   </div>
 
+  <!-- Per-Entity Anomaly Scores (from old Anomaly Breakdown tab) -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header">
+      <h2>Per-Entity Anomaly Scores</h2>
+      <span class="sec-sub" id="bd-ts"></span>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th class="bd-col-sensor">Sensor</th><th class="bd-col-current">Current</th><th class="bd-col-baseline">Baseline</th><th class="bd-col-deviation">Deviation</th><th class="bd-col-confidence">Confidence</th><th class="bd-col-bar" style="width:90px"></th></tr></thead>
+      <tbody id="bd-table"><tr><td colspan="6" style="color:var(--text3);padding:16px">No entity data yet.</td></tr></tbody>
+    </table></div>
+  </div>
+
+  <!-- Recent Activity (changelog) -->
+  <div id="changelog-section" class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>📋 Recent Activity</h2><span class="sec-sub">Automation changes and events</span></div>
+    <div id="changelog-list"><div class="skeleton skeleton-block"></div></div>
+  </div>
+
+  <!-- Routine Drift -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>📈 Routine Drift</h2><span class="sec-sub">Changes in daily patterns over time</span></div>
+    <div id="drift-info"><div class="skeleton skeleton-block"></div></div>
+  </div>
+
 </div>
 
-
-
-<!-- SETTINGS -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- TAB 6: SETTINGS                                                -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
 <div id="tab-settings" class="tab">
+
+  <!-- Model Management -->
   <div class="sec">
     <div class="sec-header">
       <h2>Model Management</h2>
@@ -1109,8 +1162,11 @@ pre.raw {
       <pre id="train-log-lines" class="raw" style="max-height:170px;overflow:auto;margin:0">Waiting for training events…</pre>
     </div>
 
-    <pre class="raw" id="raw-state">Loading...</pre>
+    <div id="schedule-info" style="margin-top:12px"></div>
+    <pre class="raw" id="raw-state" style="margin-top:12px">Loading...</pre>
   </div>
+
+  <!-- Power Source -->
   <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>Power Source</h2></div>
     <p style="color:var(--text3);font-size:.8rem;margin:0 0 12px">Habitus auto-detects your main power sensor. Override it here if the wrong one was selected.</p>
@@ -1121,6 +1177,137 @@ pre.raw {
       <button class="btn btn-accent" onclick="savePowerSensor()" style="white-space:nowrap">Save &amp; Retrain</button>
     </div>
     <div id="power-sensor-status" style="margin-top:8px;font-size:.78rem;color:var(--text3)"></div>
+  </div>
+
+  <!-- Analysis History Depth (was Geek tab) -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>📅 Analysis History Depth</h2></div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <select id="history-depth" style="background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:.85rem" onchange="saveHistoryDepth()">
+        <option value="30">30 days</option>
+        <option value="90">90 days</option>
+        <option value="180">6 months</option>
+        <option value="365">1 year</option>
+        <option value="730">2 years</option>
+        <option value="1095">3 years</option>
+        <option value="3650">All history (max 10 years)</option>
+      </select>
+      <span style="font-size:.78rem;color:var(--text3)">More history = longer training but richer patterns</span>
+    </div>
+  </div>
+
+  <!-- Notifications -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>Notifications</h2></div>
+    <p style="color:var(--text3);font-size:.8rem;margin:0 0 12px">Control whether Habitus sends anomaly/training notifications.</p>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button id="notify-toggle-btn" class="btn btn-accent" onclick="toggleHabitusNotifications()">Toggle notifications</button>
+      <span id="notify-toggle-status" style="font-size:.78rem;color:var(--text3)"></span>
+    </div>
+  </div>
+
+  <!-- Dashboard Generator (was floating) -->
+  <div id="dashboard-generator-section" class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>🎨 Dashboard Generator</h2><span class="sec-sub">Optimised Lovelace dashboard from your usage patterns</span></div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <button onclick="generateDashboard()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 16px;cursor:pointer">Generate Dashboard</button>
+      <button onclick="copyDashboardYaml()" id="copy-dashboard-btn" style="display:none;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 16px;cursor:pointer">Copy YAML</button>
+      <button onclick="applyDashboard()" id="apply-dashboard-btn" style="display:none;background:var(--success,#4caf50);color:#fff;border:none;border-radius:8px;padding:8px 16px;cursor:pointer">Apply to HA</button>
+    </div>
+    <div id="dashboard-preview"><div style="color:var(--text3);font-size:.85rem">Click "Generate Dashboard" to create a Lovelace config from your usage patterns.</div></div>
+  </div>
+
+  <!-- Device Training (was Geek tab) -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>🎓 Device Training</h2><span class="sec-sub">Teach Habitus your appliances by turning them on</span></div>
+    <div id="training-ui">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+        <select id="train-power-entity" style="flex:1;min-width:200px;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:.85rem">
+          <option value="">Select power sensor...</option>
+        </select>
+      </div>
+      <div id="train-idle">
+        <p style="font-size:.82rem;color:var(--text3);margin:0 0 8px">1. Select your main power sensor<br>2. Click Start → turn on ONE device → Click Stop<br>3. Name it → fingerprint saved</p>
+        <button class="btn btn-accent" onclick="startTraining()">▶️ Start Recording</button>
+      </div>
+      <div id="train-recording" style="display:none">
+        <div class="card" style="padding:12px;border-left:3px solid var(--amber);margin-bottom:8px">
+          <b>🔴 Recording...</b> Turn on your device now.
+          <div style="font-size:.8rem;color:var(--text3)" id="train-baseline">Baseline: --</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="text" id="train-device-name" placeholder="Device name (e.g., Hob Ring 1)" style="flex:1;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:.85rem">
+          <button class="btn btn-accent" onclick="stopTraining()">⏹ Stop & Save</button>
+        </div>
+      </div>
+    </div>
+    <div id="custom-sigs" style="margin-top:12px"></div>
+  </div>
+
+  <!-- Anomaly Feedback (was Geek tab) -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>📊 Anomaly Feedback</h2><span class="sec-sub">Your confirmations improve the model</span></div>
+    <div id="feedback-stats"></div>
+    <div style="margin-top:8px">
+      <label style="font-size:.82rem;color:var(--text3);cursor:pointer">
+        <input type="checkbox" id="sharing-toggle" onchange="toggleSharing(this.checked)">
+        Share anonymised anomaly data to improve Habitus for everyone
+      </label>
+      <div style="font-size:.72rem;color:var(--text3);margin-top:4px">Only entity domains, scores, and feedback actions are shared. No names, IPs, or identifying info.</div>
+    </div>
+  </div>
+
+  <!-- Advanced / Geek Data (collapsible) -->
+  <div class="sec" style="margin-top:12px">
+    <details class="geek-block">
+      <summary>Advanced Data</summary>
+      <div style="margin-top:12px">
+
+        <!-- Activity States (HMM) -->
+        <div class="sec" id="hmm-section" style="display:none;margin-bottom:12px">
+          <div class="sec-header"><h2>🧩 Activity States (HMM)</h2><span class="sec-sub">Hidden Markov Model — what the home is "doing"</span></div>
+          <div id="hmm-current" style="margin-bottom:8px"></div>
+          <div id="hmm-states"></div>
+        </div>
+
+        <!-- Routine Sequences (PrefixSpan) -->
+        <div class="sec" id="sequences-section" style="display:none;margin-bottom:12px">
+          <div class="sec-header"><h2>🔄 Routine Sequences (PrefixSpan)</h2><span class="sec-sub">Ordered event flows mined from history</span></div>
+          <div id="sequences-list"></div>
+        </div>
+
+        <!-- Next-Action Predictions (Markov) -->
+        <div class="sec" id="markov-section" style="display:none;margin-bottom:12px">
+          <div class="sec-header"><h2>🎯 Next-Action Predictions (Markov)</h2><span class="sec-sub">Transition probabilities between actions</span></div>
+          <div id="markov-list"></div>
+        </div>
+
+        <!-- Deep Correlations -->
+        <div class="sec" id="correlations-section" style="display:none;margin-bottom:12px">
+          <div class="sec-header"><h2>🔗 Deep Correlations</h2><span class="sec-sub">Statistically significant entity relationships</span></div>
+          <div id="corr-stats" style="font-size:.8rem;color:var(--text3);margin-bottom:8px"></div>
+          <div id="correlations-list"></div>
+        </div>
+
+        <div style="color:var(--text3);font-size:.8rem;padding:8px 0" id="geek-empty-msg">Loading advanced data...</div>
+
+      </div>
+    </details>
+  </div>
+
+  <!-- About -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>About</h2></div>
+    <div class="about-links">
+      <a class="about-link" href="https://github.com/craigrallen/ha-habitus" target="_blank">
+        <span class="al-icon">📦</span>
+        <div><div style="font-weight:600;color:var(--text)">GitHub Repository</div><div style="font-size:.72rem;color:var(--text3)">craigrallen/ha-habitus</div></div>
+      </a>
+      <a class="about-link" href="https://buymeacoffee.com/craigrallen" target="_blank">
+        <span class="al-icon">☕</span>
+        <div><div style="font-weight:600;color:var(--amber)">Buy Me a Coffee</div><div style="font-size:.72rem;color:var(--text3)">If Habitus is useful, consider supporting it</div></div>
+      </a>
+    </div>
   </div>
 
   <script>
@@ -1216,125 +1403,26 @@ pre.raw {
   })();
   </script>
 
-  <div class="sec" style="margin-top:12px">
-    <div class="sec-header"><h2>Notifications</h2></div>
-    <p style="color:var(--text3);font-size:.8rem;margin:0 0 12px">Control whether Habitus sends anomaly/training notifications.</p>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <button id="notify-toggle-btn" class="btn btn-accent" onclick="toggleHabitusNotifications()">Toggle notifications</button>
-      <span id="notify-toggle-status" style="font-size:.78rem;color:var(--text3)"></span>
-    </div>
-  </div>
-
-  <div class="sec" style="margin-top:12px">
-    <div class="sec-header"><h2>About</h2></div>
-    <div class="about-links">
-      <a class="about-link" href="https://github.com/craigrallen/ha-habitus" target="_blank">
-        <span class="al-icon">📦</span>
-        <div><div style="font-weight:600;color:var(--text)">GitHub Repository</div><div style="font-size:.72rem;color:var(--text3)">craigrallen/ha-habitus</div></div>
-      </a>
-      <a class="about-link" href="https://buymeacoffee.com/craigrallen" target="_blank">
-        <span class="al-icon">☕</span>
-        <div><div style="font-weight:600;color:var(--amber)">Buy Me a Coffee</div><div style="font-size:.72rem;color:var(--text3)">If Habitus is useful, consider supporting it</div></div>
-      </a>
-    </div>
-  </div>
-  <!-- DASHBOARD GENERATOR -->
-  <div id="dashboard-generator-section" class="sec" style="margin-top:12px">
-    <div class="sec-header"><h2>🎨 Dashboard Generator</h2><span class="sec-sub">Optimised Lovelace dashboard from your usage patterns</span></div>
-    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-      <button onclick="generateDashboard()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 16px;cursor:pointer">Generate Dashboard</button>
-      <button onclick="copyDashboardYaml()" id="copy-dashboard-btn" style="display:none;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 16px;cursor:pointer">Copy YAML</button>
-      <button onclick="applyDashboard()" id="apply-dashboard-btn" style="display:none;background:var(--success,#4caf50);color:#fff;border:none;border-radius:8px;padding:8px 16px;cursor:pointer">Apply to HA</button>
-    </div>
-    <div id="dashboard-preview"><div style="color:var(--text3);font-size:.85rem">Click "Generate Dashboard" to create a Lovelace config from your usage patterns.</div></div>
-  </div>
-
 </div>
 
-<!-- GEEK TAB -->
-<div id="tab-geek" class="tab">
-  <!-- Activity States (HMM) -->
-  <div class="sec" id="hmm-section" style="display:none">
-    <div class="sec-header"><h2>🧩 Activity States (HMM)</h2><span class="sec-sub">Hidden Markov Model — what the home is "doing"</span></div>
-    <div id="hmm-current" style="margin-bottom:8px"></div>
-    <div id="hmm-states"></div>
-  </div>
-
-  <!-- Routine Sequences -->
-  <div class="sec" id="sequences-section" style="display:none">
-    <div class="sec-header"><h2>🔄 Routine Sequences (PrefixSpan)</h2><span class="sec-sub">Ordered event flows mined from history</span></div>
-    <div id="sequences-list"></div>
-  </div>
-
-  <!-- Next-Action Predictions (Markov) -->
-  <div class="sec" id="markov-section" style="display:none">
-    <div class="sec-header"><h2>🎯 Next-Action Predictions (Markov)</h2><span class="sec-sub">Transition probabilities between actions</span></div>
-    <div id="markov-list"></div>
-  </div>
-
-  <!-- Deep Correlations -->
-  <div class="sec" id="correlations-section" style="display:none">
-    <div class="sec-header"><h2>🔗 Deep Correlations</h2><span class="sec-sub">Statistically significant entity relationships</span></div>
-    <div id="corr-stats" style="font-size:.8rem;color:var(--text3);margin-bottom:8px"></div>
-    <div id="correlations-list"></div>
-  </div>
-
-  <!-- Device Training Mode -->
-  <div class="sec">
-    <div class="sec-header"><h2>🎓 Device Training</h2><span class="sec-sub">Teach Habitus your appliances by turning them on</span></div>
-    <div id="training-ui">
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-        <select id="train-power-entity" style="flex:1;min-width:200px;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:.85rem">
-          <option value="">Select power sensor...</option>
-        </select>
-      </div>
-      <div id="train-idle">
-        <p style="font-size:.82rem;color:var(--text3);margin:0 0 8px">1. Select your main power sensor<br>2. Click Start → turn on ONE device → Click Stop<br>3. Name it → fingerprint saved</p>
-        <button class="btn btn-accent" onclick="startTraining()">▶️ Start Recording</button>
-      </div>
-      <div id="train-recording" style="display:none">
-        <div class="card" style="padding:12px;border-left:3px solid var(--amber);margin-bottom:8px">
-          <b>🔴 Recording...</b> Turn on your device now.
-          <div style="font-size:.8rem;color:var(--text3)" id="train-baseline">Baseline: --</div>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center">
-          <input type="text" id="train-device-name" placeholder="Device name (e.g., Hob Ring 1)" style="flex:1;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:.85rem">
-          <button class="btn btn-accent" onclick="stopTraining()">⏹ Stop & Save</button>
-        </div>
-      </div>
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- ONBOARDING WIZARD (full-screen modal)                          -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="onboarding-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.8);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:var(--card);border-radius:16px;padding:32px;max-width:560px;width:90%;max-height:90vh;overflow-y:auto">
+    <div id="onboarding-progress" style="display:flex;gap:8px;margin-bottom:24px">
+      <div class="ob-step" style="flex:1;height:4px;background:var(--accent);border-radius:2px"></div>
+      <div class="ob-step" style="flex:1;height:4px;background:var(--border);border-radius:2px"></div>
+      <div class="ob-step" style="flex:1;height:4px;background:var(--border);border-radius:2px"></div>
+      <div class="ob-step" style="flex:1;height:4px;background:var(--border);border-radius:2px"></div>
+      <div class="ob-step" style="flex:1;height:4px;background:var(--border);border-radius:2px"></div>
+      <div class="ob-step" style="flex:1;height:4px;background:var(--border);border-radius:2px"></div>
     </div>
-
-    <!-- Custom signatures list -->
-    <div id="custom-sigs" style="margin-top:12px"></div>
-  </div>
-
-  <!-- Anomaly Feedback Stats -->
-  <div class="sec">
-    <div class="sec-header"><h2>📊 Anomaly Feedback</h2><span class="sec-sub">Your confirmations improve the model</span></div>
-    <div id="feedback-stats"></div>
-    <div style="margin-top:8px">
-      <label style="font-size:.82rem;color:var(--text3);cursor:pointer">
-        <input type="checkbox" id="sharing-toggle" onchange="toggleSharing(this.checked)">
-        Share anonymised anomaly data to improve Habitus for everyone
-      </label>
-      <div style="font-size:.72rem;color:var(--text3);margin-top:4px">Only entity domains, scores, and feedback actions are shared. No names, IPs, or identifying info.</div>
-    </div>
-  </div>
-
-  <!-- History Depth -->
-  <div class="sec">
-    <div class="sec-header"><h2>📅 Analysis History Depth</h2></div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <select id="history-depth" style="background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:.85rem" onchange="saveHistoryDepth()">
-        <option value="30">30 days</option>
-        <option value="90">90 days</option>
-        <option value="180">6 months</option>
-        <option value="365">1 year</option>
-        <option value="730">2 years</option>
-        <option value="1095">3 years</option>
-        <option value="3650">All history (max 10 years)</option>
-      </select>
-      <span style="font-size:.78rem;color:var(--text3)">More history = longer training but richer patterns</span>
+    <div id="onboarding-content">
+      <h2 style="margin:0 0 12px">👋 Welcome to Habitus</h2>
+      <p style="color:var(--text2);margin:0 0 24px">Habitus learns your home's behaviour and suggests automations — privately, locally, without cloud.</p>
+      <button onclick="obNext()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:12px 24px;font-size:1rem;cursor:pointer;width:100%">Get Started →</button>
+      <button onclick="obSkip()" style="background:none;color:var(--text3);border:none;padding:8px;cursor:pointer;width:100%;margin-top:8px;font-size:.85rem">Skip setup</button>
     </div>
   </div>
 </div>
@@ -1350,6 +1438,15 @@ pre.raw {
     <div id="prog-desc" style="color:var(--text2);font-size:.78rem;margin-bottom:6px">Fetching...</div>
     <div class="prog-bar-wrap" style="height:4px;background:var(--card2);border-radius:2px;overflow:hidden">
       <div class="prog-bar" id="prog-bar" style="width:0%;height:100%;background:var(--accent);transition:width .3s"></div>
+    </div>
+    <div id="prog-meta" style="font-size:.72rem;color:var(--text3);margin-top:6px"></div>
+    <span id="prog-rows" style="font-size:.7rem;color:var(--text3)"></span>
+    <div class="prog-steps" style="margin-top:12px">
+      <div id="ps-fetching" class="prog-step">Fetch</div>
+      <div id="ps-building_baselines" class="prog-step">Baselines</div>
+      <div id="ps-training" class="prog-step">Train</div>
+      <div id="ps-seasonal_training" class="prog-step">Seasons</div>
+      <div id="ps-pattern_analysis" class="prog-step">Patterns</div>
     </div>
   </div>
 </div>
@@ -1428,10 +1525,21 @@ function dismissAnomaly(anomalyId, entityId, score){
 }
 
 function gotoTab(id, btn) {
+  // Normalise: strip 'tab-' prefix so both 'home' and 'tab-home' work
+  const tabId = (id || '').replace(/^tab-/, '');
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.querySelectorAll('nav button').forEach(b=>b.classList.remove('active'));
-  document.getElementById('tab-'+id).classList.add('active');
-  btn.classList.add('active');
+  const tabEl = document.getElementById('tab-'+tabId);
+  if (tabEl) tabEl.classList.add('active');
+  if (btn) {
+    btn.classList.add('active');
+  } else {
+    // Re-activate the nav button that matches this tab
+    document.querySelectorAll('nav button').forEach(b => {
+      const oc = b.getAttribute('onclick') || '';
+      if (oc.includes("'"+tabId+"'") || oc.includes('"'+tabId+'"')) b.classList.add('active');
+    });
+  }
 }
 
 function toast(msg, type='ts') {
@@ -1684,6 +1792,53 @@ function updateTrainingLog(progress, state) {
   }
 }
 
+// ── Energy/Weather loader (global so onchange can call it) ────────────────────
+function loadEnergyWeather(){
+  const rangeEl = document.getElementById('ew-range');
+  const days = rangeEl ? rangeEl.value : 90;
+  api(`api/energy_weather_history?days=${days}`).catch(()=>({days:[]})).then(ew => {
+    const body = document.getElementById('ew-body');
+    const chart = document.getElementById('ew-chart');
+    if (!ew.days || ew.days.length === 0) { if(body) body.innerHTML='<tr><td colspan="6" style="color:var(--text3);padding:8px">No data yet. Needs energy + temperature sensors.</td></tr>'; return; }
+
+    const maxKwh = Math.max(...ew.days.map(d => d.kwh));
+    const maxTemp = Math.max(...ew.days.filter(d=>d.avg_temp!==null).map(d=>d.avg_temp), 1);
+    const minTemp = Math.min(...ew.days.filter(d=>d.avg_temp!==null).map(d=>d.avg_temp), 0);
+
+    // Mini chart
+    const chartW = Math.min(ew.days.length, 90);
+    const recent = ew.days.slice(-chartW);
+    if (chart) chart.innerHTML = `<div style="display:flex;align-items:flex-end;height:80px;gap:1px;margin-bottom:4px">
+      ${recent.map(d => {
+        const kwPct = maxKwh > 0 ? d.kwh / maxKwh * 100 : 0;
+        const isWeekend = d.is_weekend;
+        return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;height:100%;justify-content:flex-end" title="${d.date}: ${d.kwh}kWh, ${d.avg_temp!==null?d.avg_temp+'°C':'?'}">
+          <div style="width:100%;background:${isWeekend?'var(--amber)':'var(--accent)'};height:${kwPct}%;min-height:1px;border-radius:1px 1px 0 0;opacity:0.7"></div>
+        </div>`;
+      }).join('')}
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:.65rem;color:var(--text3)">
+      <span>${recent[0]?.date||''}</span>
+      <span style="color:var(--accent)">■ kWh (amber=weekend)</span>
+      <span>${recent[recent.length-1]?.date||''}</span>
+    </div>`;
+
+    // Table
+    if (body) body.innerHTML = ew.days.slice().reverse().map(d => {
+      const barW = maxKwh > 0 ? d.kwh / maxKwh * 100 : 0;
+      const tempColor = d.avg_temp !== null ? (d.avg_temp < 5 ? 'var(--blue)' : d.avg_temp > 20 ? 'var(--red)' : 'var(--text3)') : 'var(--text3)';
+      return `<tr style="border-bottom:1px solid var(--border);${d.is_weekend?'background:rgba(255,255,255,0.02)':''}">
+        <td style="padding:3px 4px;white-space:nowrap">${d.day_name} ${d.date}</td>
+        <td style="padding:3px 4px;text-align:right;font-weight:600">${d.kwh}</td>
+        <td style="padding:3px 4px;text-align:right;color:${tempColor}">${d.avg_temp!==null?d.avg_temp:'—'}</td>
+        <td style="padding:3px 4px;text-align:right;color:${tempColor}">${d.min_temp!==null?d.min_temp:'—'}</td>
+        <td style="padding:3px 4px;text-align:right;color:${tempColor}">${d.max_temp!==null?d.max_temp:'—'}</td>
+        <td style="padding:3px 4px;width:120px"><div style="height:10px;border-radius:2px;background:var(--accent);width:${barW}%;opacity:0.6"></div></td>
+      </tr>`;
+    }).join('');
+  });
+}
+
 async function load() {
   const [state, baseline, progress, patterns, suggestions, anomalies, phantomData, driftData, autoScores, gapData, scenesData, smartSuggestions, haAutomations, sceneAnalysis] = await Promise.all([
     api('api/state').catch(()=>({})),
@@ -1727,26 +1882,26 @@ async function load() {
       scoring:            `Scoring current state`,
     }[phase] || phase;
     document.getElementById('prog-desc').textContent = desc;
-    // Animated row ticker during fetch
     if(phase==='fetching'){
-      document.getElementById('prog-rows').textContent = rows+' rows';
+      const rowsEl = document.getElementById('prog-rows');
+      if (rowsEl) rowsEl.textContent = rows+' rows';
     }
     document.getElementById('prog-bar').style.width = (progress.pct||0)+'%';
     const eta = progress.eta_min>0 ? `~${progress.eta_min} min remaining` : '';
     const el  = progress.elapsed_min ? `${progress.elapsed_min} min elapsed` : '';
-    document.getElementById('prog-meta').textContent = [el,eta].filter(Boolean).join(' · ');
-    // Step indicators
+    const metaEl = document.getElementById('prog-meta');
+    if (metaEl) metaEl.textContent = [el,eta].filter(Boolean).join(' · ');
     const phaseIdx = phaseOrder.indexOf(phase);
     phaseOrder.forEach((p,i)=>{
-      const el = document.getElementById('ps-'+p);
-      if (!el) return;
-      el.className = 'prog-step' + (i < phaseIdx ? ' done' : i===phaseIdx ? ' active' : '');
+      const el2 = document.getElementById('ps-'+p);
+      if (!el2) return;
+      el2.className = 'prog-step' + (i < phaseIdx ? ' done' : i===phaseIdx ? ' active' : '');
     });
     document.getElementById('hdr-dot').className = 'status-dot warn';
     const winLabel = progress.progressive_window ? ` (${progress.progressive_window}d window)` : '';
     if(document.getElementById('hdr-version'))document.getElementById('hdr-version').textContent='v'+(progress.version||state.version||'—');
-  document.getElementById('hdr-label').textContent = `Training ${progress.pct||0}%${winLabel}`;
-    if (!hasData) return;  // only block if no data yet
+    document.getElementById('hdr-label').textContent = `Training ${progress.pct||0}%${winLabel}`;
+    if (!hasData) return;
   }
   document.getElementById('prog-overlay').style.display = 'none';
 
@@ -1755,9 +1910,8 @@ async function load() {
     document.getElementById('hdr-version').textContent = 'v' + (state.version || '—');
   }
 
-  // Header — treat as normal during warmup grace period
+  // Header
   const warmingUp = state.warming_up || state.phase === 'warming_up';
-  const warmupDaysLeft = state.warmup_days_remaining ?? 0;
   const score = warmingUp ? 0 : (state.anomaly_score ?? 0);
   document.getElementById('hdr-dot').className = 'status-dot ' + (score>=70?'bad':score>=40?'warn':'ok');
   document.getElementById('hdr-label').textContent = score>=70?'Anomaly Detected':score>=40?'Elevated':'Normal';
@@ -1842,7 +1996,7 @@ async function load() {
     return`<tr${cur}><td><span style="font-weight:${h===nowH?700:400}">${String(h).padStart(2,'0')}:00</span> <span style="color:var(--text3);font-size:.7rem">${pd}</span>${h===nowH?' <span class="badge b-info" style="padding:1px 6px;font-size:.66rem">now</span>':''}</td><td>${fmtW(mean)}</td><td style="color:var(--text3)">±${fmtW(std)}</td><td><div class="bar-wrap"><div class="bar" style="width:${pct}%"></div></div></td></tr>`;
   }).join('');
 
-  // Anomaly breakdown
+  // Anomaly breakdown (Health tab)
   const allE = anomalies.anomalies||[];
   const bts = anomalies.timestamp ? 'as of '+new Date(anomalies.timestamp).toLocaleString() : '';
   document.getElementById('bd-ts').textContent = bts;
@@ -1862,7 +2016,7 @@ async function load() {
         </tr>`;}).join('')
     : '<tr><td colspan="6" style="color:var(--text3);padding:16px">No entity anomalies detected.</td></tr>';
 
-  // Smart Suggestions (prefer smart_suggestions which include scenes; fallback to legacy)
+  // Smart Suggestions
   const smartSugList = (smartSuggestions && smartSuggestions.suggestions && smartSuggestions.suggestions.length)
     ? smartSuggestions.suggestions : suggestions;
   allSuggestions = smartSugList;
@@ -1872,6 +2026,8 @@ async function load() {
     const sec = document.getElementById('hmm-section');
     if (!h.states || h.states.length === 0) { sec.style.display='none'; return; }
     sec.style.display='';
+    const geekEmpty = document.getElementById('geek-empty-msg');
+    if (geekEmpty) geekEmpty.style.display = 'none';
     const icons = {sleeping:'😴',away:'🚶',cooking:'🍳',working:'💻',relaxing:'📺',morning_routine:'☀️',active:'🏃',idle:'🏠'};
     document.getElementById('hmm-current').innerHTML = `<div class="card" style="padding:12px;border-left:3px solid var(--accent)">
       <b>Current state:</b> ${icons[h.current_state]||'❓'} <b>${(h.current_state||'unknown').replace('_',' ')}</b>
@@ -1916,7 +2072,7 @@ async function load() {
     document.getElementById('drift-list').innerHTML = da.drifts.slice(0,10).map(d => `
       <div class="card" style="padding:10px;margin-bottom:6px;border-left:3px solid ${d.shift_minutes>0?'var(--accent)':'var(--blue)'}">
         <div style="display:flex;justify-content:space-between">
-          <b>${d.name}</b> <span style="font-size:.75rem">${d.room||''}</span>
+          <b>${d.name} <span style="font-size:.75rem">${d.room||''}</span>
         </div>
         <div style="font-size:.82rem;color:var(--text3)">${d.description}</div>
         <div style="font-size:.72rem;color:var(--accent);margin-top:2px">${d.confidence}% confident · suggestion: shift to ${d.recent_avg_time}</div>
@@ -1929,6 +2085,8 @@ async function load() {
     const sec = document.getElementById('sequences-section');
     if (!sq.sequences || sq.sequences.length === 0) { sec.style.display='none'; return; }
     sec.style.display='';
+    const geekEmpty = document.getElementById('geek-empty-msg');
+    if (geekEmpty) geekEmpty.style.display = 'none';
     document.getElementById('sequences-list').innerHTML = sq.sequences.slice(0,15).map(s => `
       <div class="card" style="padding:10px;margin-bottom:6px">
         <div style="display:flex;justify-content:space-between">
@@ -1945,6 +2103,8 @@ async function load() {
     const sec = document.getElementById('markov-section');
     if (!mk.predictions || mk.predictions.length === 0) { sec.style.display='none'; return; }
     sec.style.display='';
+    const geekEmpty = document.getElementById('geek-empty-msg');
+    if (geekEmpty) geekEmpty.style.display = 'none';
     document.getElementById('markov-list').innerHTML = mk.predictions.slice(0,15).map(p => `
       <div class="card" style="padding:10px;margin-bottom:6px">
         <div style="font-size:.85rem">${p.description}</div>
@@ -1961,6 +2121,8 @@ async function load() {
     const stats = document.getElementById('corr-stats');
     if (!cd.suggestions || cd.suggestions.length === 0) { sec.style.display='none'; return; }
     sec.style.display='';
+    const geekEmpty = document.getElementById('geek-empty-msg');
+    if (geekEmpty) geekEmpty.style.display = 'none';
     const s = cd.stats || {};
     stats.textContent = `${cd.total_correlations} correlations found · ${cd.actionable_suggestions} actionable · ${s.entities_analysed || '?'} entities · ${s.total_events || '?'} events analysed`;
     const catIcons = {trigger_action:'⚡',room_routine:'🏠',cross_room_routine:'🚪→🚪',presence_driven:'👤',climate_response:'🌡️',general:'🔗'};
@@ -2002,11 +2164,8 @@ async function load() {
     `).join('');
   });
 
-  // ── Active Conflicts ──
+  // ── Active Conflicts (populates automation-conflicts-list in Automations tab) ──
   api('api/conflicts').catch(()=>({conflicts:[]})).then(cd => {
-    const el = document.getElementById('conflicts-list');
-    const sec = document.getElementById('conflicts-section');
-    // Also populate the automation-conflicts-list section
     const acListEl = document.getElementById('automation-conflicts-list');
     if (acListEl) {
       if (!cd.conflicts || cd.conflicts.length === 0) {
@@ -2021,24 +2180,11 @@ async function load() {
             </div>
             <div style="font-size:.82rem;color:var(--text3);margin-top:4px">${c.description||''}</div>
             <div style="font-size:.82rem;margin-top:6px">💡 ${c.suggestion||''}</div>
+            ${c.est_waste_w ? `<div style="font-size:.75rem;color:var(--text3);margin-top:4px">~${c.est_waste_w}W estimated waste</div>` : ''}
+            ${c.yaml ? `<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--accent);font-size:.8rem">Fix automation YAML</summary><pre style="font-size:.72rem;margin-top:4px">${c.yaml}</pre></details>` : ''}
           </div>`).join('');
       }
     }
-    if (!cd.conflicts || cd.conflicts.length === 0) { sec.style.display='none'; return; }
-    sec.style.display='';
-    const sevColors = {critical:'#ff4444',high:'#ff8800',medium:'#ffbb33',low:'var(--text3)'};
-    el.innerHTML = cd.conflicts.map(c => `
-      <div class="card" style="padding:12px;margin-bottom:8px;border-left:3px solid ${sevColors[c.severity]||'var(--border)'}">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <div><span style="font-size:1.2rem">${c.icon||'⚠️'}</span> <b>${c.title}</b></div>
-          <span style="font-size:.75rem;color:${sevColors[c.severity]};text-transform:uppercase">${c.severity}</span>
-        </div>
-        <div style="font-size:.82rem;color:var(--text3);margin-top:4px">${c.description}</div>
-        <div style="font-size:.82rem;margin-top:6px">💡 ${c.suggestion}</div>
-        ${c.est_waste_w ? `<div style="font-size:.75rem;color:var(--text3);margin-top:4px">~${c.est_waste_w}W estimated waste</div>` : ''}
-        ${c.yaml ? `<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--accent);font-size:.8rem">Fix automation YAML</summary><pre style="font-size:.72rem;margin-top:4px">${c.yaml}</pre></details>` : ''}
-      </div>
-    `).join('');
   });
 
   // Discovered Scenes
@@ -2162,12 +2308,11 @@ async function load() {
       ${sm[s]?'<span class="badge b-ok">Trained</span>':'<span class="badge b-muted">No data</span>'}
     </div>`).join('');
 
-  // Insights — Energy Dashboard stats (same data HA shows)
+  // Phantom Loads
   const pd = phantomData && !Array.isArray(phantomData) ? phantomData : {};
   const months = pd.months || [];
   const phantom = pd.overnight_baseline || {};
   const total12mo = pd.total_12mo_kwh || 0;
-  const momPct = pd.mom_pct;
 
   function kwhBar(val, max) {
     const pct = max > 0 ? Math.round(val/max*100) : 0;
@@ -2175,8 +2320,6 @@ async function load() {
   }
 
   let phantomHtml = '';
-
-  // 12-month total header
   if (total12mo) {
     phantomHtml += `<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:14px">
       <div style="font-size:.78rem;color:var(--text3);margin-bottom:6px">LAST 12 MONTHS (from Energy Dashboard)</div>
@@ -2186,8 +2329,6 @@ async function load() {
       </div>
     </div>`;
   }
-
-  // Phantom baseline card
   if (phantom.overnight_kwh_year) {
     const phantomPct = total12mo > 0 ? Math.round(100 * phantom.overnight_kwh_year / total12mo) : null;
     phantomHtml += `<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:14px">
@@ -2198,11 +2339,8 @@ async function load() {
         <span style="color:var(--text2)">→ ${Math.round(phantom.overnight_kwh_year).toLocaleString()} kWh/year</span>
         ${phantomPct ? `<span style="color:var(--amber)">(${phantomPct}% of usage)</span>` : ''}
       </div>
-      <div style="font-size:.75rem;color:var(--text3);margin-top:4px">Typical overnight draw when on shore power</div>
     </div>`;
   }
-
-  // Day-normalized comparison
   const cmp = pd.same_days_comparison || {};
   const avgDaily = pd.this_month_avg_daily;
   const lastAvgDaily = pd.last_month_avg_daily;
@@ -2229,8 +2367,6 @@ async function load() {
       <div style="margin-top:8px;font-size:.82rem">${arrow} ${cmp.delta_kwh > 0 ? '+' : ''}${cmp.delta_kwh} kWh</div>
     </div>`;
   }
-
-  // Monthly breakdown table
   if (months.length) {
     const maxMonth = Math.max(...months.map(m=>m.kwh), 1);
     phantomHtml += `<div style="font-size:.82rem;font-weight:600;color:var(--text2);margin:12px 0 8px">Monthly Usage</div>
@@ -2283,52 +2419,6 @@ async function load() {
     el.innerHTML = html;
   });
 
-  // ── Energy + Weather History ──
-  function loadEnergyWeather(){
-    const days = document.getElementById('ew-range').value;
-    api(`api/energy_weather_history?days=${days}`).catch(()=>({days:[]})).then(ew => {
-      const body = document.getElementById('ew-body');
-      const chart = document.getElementById('ew-chart');
-      if (!ew.days || ew.days.length === 0) { body.innerHTML='<tr><td colspan="6" style="color:var(--text3);padding:8px">No data yet. Needs energy + temperature sensors.</td></tr>'; return; }
-
-      const maxKwh = Math.max(...ew.days.map(d => d.kwh));
-      const maxTemp = Math.max(...ew.days.filter(d=>d.avg_temp!==null).map(d=>d.avg_temp), 1);
-      const minTemp = Math.min(...ew.days.filter(d=>d.avg_temp!==null).map(d=>d.avg_temp), 0);
-
-      // Mini chart — dual bar (energy=blue, temp=amber)
-      const chartW = Math.min(ew.days.length, 90);
-      const recent = ew.days.slice(-chartW);
-      chart.innerHTML = `<div style="display:flex;align-items:flex-end;height:80px;gap:1px;margin-bottom:4px">
-        ${recent.map(d => {
-          const kwPct = maxKwh > 0 ? d.kwh / maxKwh * 100 : 0;
-          const tempPct = d.avg_temp !== null && (maxTemp - minTemp) > 0 ? (d.avg_temp - minTemp) / (maxTemp - minTemp) * 100 : 0;
-          const isWeekend = d.is_weekend;
-          return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;height:100%;justify-content:flex-end" title="${d.date}: ${d.kwh}kWh, ${d.avg_temp!==null?d.avg_temp+'°C':'?'}">
-            <div style="width:100%;background:${isWeekend?'var(--amber)':'var(--accent)'};height:${kwPct}%;min-height:1px;border-radius:1px 1px 0 0;opacity:0.7"></div>
-          </div>`;
-        }).join('')}
-      </div>
-      <div style="display:flex;justify-content:space-between;font-size:.65rem;color:var(--text3)">
-        <span>${recent[0]?.date||''}</span>
-        <span style="color:var(--accent)">■ kWh (amber=weekend)</span>
-        <span>${recent[recent.length-1]?.date||''}</span>
-      </div>`;
-
-      // Table
-      body.innerHTML = ew.days.slice().reverse().map(d => {
-        const barW = maxKwh > 0 ? d.kwh / maxKwh * 100 : 0;
-        const tempColor = d.avg_temp !== null ? (d.avg_temp < 5 ? 'var(--blue)' : d.avg_temp > 20 ? 'var(--red)' : 'var(--text3)') : 'var(--text3)';
-        return `<tr style="border-bottom:1px solid var(--border);${d.is_weekend?'background:rgba(255,255,255,0.02)':''}">
-          <td style="padding:3px 4px;white-space:nowrap">${d.day_name} ${d.date}</td>
-          <td style="padding:3px 4px;text-align:right;font-weight:600">${d.kwh}</td>
-          <td style="padding:3px 4px;text-align:right;color:${tempColor}">${d.avg_temp!==null?d.avg_temp:'—'}</td>
-          <td style="padding:3px 4px;text-align:right;color:${tempColor}">${d.min_temp!==null?d.min_temp:'—'}</td>
-          <td style="padding:3px 4px;text-align:right;color:${tempColor}">${d.max_temp!==null?d.max_temp:'—'}</td>
-          <td style="padding:3px 4px;width:120px"><div style="height:10px;border-radius:2px;background:var(--accent);width:${barW}%;opacity:0.6"></div></td>
-        </tr>`;
-      }).join('');
-    });
-  }
   loadEnergyWeather();
 
   // ── NILM Disaggregation ──
@@ -2339,8 +2429,6 @@ async function load() {
       else { sec.style.display='none'; return; }
     }
     sec.style.display='';
-
-    // Current breakdown (pie-like bar)
     if (n.current_breakdown && n.current_breakdown.length > 0) {
       const total = n.current_total_w || 0;
       const colors = ['var(--accent)','var(--blue)','var(--amber)','var(--red)','#8b5cf6','#10b981','#f59e0b','#ef4444','#6366f1','#ec4899'];
@@ -2358,8 +2446,6 @@ async function load() {
           </div>
         </div>`;
     }
-
-    // Discovered appliances
     if (n.discovered_appliances && n.discovered_appliances.length > 0) {
       document.getElementById('nilm-appliances').innerHTML =
         '<div style="font-size:.82rem;margin-bottom:4px"><b>Discovered Appliance Slots</b></div>' +
@@ -2370,8 +2456,6 @@ async function load() {
           </div>
         `).join('');
     }
-
-    // 24h energy breakdown
     if (n.energy_24h && n.energy_24h.length > 0) {
       document.getElementById('nilm-energy').innerHTML = `
         <div style="font-size:.82rem;margin-bottom:4px"><b>Last 24h Energy by Appliance</b> (${n.total_kwh_24h} kWh total)</div>
@@ -2417,48 +2501,7 @@ async function load() {
     document.getElementById('history-depth').value = String(d);
   });
 
-  // ── Predicted Routines ──
-  api('api/routines').catch(()=>({routines:[]})).then(rd => {
-    const el = document.getElementById('routines-list');
-    if (!rd.routines || rd.routines.length === 0) {
-      el.innerHTML = '<div style="color:var(--text3);padding:12px">No recurring routines detected yet. Needs humidity/temperature sensor data.</div>';
-      return;
-    }
-    el.innerHTML = rd.routines.map(r => `
-      <div class="card" style="padding:12px;margin-bottom:8px">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <div><span style="font-size:1.3rem">${r.icon}</span> <b>${r.activity.replace(/_/g,' ')} — ${r.room.replace(/_/g,' ')}</b></div>
-          <span style="font-size:.75rem;color:var(--accent)">${r.confidence}% confident</span>
-        </div>
-        <div style="font-size:.85rem;margin-top:6px">
-          ⏰ Usually at <b>${r.typical_time}</b> (${r.day_pattern}) · ${r.events_per_day}/day · ~${r.avg_duration_min} min each
-        </div>
-        <div style="font-size:.85rem;margin-top:4px;color:var(--accent)">
-          💡 Suggestion: ${r.suggestion}
-        </div>
-        ${r.yaml ? `<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--accent);font-size:.8rem">Pre-heat automation YAML</summary><pre style="font-size:.72rem;margin-top:4px">${r.yaml}</pre></details>` : ''}
-      </div>
-    `).join('');
-  });
-
-  // Insights — Routine Drift
-  if (driftData && driftData.drifts && driftData.drifts.length) {
-    const sig = driftData.drifts.filter(d=>d.significant);
-    document.getElementById('drift-info').innerHTML = `
-      <div style="margin-bottom:14px;font-size:.88rem;font-weight:600;color:${sig.length?'var(--amber)':'var(--green)'}">${driftData.summary || 'No significant drift'}</div>
-      <div class="pat-grid">${driftData.drifts.map(d=>`
-        <div class="pat-item">
-          <div class="pi-label">${d.metric.replace(/_/g,' ')}</div>
-          <div class="pi-val" style="color:${d.significant?'var(--amber)':'var(--text)'}">${d.diff_min!=null?(d.diff_min>0?'+':'')+d.diff_min+' min':d.diff+' '+d.unit}</div>
-          ${d.direction?`<div style="font-size:.72rem;color:var(--text3)">${d.direction}</div>`:''}
-        </div>`).join('')}
-      </div>`;
-  } else {
-    const reason = driftData.reason || 'Not enough data yet';
-    document.getElementById('drift-info').innerHTML = `<div style="color:var(--text3);padding:12px">${reason}</div>`;
-  }
-
-  // Insights — Automation Health
+  // ── Automation Health Scores ──
   if (autoScores && autoScores.length) {
     document.getElementById('auto-scores').innerHTML = `
       <div class="table-wrap">
@@ -2481,12 +2524,13 @@ async function load() {
   } else {
     document.getElementById('auto-scores').innerHTML = '<div style="color:var(--text3);padding:12px">No automations scored yet.</div>';
   }
-  // Insights — Automation Gaps
+
+  // ── Automation Gaps ──
   const gaps = (gapData && gapData.gaps) ? gapData.gaps : [];
   if (gaps.length) {
     const missing = gaps.filter(g=>g.status==='missing');
     const poor = gaps.filter(g=>g.status==='exists_poor');
-    const disabled = gaps.filter(g=>g.status==='exists_disabled');
+    const disabled2 = gaps.filter(g=>g.status==='exists_disabled');
     const working = gaps.filter(g=>g.status==='exists_working');
     let html = '';
     if (gapData.summary) html += `<div style="margin-bottom:14px;font-size:.82rem;color:var(--text2)">${gapData.summary}</div>`;
@@ -2517,9 +2561,9 @@ async function load() {
         </div>`;
       });
     }
-    if (disabled.length) {
-      html += `<div style="font-weight:600;margin:14px 0 8px;color:var(--text2)">Disabled automations (${disabled.length})</div>`;
-      disabled.forEach(g=>{
+    if (disabled2.length) {
+      html += `<div style="font-weight:600;margin:14px 0 8px;color:var(--text2)">Disabled automations (${disabled2.length})</div>`;
+      disabled2.forEach(g=>{
         html += `<div class="sug" style="margin-bottom:10px">
           <div class="sug-head"><h3>${g.suggestion}</h3><span class="badge b-muted">disabled</span></div>
           <div class="desc">${g.improvement||''}</div>
@@ -2540,11 +2584,47 @@ async function load() {
     document.getElementById('auto-gap').innerHTML = '<div style="color:var(--text3);padding:12px">No gap analysis yet — run Habitus first.</div>';
   }
 
-
-  // Settings
+  // Settings raw state
   document.getElementById('raw-state').textContent = JSON.stringify(state,null,2);
 
-  // ── 5a) Unified Insights Summary ────────────────────────────────────────
+  // Schedule info
+  const schedule = '{{ schedule }}' || state.schedule || 'overnight';
+  const trainTime = '{{ train_time }}' || state.train_time || '02:00';
+  const lastScore = state.last_score ? new Date(state.last_score).toLocaleString() : 'never';
+  const lastTrain = state.last_run  ? new Date(state.last_run).toLocaleString()   : 'never';
+  const modeLabels = {
+    overnight: `<span class="badge b-info">🌙 Overnight</span>`,
+    continuous: `<span class="badge b-warn">🔄 Continuous</span>`,
+  };
+  const siEl2 = document.getElementById('schedule-info');
+  if (siEl2) siEl2.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+      <div class="pat-item">
+        <div class="pi-label">Mode</div>
+        <div style="margin-top:4px">${modeLabels[schedule] || schedule}</div>
+      </div>
+      <div class="pat-item">
+        <div class="pi-label">Train Time</div>
+        <div class="pi-val">${schedule === 'overnight' ? trainTime : 'every run'}</div>
+      </div>
+      <div class="pat-item">
+        <div class="pi-label">Last Full Train</div>
+        <div style="font-size:.78rem;color:var(--text2);margin-top:2px">${lastTrain}</div>
+      </div>
+      <div class="pat-item">
+        <div class="pi-label">Last Score</div>
+        <div style="font-size:.78rem;color:var(--text2);margin-top:2px">${lastScore}</div>
+      </div>
+    </div>
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:.8rem;color:var(--text2);line-height:1.6">
+      ${schedule === 'overnight'
+        ? `🌙 <strong style="color:var(--text)">Overnight mode</strong> — model retrains once per day at <strong>${trainTime}</strong> when your home is idle. During the day, Habitus scores every ${state.scan_interval_hours || 6}h using the existing model (fast, no resource usage).`
+        : `🔄 <strong style="color:var(--text)">Continuous mode</strong> — model retrains on every scan cycle. More responsive to pattern changes but uses more CPU. Not recommended for low-powered devices.`
+      }
+      <br><br>Change this in <strong>Settings → Add-on → Configuration</strong> in Home Assistant.
+    </div>`;
+
+  // ── Unified Insights Summary ──
   (async () => {
     const [conflictsData, healthData, batteryData, gapD, guestData] = await Promise.all([
       api('api/conflicts').catch(()=>({})),
@@ -2556,38 +2636,38 @@ async function load() {
 
     const chips = [];
 
-    // Conflicts
+    // Conflicts → Automations tab
     const nConflicts = conflictsData?.count ?? (conflictsData?.conflicts?.length ?? 0);
     if (nConflicts > 0) {
-      chips.push(`<a href="#" class="insight-chip chip-danger" onclick="gotoTab('tab-smarthome',null);return false;" title="Jump to Conflicts">⚡ ${nConflicts} conflict${nConflicts!==1?'s':''}</a>`);
+      chips.push(`<a href="#" class="insight-chip chip-danger" onclick="gotoTab('automations',null);return false;" title="Jump to Conflicts">⚡ ${nConflicts} conflict${nConflicts!==1?'s':''}</a>`);
     }
 
-    // Dead automations
+    // Dead automations → Automations tab
     const deadCount = (healthData?.automations || []).filter(a => a.status === 'dead').length;
     if (deadCount > 0) {
-      chips.push(`<a href="#" class="insight-chip chip-warn" onclick="gotoTab('tab-smarthome',null);return false;" title="Jump to Automation Health">💤 ${deadCount} dead automation${deadCount!==1?'s':''}</a>`);
+      chips.push(`<a href="#" class="insight-chip chip-warn" onclick="gotoTab('automations',null);return false;" title="Jump to Automation Health">💤 ${deadCount} dead automation${deadCount!==1?'s':''}</a>`);
     }
 
-    // Battery alerts
+    // Battery alerts → Health tab
     const batteryAlerts = (batteryData?.batteries || []).filter(b => b.level_pct !== null && b.level_pct < 20).length;
     if (batteryAlerts > 0) {
-      chips.push(`<a href="#" class="insight-chip chip-danger" onclick="gotoTab('tab-smarthome',null);return false;" title="Jump to Battery Status">🔋 ${batteryAlerts} battery alert${batteryAlerts!==1?'s':''}</a>`);
+      chips.push(`<a href="#" class="insight-chip chip-danger" onclick="gotoTab('health',null);return false;" title="Jump to Battery Status">🔋 ${batteryAlerts} battery alert${batteryAlerts!==1?'s':''}</a>`);
     }
 
-    // Missing automation gaps
+    // Missing automation gaps → Suggestions tab
     const missingGaps = (gapD?.gaps || []).filter(g => g.status === 'missing').length;
     if (missingGaps > 0) {
-      chips.push(`<a href="#" class="insight-chip chip-info" onclick="gotoTab('tab-smarthome',null);return false;" title="Jump to Automation Gaps">🔧 ${missingGaps} missing automation${missingGaps!==1?'s':''}</a>`);
+      chips.push(`<a href="#" class="insight-chip chip-info" onclick="gotoTab('suggestions',null);return false;" title="Jump to Automation Gaps">🔧 ${missingGaps} missing automation${missingGaps!==1?'s':''}</a>`);
     }
 
-    // Cost saving potential
+    // Cost saving potential → Suggestions tab
     const totalSaving = [...(gapD?.gaps||[]), ...(Array.isArray(smartSuggestions?.suggestions) ? smartSuggestions.suggestions : [])]
       .reduce((sum, item) => sum + (item?.cost_estimate?.monthly_saving_eur || 0), 0);
     if (totalSaving > 0) {
-      chips.push(`<a href="#" class="insight-chip chip-ok" onclick="gotoTab('tab-smarthome',null);return false;" title="Potential monthly energy savings">€${totalSaving.toFixed(1)}/month savings</a>`);
+      chips.push(`<a href="#" class="insight-chip chip-ok" onclick="gotoTab('suggestions',null);return false;" title="Potential monthly energy savings">€${totalSaving.toFixed(1)}/month savings</a>`);
     }
 
-    // Guest mode
+    // Guest mode → Suggestions tab
     const guestProb = guestData?.guest_probability ?? 0;
     if (guestProb > 0.4) {
       chips.push(`<span class="insight-chip chip-info">👥 Guests may be present (${Math.round(guestProb*100)}%)</span>`);
@@ -2603,20 +2683,15 @@ async function load() {
     }
   })();
 
-  // ── 5d) Section collapse/expand (backed by localStorage) ─────────────────
+  // ── Section collapse/expand (backed by localStorage) ──
   document.querySelectorAll('.sec-header').forEach(hdr => {
     const sec = hdr.closest('.sec');
     if (!sec) return;
-    const body = sec.querySelector('.sec-body, :scope > :not(.sec-header)');
-    if (!body) return;
-
-    // Make the next sibling a .sec-body if not already
     const sectionId = hdr.querySelector('h2')?.textContent?.trim().replace(/[^a-z0-9]/gi,'_').toLowerCase();
     if (!sectionId) return;
     const storageKey = 'habitus_collapsed_' + sectionId;
 
     hdr.classList.add('collapsible');
-    // Wrap content in a .sec-body div if it isn't already
     const secBody = (() => {
       let el = hdr.nextElementSibling;
       if (el && !el.classList.contains('sec-body')) {
@@ -2649,42 +2724,6 @@ async function load() {
       localStorage.setItem(storageKey, isNowCollapsed ? '1' : '0');
     });
   });
-
-  // Schedule info
-  const schedule = '{{ schedule }}' || state.schedule || 'overnight';
-  const trainTime = '{{ train_time }}' || state.train_time || '02:00';
-  const lastScore = state.last_score ? new Date(state.last_score).toLocaleString() : 'never';
-  const lastTrain = state.last_run  ? new Date(state.last_run).toLocaleString()   : 'never';
-  const modeLabels = {
-    overnight: `<span class="badge b-info">🌙 Overnight</span>`,
-    continuous: `<span class="badge b-warn">🔄 Continuous</span>`,
-  };
-  document.getElementById('schedule-info').innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
-      <div class="pat-item">
-        <div class="pi-label">Mode</div>
-        <div style="margin-top:4px">${modeLabels[schedule] || schedule}</div>
-      </div>
-      <div class="pat-item">
-        <div class="pi-label">Train Time</div>
-        <div class="pi-val">${schedule === 'overnight' ? trainTime : 'every run'}</div>
-      </div>
-      <div class="pat-item">
-        <div class="pi-label">Last Full Train</div>
-        <div style="font-size:.78rem;color:var(--text2);margin-top:2px">${lastTrain}</div>
-      </div>
-      <div class="pat-item">
-        <div class="pi-label">Last Score</div>
-        <div style="font-size:.78rem;color:var(--text2);margin-top:2px">${lastScore}</div>
-      </div>
-    </div>
-    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:.8rem;color:var(--text2);line-height:1.6">
-      ${schedule === 'overnight'
-        ? `🌙 <strong style="color:var(--text)">Overnight mode</strong> — model retrains once per day at <strong>${trainTime}</strong> when your home is idle. During the day, Habitus scores every ${state.scan_interval_hours || 6}h using the existing model (fast, no resource usage).`
-        : `🔄 <strong style="color:var(--text)">Continuous mode</strong> — model retrains on every scan cycle. More responsive to pattern changes but uses more CPU. Not recommended for low-powered devices.`
-      }
-      <br><br>Change this in <strong>Settings → Add-on → Configuration</strong> in Home Assistant.
-    </div>`;
 }
 
 function runNilm(){
@@ -2746,6 +2785,12 @@ async function doRescan(){
   else toast('Failed: '+(d.error||'?'),'te');
   btn.disabled=false; btn.textContent='🔄 Full Rescan';
   btn.onclick=confirmRescan;
+}
+
+async function fullTrain() {
+  const d = await apiPost('api/full_train', {}).catch(()=>({}));
+  if (d.ok) toast('Training started ✓');
+  else toast('Train failed: '+(d.error||'?'), 'te');
 }
 
 // Entity picker
@@ -2847,7 +2892,7 @@ async function activateGuestMode() {
   const data = await api('api/guest_mode').catch(()=>({}));
   const suggestions = data.suggestions || [];
   if (!suggestions.length) { toast('No guest mode suggestions available'); return; }
-  toast('Guest Mode suggestions ready — see seasonal/suggestions section');
+  toast('Guest Mode suggestions ready — see Suggestions tab');
 }
 
 async function loadSeasonalSuggestions() {
@@ -3015,6 +3060,7 @@ async function loadNewFeatures() {
 load();
 loadNewFeatures();
 checkOnboarding();
+
 // Fast-poll during training, normal refresh otherwise
 let _pollTimer = null;
 function schedulePoll() {
