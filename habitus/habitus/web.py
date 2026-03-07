@@ -742,6 +742,11 @@ pre.raw {
 .chip-ok     { background: rgba(34,197,94,.15); color: var(--green); border-color: rgba(34,197,94,.3); }
 .chip-info   { background: rgba(79,195,247,.15); color: #4fc3f7; border-color: rgba(79,195,247,.3); }
 .chip-muted  { background: var(--bg2); color: var(--text2); border-color: var(--border); }
+
+/* ── Shared utility classes ── */
+.yaml-block { font-size:.72rem; overflow-x:auto; background:var(--card2); border-radius:6px; padding:10px; margin-bottom:6px; }
+.yaml-actions { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+.empty-state { color:var(--text3); text-align:center; padding:24px; font-size:.9rem; }
 </style>
 </head>
 <body>
@@ -1167,8 +1172,7 @@ pre.raw {
       const sel = document.getElementById('power-sensor-select');
       const status = document.getElementById('power-sensor-status');
       try {
-        const r = await fetch('api/power_sensors');
-        const d = await r.json();
+        const d = await api('api/power_sensors');
         sel.innerHTML = '';
         if (d.sensors.length === 0) {
           sel.innerHTML = '<option value="">No watt sensors found</option>';
@@ -1195,13 +1199,12 @@ pre.raw {
       if (!eid) return;
       status.textContent = 'Saving…';
       try {
-        const r = await fetch('api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({power_entity: eid})});
-        const d = await r.json();
+        const d = await apiPost('api/settings', {power_entity: eid});
         if (d.ok) {
           status.textContent = `✓ Saved: ${eid} — triggering retrain…`;
           status.style.color = 'var(--green)';
           setTimeout(async () => {
-            await fetch('api/rescan', {method:'POST'});
+            await api('api/rescan', {method:'POST'});
             status.textContent = `✓ Saved: ${eid} — retraining started`;
           }, 500);
         } else {
@@ -1219,8 +1222,7 @@ pre.raw {
       const st = document.getElementById('notify-toggle-status');
       if (!btn || !st) return;
       try {
-        const r = await fetch('api/settings');
-        const d = await r.json();
+        const d = await api('api/settings');
         const on = !!(d.settings && d.settings.notify_on_anomaly);
         btn.textContent = on ? 'Disable notifications' : 'Enable notifications';
         btn.className = on ? 'btn btn-danger' : 'btn btn-accent';
@@ -1239,12 +1241,7 @@ pre.raw {
       try {
         const currentOn = (btn.textContent || '').toLowerCase().includes('disable');
         const next = !currentOn;
-        const r = await fetch('api/settings', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({notify_on_anomaly: next})
-        });
-        const d = await r.json();
+        const d = await apiPost('api/settings', {notify_on_anomaly: next});
         if (d.ok) {
           await loadNotificationSetting();
           st.textContent = next ? 'Notifications enabled' : 'Notifications disabled';
@@ -1392,6 +1389,50 @@ pre.raw {
 <div class="toast" id="toast"></div>
 
 <script>
+// ── Core utilities ────────────────────────────────────────────────────────────
+async function api(endpoint, opts={}) {
+  const r = await fetch(endpoint, opts);
+  if (!r.ok) { const e = await r.json().catch(()=>({error:r.statusText})); throw new Error(e.error||r.statusText); }
+  return r.json();
+}
+async function apiPost(endpoint, body) {
+  return api(endpoint, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+}
+function copyText(text) {
+  return navigator.clipboard.writeText(text).then(()=>toast('Copied ✓'));
+}
+// Single Add-to-HA function used by ALL callers
+async function addYamlToHA(yaml, btn) {
+  if (!yaml?.trim()) { toast('No YAML to add','te'); return; }
+  const orig = btn?.textContent;
+  if (btn) { btn.disabled=true; btn.textContent='Adding…'; }
+  try {
+    const d = await apiPost('api/add_automation', {yaml});
+    if (d.ok) {
+      if (btn) btn.textContent = '✓ Added';
+      toast('Automation added ✓');
+      setTimeout(()=>load(), 600);
+    } else { throw new Error(d.error||'Unknown error'); }
+  } catch(e) {
+    if (btn) { btn.disabled=false; btn.textContent=orig||'+ Add to HA'; }
+    toast('Failed: '+e.message, 'te');
+  }
+}
+// Shared card renderer
+function card(content, {accent='', mb=8}={}) {
+  const border = accent ? `border-left:3px solid ${accent};` : '';
+  return `<div class="card" style="padding:12px;margin-bottom:${mb}px;${border}">${content}</div>`;
+}
+// Shared suggestion/gap card
+function sugCard(content, {accent='', mb=10}={}) {
+  const border = accent ? `border-left:3px solid ${accent};` : '';
+  return `<div class="sug" style="margin-bottom:${mb}px;${border}">${content}</div>`;
+}
+// Empty state helper
+function emptyState(msg) {
+  return `<div class="empty-state">${msg}</div>`;
+}
+
 let allSuggestions = [];
 let haAutomationMap = new Map();
 let currentFilter = 'all';
@@ -1548,18 +1589,13 @@ function renderSuggestions() {
 }
 
 function copyYaml(id) {
-  navigator.clipboard.writeText(document.getElementById('yaml-'+id).textContent)
-    .then(()=>toast('Copied to clipboard ✓'));
+  copyText(document.getElementById('yaml-'+id).textContent);
 }
 
 async function recordFeedback(suggestionId, action) {
   if (!suggestionId) return;
   try {
-    await fetch('api/feedback', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({suggestion_id: suggestionId, action})
-    });
+    await apiPost('api/feedback', {suggestion_id: suggestionId, action});
   } catch(e) { /* non-fatal */ }
 }
 
@@ -1573,53 +1609,21 @@ async function dismissSuggestion(suggestionId) {
 async function addToHA(id) {
   const btn = document.getElementById('add-'+id);
   const yaml = document.getElementById('yaml-'+id).textContent;
-  btn.disabled = true; btn.textContent = 'Adding…';
-  try {
-    const r = await fetch('api/add_automation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({yaml})});
-    const d = await r.json();
-    if (d.ok) {
-      btn.textContent = '✓ Added';
-      toast('Automation added ✓');
-      recordFeedback(id, 'add');
-      setTimeout(()=>load(), 500);
-    } else {
-      btn.disabled=false; btn.textContent='+ Add to HA'; toast('Failed: '+(d.error||'?'),'te');
-    }
-  } catch(e) { btn.disabled=false; btn.textContent='+ Add to HA'; toast('Network error','te'); }
+  await addYamlToHA(yaml, btn);
+  recordFeedback(id, 'add');
 }
 
 async function addGapToHA(yamlId, btnId) {
   const btn = document.getElementById(btnId);
   const yaml = (document.getElementById(yamlId)?.textContent || '').trim();
-  if (!yaml) { toast('Missing YAML','te'); return; }
-  if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
-  try {
-    const r = await fetch('api/add_automation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({yaml})});
-    const d = await r.json();
-    if (d.ok) {
-      if (btn) btn.textContent = '✓ Added';
-      toast('Automation added ✓');
-      setTimeout(()=>load(), 500);
-    } else {
-      if (btn) { btn.disabled = false; btn.textContent = '+ Add to HA'; }
-      toast('Failed: '+(d.error||'?'),'te');
-    }
-  } catch(e) {
-    if (btn) { btn.disabled = false; btn.textContent = '+ Add to HA'; }
-    toast('Network error','te');
-  }
+  await addYamlToHA(yaml, btn);
 }
 
 async function removeFromHA(entityId, suggestionId='') {
   const btn = suggestionId ? document.getElementById('remove-'+suggestionId) : null;
   if (btn) { btn.disabled = true; btn.textContent = 'Removing…'; }
   try {
-    const r = await fetch('api/remove_automation',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({entity_id:entityId})
-    });
-    const d = await r.json();
+    const d = await apiPost('api/remove_automation', {entity_id:entityId});
     if (d.ok) {
       toast('Automation removed ✓');
       if (suggestionId) recordFeedback(suggestionId, 'remove');
@@ -1714,20 +1718,20 @@ function updateTrainingLog(progress, state) {
 
 async function load() {
   const [state, baseline, progress, patterns, suggestions, anomalies, phantomData, driftData, autoScores, gapData, scenesData, smartSuggestions, haAutomations, sceneAnalysis] = await Promise.all([
-    fetch('api/state').then(r=>r.json()).catch(()=>({})),
-    fetch('api/baseline').then(r=>r.json()).catch(()=>({})),
-    fetch('api/progress').then(r=>r.json()).catch(()=>({})),
-    fetch('api/patterns').then(r=>r.json()).catch(()=>({})),
-    fetch('api/suggestions').then(r=>r.json()).catch(()=>([])),
-    fetch('api/anomalies').then(r=>r.json()).catch(()=>({})),
-    fetch('api/phantom').then(r=>r.json()).catch(()=>([])),
-    fetch('api/drift').then(r=>r.json()).catch(()=>({})),
-    fetch('api/automation_scores').then(r=>r.json()).catch(()=>([])),
-    fetch('api/automation_gap').then(r=>r.json()).catch(()=>({})),
-    fetch('api/scenes').then(r=>r.json()).catch(()=>({scenes:[]})),
-    fetch('api/smart_suggestions').then(r=>r.json()).catch(()=>({suggestions:[]})),
-    fetch('api/ha_automations').then(r=>r.json()).catch(()=>({automations:[]})),
-    fetch('api/scene_analysis').then(r=>r.json()).catch(()=>({suggestions:[]})),
+    api('api/state').catch(()=>({})),
+    api('api/baseline').catch(()=>({})),
+    api('api/progress').catch(()=>({})),
+    api('api/patterns').catch(()=>({})),
+    api('api/suggestions').catch(()=>([])),
+    api('api/anomalies').catch(()=>({})),
+    api('api/phantom').catch(()=>([])),
+    api('api/drift').catch(()=>({})),
+    api('api/automation_scores').catch(()=>([])),
+    api('api/automation_gap').catch(()=>({})),
+    api('api/scenes').catch(()=>({scenes:[]})),
+    api('api/smart_suggestions').catch(()=>({suggestions:[]})),
+    api('api/ha_automations').catch(()=>({automations:[]})),
+    api('api/scene_analysis').catch(()=>({suggestions:[]})),
   ]);
 
   // Always update visible training status + log
@@ -1896,7 +1900,7 @@ async function load() {
   allSuggestions = smartSugList;
 
   // ── Activity States (HMM) ──
-  fetch('api/activity_states').then(r=>r.json()).catch(()=>({states:[]})).then(h => {
+  api('api/activity_states').catch(()=>({states:[]})).then(h => {
     const sec = document.getElementById('hmm-section');
     if (!h.states || h.states.length === 0) { sec.style.display='none'; return; }
     sec.style.display='';
@@ -1915,7 +1919,7 @@ async function load() {
   });
 
   // ── Energy Forecast ──
-  fetch('api/energy_forecast').then(r=>r.json()).catch(()=>({forecast:[]})).then(ef => {
+  api('api/energy_forecast').catch(()=>({forecast:[]})).then(ef => {
     const sec = document.getElementById('forecast-section');
     if (!ef.forecast || ef.forecast.length === 0) { sec.style.display='none'; return; }
     sec.style.display='';
@@ -1937,7 +1941,7 @@ async function load() {
   });
 
   // ── Behaviour Drift ──
-  fetch('api/dynamic').then(r=>r.json()).catch(()=>({drifts:[]})).then(da => {
+  api('api/dynamic').catch(()=>({drifts:[]})).then(da => {
     const sec = document.getElementById('drift-section');
     if (!da.drifts || da.drifts.length === 0) { sec.style.display='none'; return; }
     sec.style.display='';
@@ -1953,7 +1957,7 @@ async function load() {
   });
 
   // ── Routine Sequences ──
-  fetch('api/sequences').then(r=>r.json()).catch(()=>({sequences:[]})).then(sq => {
+  api('api/sequences').catch(()=>({sequences:[]})).then(sq => {
     const sec = document.getElementById('sequences-section');
     if (!sq.sequences || sq.sequences.length === 0) { sec.style.display='none'; return; }
     sec.style.display='';
@@ -1969,7 +1973,7 @@ async function load() {
   });
 
   // ── Markov Predictions ──
-  fetch('api/markov').then(r=>r.json()).catch(()=>({predictions:[]})).then(mk => {
+  api('api/markov').catch(()=>({predictions:[]})).then(mk => {
     const sec = document.getElementById('markov-section');
     if (!mk.predictions || mk.predictions.length === 0) { sec.style.display='none'; return; }
     sec.style.display='';
@@ -1983,7 +1987,7 @@ async function load() {
   });
 
   // ── Deep Correlations ──
-  fetch('api/correlations').then(r=>r.json()).catch(()=>({suggestions:[]})).then(cd => {
+  api('api/correlations').catch(()=>({suggestions:[]})).then(cd => {
     const el = document.getElementById('correlations-list');
     const sec = document.getElementById('correlations-section');
     const stats = document.getElementById('corr-stats');
@@ -2010,7 +2014,7 @@ async function load() {
   });
 
   // ── Room Predictions ──
-  fetch('api/room_predictions').then(r=>r.json()).catch(()=>({automations:[]})).then(rp => {
+  api('api/room_predictions').catch(()=>({automations:[]})).then(rp => {
     const el = document.getElementById('predictions-list');
     const sec = document.getElementById('predictions-section');
     if (!rp.automations || rp.automations.length === 0) { sec.style.display='none'; return; }
@@ -2031,7 +2035,7 @@ async function load() {
   });
 
   // ── Active Conflicts ──
-  fetch('api/conflicts').then(r=>r.json()).catch(()=>({conflicts:[]})).then(cd => {
+  api('api/conflicts').catch(()=>({conflicts:[]})).then(cd => {
     const el = document.getElementById('conflicts-list');
     const sec = document.getElementById('conflicts-section');
     // Also populate the automation-conflicts-list section
@@ -2086,7 +2090,7 @@ async function load() {
         <div style="font-size:.75rem;color:var(--text3);margin-bottom:8px">
           ⏰ Peak: ${(tp.peak_hour||18).toString().padStart(2,'0')}:00 · ${tp.days||'daily'} · ${sc.occurrences||0} occurrences
         </div>
-        ${sc.scene_yaml ? `<details><summary style="cursor:pointer;color:var(--accent);font-size:.82rem;margin-bottom:4px">Show Scene YAML</summary><pre id="scene-yaml-${idx}" style="font-size:.72rem">${(sc.scene_yaml||'').trim()}</pre><button class="btn btn-accent" style="margin-top:4px" onclick="navigator.clipboard.writeText(document.getElementById('scene-yaml-${idx}').textContent).then(()=>toast('Copied ✓'))">📋 Copy</button></details>` : ''}
+        ${sc.scene_yaml ? `<details><summary style="cursor:pointer;color:var(--accent);font-size:.82rem;margin-bottom:4px">Show Scene YAML</summary><pre id="scene-yaml-${idx}" style="font-size:.72rem">${(sc.scene_yaml||'').trim()}</pre><button class="btn btn-accent" style="margin-top:4px" onclick="copyText(document.getElementById('scene-yaml-${idx}').textContent)">📋 Copy</button></details>` : ''}
       </div>`;
     }).join('');
   } else {
@@ -2278,7 +2282,7 @@ async function load() {
   document.getElementById('phantom-list').innerHTML = phantomHtml;
 
   // ── Appliance Fingerprints ──
-  fetch('api/appliance_fingerprints').then(r=>r.json()).catch(()=>({appliances:[],recent_events:[],total_events:0})).then(fp => {
+  api('api/appliance_fingerprints').catch(()=>({appliances:[],recent_events:[],total_events:0})).then(fp => {
     const el = document.getElementById('appliance-list');
     if (!fp.appliances || fp.appliances.length === 0) {
       el.innerHTML = '<div style="color:var(--text3);padding:12px">No appliance signatures detected yet. Runs after next training cycle.</div>';
@@ -2314,7 +2318,7 @@ async function load() {
   // ── Energy + Weather History ──
   function loadEnergyWeather(){
     const days = document.getElementById('ew-range').value;
-    fetch(`api/energy_weather_history?days=${days}`).then(r=>r.json()).catch(()=>({days:[]})).then(ew => {
+    api(`api/energy_weather_history?days=${days}`).catch(()=>({days:[]})).then(ew => {
       const body = document.getElementById('ew-body');
       const chart = document.getElementById('ew-chart');
       if (!ew.days || ew.days.length === 0) { body.innerHTML='<tr><td colspan="6" style="color:var(--text3);padding:8px">No data yet. Needs energy + temperature sensors.</td></tr>'; return; }
@@ -2360,7 +2364,7 @@ async function load() {
   loadEnergyWeather();
 
   // ── NILM Disaggregation ──
-  fetch('api/nilm').then(r=>r.json()).catch(()=>({breakdown:[]})).then(n => {
+  api('api/nilm').catch(()=>({breakdown:[]})).then(n => {
     const sec = document.getElementById('nilm-section');
     if (!n.current_breakdown || n.current_breakdown.length === 0) {
       if (n.discovered_appliances && n.discovered_appliances.length > 0) sec.style.display='';
@@ -2408,7 +2412,7 @@ async function load() {
   });
 
   // ── Device Training ──
-  fetch('api/power_sensors').then(r=>r.json()).catch(()=>({sensors:[]})).then(ps => {
+  api('api/power_sensors').catch(()=>({sensors:[]})).then(ps => {
     const sel = document.getElementById('train-power-entity');
     if (ps.sensors) ps.sensors.forEach(s => {
       const opt = document.createElement('option');
@@ -2417,7 +2421,7 @@ async function load() {
       sel.appendChild(opt);
     });
   });
-  fetch('api/custom_signatures').then(r=>r.json()).catch(()=>({signatures:[]})).then(cs => {
+  api('api/custom_signatures').catch(()=>({signatures:[]})).then(cs => {
     const el = document.getElementById('custom-sigs');
     if (!cs.signatures || cs.signatures.length === 0) { el.innerHTML='<div style="color:var(--text3);font-size:.8rem">No custom signatures yet. Train your first device above.</div>'; return; }
     el.innerHTML = '<div style="font-size:.85rem;margin-bottom:6px"><b>Trained Devices</b></div>' + cs.signatures.map(s => `
@@ -2429,7 +2433,7 @@ async function load() {
   });
 
   // ── Anomaly Feedback Stats ──
-  fetch('api/feedback_stats').then(r=>r.json()).catch(()=>({stats:{}})).then(fb => {
+  api('api/feedback_stats').catch(()=>({stats:{}})).then(fb => {
     const el = document.getElementById('feedback-stats');
     const s = fb.stats || {};
     el.innerHTML = `<div class="card" style="padding:10px">
@@ -2440,13 +2444,13 @@ async function load() {
   });
 
   // ── History Depth ──
-  fetch('api/settings').then(r=>r.json()).catch(()=>({settings:{}})).then(s => {
+  api('api/settings').catch(()=>({settings:{}})).then(s => {
     const d = (s.settings||{}).days_history || 30;
     document.getElementById('history-depth').value = String(d);
   });
 
   // ── Predicted Routines ──
-  fetch('api/routines').then(r=>r.json()).catch(()=>({routines:[]})).then(rd => {
+  api('api/routines').catch(()=>({routines:[]})).then(rd => {
     const el = document.getElementById('routines-list');
     if (!rd.routines || rd.routines.length === 0) {
       el.innerHTML = '<div style="color:var(--text3);padding:12px">No recurring routines detected yet. Needs humidity/temperature sensor data.</div>';
@@ -2530,7 +2534,7 @@ async function load() {
           <div class="sug-head"><h3>${g.suggestion}</h3><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="badge b-alert">missing</span>${costBadge}</div></div>
           ${g.ha_automation_yaml ? `<pre id="${yid}" style="font-size:.72rem">${g.ha_automation_yaml}</pre>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <button class="btn btn-accent" onclick="navigator.clipboard.writeText(document.getElementById('${yid}').textContent).then(()=>toast('Copied ✓'))">📋 Copy YAML</button>
+              <button class="btn btn-accent" onclick="copyText(document.getElementById('${yid}').textContent)">📋 Copy YAML</button>
               <button class="btn btn-success" id="${bid}" onclick="addGapToHA('${yid}','${bid}')">+ Add to HA</button>
             </div>` : ''}
         </div>`;
@@ -2575,11 +2579,11 @@ async function load() {
   // ── 5a) Unified Insights Summary ────────────────────────────────────────
   (async () => {
     const [conflictsData, healthData, batteryData, gapD, guestData] = await Promise.all([
-      fetch('api/conflicts').then(r=>r.json()).catch(()=>({})),
-      fetch('api/automation_health').then(r=>r.json()).catch(()=>({})),
-      fetch('api/battery_status').then(r=>r.json()).catch(()=>({})),
+      api('api/conflicts').catch(()=>({})),
+      api('api/automation_health').catch(()=>({})),
+      api('api/battery_status').catch(()=>({})),
       Promise.resolve(gapData),
-      fetch('api/guest_mode').then(r=>r.json()).catch(()=>({})),
+      api('api/guest_mode').catch(()=>({})),
     ]);
 
     const chips = [];
@@ -2717,16 +2721,14 @@ async function load() {
 
 function runNilm(){
   toast('Running NILM disaggregation...');
-  fetch('api/nilm/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({days:7})})
-    .then(r=>r.json()).then(d=>{
+  apiPost('api/nilm/run',{days:7}).then(d=>{
       if(d.error){toast(d.error,'err');}else{toast(`NILM: ${d.appliance_slots} appliances found, ${d.current_total_w}W current`);location.reload();}
     }).catch(()=>toast('NILM failed','err'));
 }
 function startTraining(){
   const entity = document.getElementById('train-power-entity').value;
   if(!entity){toast('Select a power sensor first','err');return;}
-  fetch('api/training/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({power_entity:entity})})
-    .then(r=>r.json()).then(d=>{
+  apiPost('api/training/start',{power_entity:entity}).then(d=>{
       document.getElementById('train-idle').style.display='none';
       document.getElementById('train-recording').style.display='';
       document.getElementById('train-baseline').textContent='Baseline: '+(d.baseline_w||0).toFixed(0)+'W';
@@ -2736,29 +2738,24 @@ function startTraining(){
 function stopTraining(){
   const name = document.getElementById('train-device-name').value;
   if(!name){toast('Enter a device name','err');return;}
-  fetch('api/training/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_name:name})})
-    .then(r=>r.json()).then(d=>{
+  apiPost('api/training/stop',{device_name:name}).then(d=>{
       document.getElementById('train-idle').style.display='';
       document.getElementById('train-recording').style.display='none';
       if(d.error){toast(d.error,'err');}else{toast(`Saved: ${d.name} — ${d.peak_delta_w}W peak, ${d.shape} shape`);}
     }).catch(()=>toast('Failed to save','err'));
 }
 function deleteSignature(name){
-  fetch('api/custom_signatures/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})})
-    .then(r=>r.json()).then(()=>{toast('Deleted');location.reload();});
+  apiPost('api/custom_signatures/delete',{name}).then(()=>{toast('Deleted');location.reload();});
 }
 function toggleSharing(enabled){
-  fetch('api/sharing',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})})
-    .then(()=>toast(enabled?'Anonymous sharing enabled':'Sharing disabled'));
+  apiPost('api/sharing',{enabled}).then(()=>toast(enabled?'Anonymous sharing enabled':'Sharing disabled'));
 }
 function saveHistoryDepth(){
   const days = parseInt(document.getElementById('history-depth').value);
-  fetch('api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({days_history:days})})
-    .then(()=>toast(`History depth set to ${days} days. Retrain to apply.`));
+  apiPost('api/settings',{days_history:days}).then(()=>toast(`History depth set to ${days} days. Retrain to apply.`));
 }
 function anomalyFeedback(id, action, entityId, score){
-  fetch('api/anomaly_feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({anomaly_id:id,action,entity_id:entityId,score})})
-    .then(r=>r.json()).then(d=>{
+  apiPost('api/anomaly_feedback',{anomaly_id:id,action,entity_id:entityId,score}).then(d=>{
       toast(action==='confirmed'?'✅ Confirmed — model will learn':'❌ Dismissed — widening normal band');
       const btn = document.getElementById('fb-'+id);
       if(btn) btn.innerHTML='<span style="color:var(--text3)">'+( action==='confirmed'?'✅':'❌')+'</span>';
@@ -2776,8 +2773,7 @@ async function doRescan(){
   const btn=document.getElementById('btn-rescan');
   btn.disabled=true; btn.textContent='Triggered…';
   document.getElementById('rescan-warn').style.display='none';
-  const r=await fetch('api/rescan',{method:'POST'});
-  const d=await r.json();
+  const d=await api('api/rescan',{method:'POST'});
   if(d.ok) toast('Full rescan started ✓');
   else toast('Failed: '+(d.error||'?'),'te');
   btn.disabled=false; btn.textContent='🔄 Full Rescan';
@@ -2788,8 +2784,7 @@ async function doRescan(){
 let allEntities = [];
 async function loadEntities() {
   try {
-    const r = await fetch('api/entities');
-    allEntities = await r.json();
+    allEntities = await api('api/entities');
     filterEntities();
   } catch(e) { console.warn('Entity load failed', e); }
 }
@@ -2814,7 +2809,7 @@ function filterEntities() {
         <div style="font-size:.7rem;color:var(--text3)">${e.entity_id}</div>
       </div>
       <div style="font-size:.78rem;color:var(--text2)">${e.state || ''}</div>
-      <button class="btn btn-accent" style="font-size:.7rem;padding:2px 8px" onclick="navigator.clipboard.writeText('${e.entity_id}').then(()=>toast('Copied: ${e.entity_id}'))">📋</button>
+      <button class="btn btn-accent" style="font-size:.7rem;padding:2px 8px" onclick="copyText('${e.entity_id}')">📋</button>
     </div>`).join('');
 }
 loadEntities();
@@ -2822,7 +2817,7 @@ loadEntities();
 // ══ New Feature Loaders ══════════════════════════════════════
 
 async function loadAutomationHealth() {
-  const data = await fetch('api/automation_health').then(r=>r.json()).catch(()=>({automations:[]}));
+  const data = await api('api/automation_health').catch(()=>({automations:[]}));
   const el = document.getElementById('automation-health-list');
   if (!el) return;
   const autos = data.automations || [];
@@ -2841,13 +2836,13 @@ async function loadAutomationHealth() {
 
 async function disableAutomation(entityId) {
   if (!confirm('Disable ' + entityId + '?')) return;
-  const r = await fetch('api/automation_health/disable', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({entity_id:entityId})}).then(r=>r.json()).catch(()=>({}));
+  const r = await apiPost('api/automation_health/disable', {entity_id:entityId}).catch(()=>({}));
   if (r.success) { toast('Disabled ' + entityId); loadAutomationHealth(); }
   else toast('Error: ' + (r.error||'unknown'), 'err');
 }
 
 async function loadDetectedRoutines() {
-  const data = await fetch('api/routine_builder').then(r=>r.json()).catch(()=>({routines:[]}));
+  const data = await api('api/routine_builder').catch(()=>({routines:[]}));
   const el = document.getElementById('detected-routines-list');
   if (!el) return;
   const routines = data.routines || [];
@@ -2868,7 +2863,7 @@ async function loadDetectedRoutines() {
 }
 
 async function loadGuestMode() {
-  const data = await fetch('api/guest_mode').then(r=>r.json()).catch(()=>({guest_probability:0}));
+  const data = await api('api/guest_mode').catch(()=>({guest_probability:0}));
   const banner = document.getElementById('guest-mode-banner');
   const details = document.getElementById('guest-mode-details');
   if (!banner || !details) return;
@@ -2881,14 +2876,14 @@ async function loadGuestMode() {
 }
 
 async function activateGuestMode() {
-  const data = await fetch('api/guest_mode').then(r=>r.json()).catch(()=>({}));
+  const data = await api('api/guest_mode').catch(()=>({}));
   const suggestions = data.suggestions || [];
   if (!suggestions.length) { toast('No guest mode suggestions available'); return; }
   toast('Guest Mode suggestions ready — see seasonal/suggestions section');
 }
 
 async function loadSeasonalSuggestions() {
-  const data = await fetch('api/seasonal_suggestions').then(r=>r.json()).catch(()=>({suggestions:[]}));
+  const data = await api('api/seasonal_suggestions').catch(()=>({suggestions:[]}));
   const el = document.getElementById('seasonal-list');
   const badge = document.getElementById('season-badge');
   if (!el) return;
@@ -2904,7 +2899,7 @@ async function loadSeasonalSuggestions() {
 }
 
 async function loadBatteryStatus() {
-  const data = await fetch('api/battery_status').then(r=>r.json()).catch(()=>({batteries:[]}));
+  const data = await api('api/battery_status').catch(()=>({batteries:[]}));
   const el = document.getElementById('battery-status-list');
   if (!el) return;
   const batteries = data.batteries || [];
@@ -2927,7 +2922,7 @@ async function loadBatteryStatus() {
 }
 
 async function loadIntegrationHealth() {
-  const data = await fetch('api/integration_health').then(r=>r.json()).catch(()=>({overall_score:0}));
+  const data = await api('api/integration_health').catch(()=>({overall_score:0}));
   const el = document.getElementById('integration-health-list');
   const badge = document.getElementById('health-score-badge');
   if (!el) return;
@@ -2946,7 +2941,7 @@ async function loadIntegrationHealth() {
 }
 
 async function loadChangelog() {
-  const data = await fetch('api/changelog?limit=15').then(r=>r.json()).catch(()=>({entries:[]}));
+  const data = await api('api/changelog?limit=15').catch(()=>({entries:[]}));
   const el = document.getElementById('changelog-list');
   if (!el) return;
   const entries = data.entries || [];
@@ -2966,7 +2961,7 @@ async function nlPreview() {
   _nlDebounce = setTimeout(async () => {
     const text = document.getElementById('nl-input')?.value || '';
     if (!text.trim()) { document.getElementById('nl-preview').style.display='none'; return; }
-    const data = await fetch('api/nl_automation', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})}).then(r=>r.json()).catch(()=>({}));
+    const data = await apiPost('api/nl_automation', {text}).catch(()=>({}));
     const preview = document.getElementById('nl-preview');
     if (!preview) return;
     preview.style.display = 'block';
@@ -2981,16 +2976,14 @@ async function nlPreview() {
 
 async function nlAddToHA() {
   const yaml = window._nlYaml;
-  if (!yaml) { toast('No automation to add', 'err'); return; }
-  const data = await fetch('api/automations/add', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({yaml})}).then(r=>r.json()).catch(()=>({}));
-  if (data.status==='success'||data.ok) toast('Automation added!');
-  else toast('Error: '+(data.error||'Could not add'), 'err');
+  const btn = document.getElementById('nl-add-btn');
+  await addYamlToHA(yaml, btn);
 }
 
 async function generateDashboard() {
   const el = document.getElementById('dashboard-preview');
   if (el) el.innerHTML = '<div style="color:var(--text3)">Generating...</div>';
-  const data = await fetch('api/dashboard_yaml').then(r=>r.json()).catch(()=>({yaml:''}));
+  const data = await api('api/dashboard_yaml').catch(()=>({yaml:''}));
   if (!el) return;
   const yaml = data.yaml || '';
   window._dashboardYaml = yaml;
@@ -3000,12 +2993,12 @@ async function generateDashboard() {
 }
 
 function copyDashboardYaml() {
-  navigator.clipboard.writeText(window._dashboardYaml||'').then(()=>toast('Dashboard YAML copied!'));
+  copyText(window._dashboardYaml||'');
 }
 
 async function applyDashboard() {
   if (!confirm('Apply generated dashboard to HA? This will replace your existing dashboard.')) return;
-  const r = await fetch('api/lovelace/config', {method:'POST'}).then(r=>r.json()).catch(()=>({}));
+  const r = await api('api/lovelace/config', {method:'POST'}).catch(()=>({}));
   if (r.success) toast('Dashboard applied to HA!');
   else toast('Error: '+(r.error||'unknown'), 'err');
 }
@@ -3013,16 +3006,16 @@ async function applyDashboard() {
 // Onboarding
 let _obStep = 0;
 async function checkOnboarding() {
-  const status = await fetch('api/onboarding/status').then(r=>r.json()).catch(()=>({complete:true}));
+  const status = await api('api/onboarding/status').catch(()=>({complete:true}));
   if (!status.complete) {
     document.getElementById('onboarding-modal').style.display = 'flex';
   }
 }
 
 function obNext() { _obStep++; if (_obStep >= 6) obComplete(); }
-function obSkip() { fetch('api/onboarding/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({skipped:true})}); document.getElementById('onboarding-modal').style.display = 'none'; }
+function obSkip() { apiPost('api/onboarding/complete',{skipped:true}); document.getElementById('onboarding-modal').style.display = 'none'; }
 function obComplete() {
-  fetch('api/onboarding/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({skipped:false})});
+  apiPost('api/onboarding/complete',{skipped:false});
   document.getElementById('onboarding-modal').style.display = 'none';
   toast('Setup complete! Running initial train...');
   fullTrain();
@@ -3030,11 +3023,7 @@ function obComplete() {
 
 function addRoutineToHA(yamlEncoded) {
   const yaml = decodeURIComponent(yamlEncoded);
-  fetch('api/automations/add', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({yaml})})
-    .then(r=>r.json()).then(d=>{
-      if(d.status==='success'||d.ok) toast('Routine added to HA!');
-      else toast('Error: '+(d.error||'could not add'),'err');
-    }).catch(()=>toast('Network error','err'));
+  addYamlToHA(yaml, null);
 }
 
 function showYaml(id) {
