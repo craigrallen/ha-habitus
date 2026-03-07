@@ -950,119 +950,65 @@ pre.raw {
     <div class="sec-header"><h2>📈 Routine Drift</h2><span class="sec-sub">Changes in daily patterns</span></div>
     <div id="drift-info"><div class="skeleton skeleton-block"></div></div>
   </div>
-  <div class="sec" style="margin-top:12px">
-    <div class="sec-header"><h2>⚡ Automation Health</h2><span class="sec-sub">How well your automations work</span></div>
-    <div id="auto-scores"><div class="skeleton skeleton-block"></div></div>
-  </div>
+  <div id="auto-scores" style="display:none"></div>
   <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>🔧 Automation Gaps</h2><span class="sec-sub">Suggestions vs existing automations</span></div>
     <div id="auto-gap"><div class="skeleton skeleton-block"></div></div>
   </div>
 
-</div>
-
-<!-- ======= NEW FEATURE SECTIONS ======= -->
-
-<!-- ONBOARDING WIZARD (full-screen modal) -->
-<div id="onboarding-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.8);z-index:9999;align-items:center;justify-content:center">
-  <div style="background:var(--card);border-radius:16px;padding:32px;max-width:560px;width:90%;max-height:90vh;overflow-y:auto">
-    <div id="onboarding-progress" style="display:flex;gap:8px;margin-bottom:24px">
-      <div class="ob-step" style="flex:1;height:4px;background:var(--accent);border-radius:2px"></div>
-      <div class="ob-step" style="flex:1;height:4px;background:var(--border);border-radius:2px"></div>
-      <div class="ob-step" style="flex:1;height:4px;background:var(--border);border-radius:2px"></div>
-      <div class="ob-step" style="flex:1;height:4px;background:var(--border);border-radius:2px"></div>
-      <div class="ob-step" style="flex:1;height:4px;background:var(--border);border-radius:2px"></div>
-      <div class="ob-step" style="flex:1;height:4px;background:var(--border);border-radius:2px"></div>
+  <!-- AUTOMATION HEALTH -->
+  <div id="automation-health-section" class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>🏥 Automation Health</h2><span class="sec-sub">Dead, stale, and over-triggering automations</span></div>
+    <div id="automation-health-list"><div class="skeleton skeleton-block"></div></div>
+  </div>
+  <!-- AUTOMATION CONFLICTS (inter-automation) -->
+  <div id="automation-conflicts-section" class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>⚔️ Automation Conflicts</h2><span class="sec-sub">Automations that fight each other</span></div>
+    <div id="automation-conflicts-list"><div class="skeleton skeleton-block"></div></div>
+  </div>
+  <!-- DETECTED ROUTINES (routine builder) -->
+  <div id="detected-routines-section" class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>🔄 Detected Routines</h2><span class="sec-sub">Temporal sequences → chainable automations</span></div>
+    <div id="detected-routines-list"><div class="skeleton skeleton-block"></div></div>
+  </div>
+  <!-- GUEST MODE -->
+  <div id="guest-mode-section" class="sec" style="margin-top:12px">
+    <div id="guest-mode-banner" style="display:none;background:var(--accent);color:#fff;border-radius:8px;padding:12px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
+      <span>👥 Guests may be present — <strong id="guest-prob-text">probability 0%</strong></span>
+      <button onclick="activateGuestMode()" style="background:#fff;color:var(--accent);border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-weight:600">Activate Guest Mode</button>
     </div>
-    <div id="onboarding-content">
-      <h2 style="margin:0 0 12px">👋 Welcome to Habitus</h2>
-      <p style="color:var(--text2);margin:0 0 24px">Habitus learns your home's behaviour and suggests automations — privately, locally, without cloud.</p>
-      <button onclick="obNext()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:12px 24px;font-size:1rem;cursor:pointer;width:100%">Get Started →</button>
-      <button onclick="obSkip()" style="background:none;color:var(--text3);border:none;padding:8px;cursor:pointer;width:100%;margin-top:8px;font-size:.85rem">Skip setup</button>
+    <div class="sec-header"><h2>👥 Guest Mode</h2><span class="sec-sub">Unusual activity pattern detection</span></div>
+    <div id="guest-mode-details"><div class="skeleton skeleton-block"></div></div>
+  </div>
+  <!-- SEASONAL SUGGESTIONS -->
+  <div id="seasonal-section" class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>🌿 Seasonal Suggestions</h2><span class="sec-sub">Automations tuned to the current season</span><span id="season-badge" style="margin-left:8px;background:var(--accent);color:#fff;border-radius:12px;padding:2px 10px;font-size:.75rem"></span></div>
+    <div id="seasonal-list"><div class="skeleton skeleton-block"></div></div>
+  </div>
+  <!-- NL AUTOMATION CREATOR -->
+  <div id="nl-automation-section" class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>✍️ Describe an Automation</h2><span class="sec-sub">Write in plain English — Habitus generates the YAML</span></div>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <input type="text" id="nl-input" placeholder='e.g. "Turn off lights at 11pm" or "When motion detected turn on hallway light"'
+        style="flex:1;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:.9rem"
+        oninput="nlPreview()" onkeydown="if(event.key==='Enter')nlPreview()">
+      <button onclick="nlPreview()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:10px 16px;cursor:pointer">Parse</button>
+    </div>
+    <div id="nl-preview" style="display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span id="nl-confidence" style="font-size:.8rem;color:var(--text3)"></span>
+        <button id="nl-add-btn" onclick="nlAddToHA()" style="background:var(--success,#4caf50);color:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:.85rem">Add to HA</button>
+      </div>
+      <div id="nl-clarifications" style="color:var(--warn,#ff9800);font-size:.82rem;margin-bottom:8px"></div>
+      <pre id="nl-yaml" style="background:var(--card2);border-radius:8px;padding:12px;font-size:.78rem;overflow-x:auto;max-height:300px;overflow-y:auto;white-space:pre-wrap"></pre>
     </div>
   </div>
-</div>
-
-<!-- AUTOMATION HEALTH -->
-<div id="automation-health-section" class="sec" style="margin-top:12px">
-  <div class="sec-header"><h2>🏥 Automation Health</h2><span class="sec-sub">Dead, stale, and over-triggering automations</span></div>
-  <div id="automation-health-list"><div class="skeleton skeleton-block"></div></div>
-</div>
-
-<!-- AUTOMATION CONFLICTS (inter-automation) -->
-<div id="automation-conflicts-section" class="sec" style="margin-top:12px">
-  <div class="sec-header"><h2>⚔️ Automation Conflicts</h2><span class="sec-sub">Automations that fight each other</span></div>
-  <div id="automation-conflicts-list"><div class="skeleton skeleton-block"></div></div>
-</div>
-
-<!-- DETECTED ROUTINES (routine builder) -->
-<div id="detected-routines-section" class="sec" style="margin-top:12px">
-  <div class="sec-header"><h2>🔄 Detected Routines</h2><span class="sec-sub">Temporal sequences → chainable automations</span></div>
-  <div id="detected-routines-list"><div class="skeleton skeleton-block"></div></div>
-</div>
-
-<!-- GUEST MODE -->
-<div id="guest-mode-section" class="sec" style="margin-top:12px">
-  <div id="guest-mode-banner" style="display:none;background:var(--accent);color:#fff;border-radius:8px;padding:12px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
-    <span>👥 Guests may be present — <strong id="guest-prob-text">probability 0%</strong></span>
-    <button onclick="activateGuestMode()" style="background:#fff;color:var(--accent);border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-weight:600">Activate Guest Mode</button>
+  <!-- RECENT ACTIVITY (changelog) -->
+  <div id="changelog-section" class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>📋 Recent Activity</h2><span class="sec-sub">Automation changes and events</span></div>
+    <div id="changelog-list"><div class="skeleton skeleton-block"></div></div>
   </div>
-  <div class="sec-header"><h2>👥 Guest Mode</h2><span class="sec-sub">Unusual activity pattern detection</span></div>
-  <div id="guest-mode-details"><div class="skeleton skeleton-block"></div></div>
-</div>
 
-<!-- SEASONAL SUGGESTIONS -->
-<div id="seasonal-section" class="sec" style="margin-top:12px">
-  <div class="sec-header"><h2>🌿 Seasonal Suggestions</h2><span class="sec-sub">Automations tuned to the current season</span><span id="season-badge" style="margin-left:8px;background:var(--accent);color:#fff;border-radius:12px;padding:2px 10px;font-size:.75rem"></span></div>
-  <div id="seasonal-list"><div class="skeleton skeleton-block"></div></div>
-</div>
-
-<!-- BATTERY STATUS -->
-<div id="battery-status-section" class="sec" style="margin-top:12px">
-  <div class="sec-header"><h2>🔋 Battery Status</h2><span class="sec-sub">Device batteries sorted by urgency</span></div>
-  <div id="battery-status-list"><div class="skeleton skeleton-block"></div></div>
-</div>
-
-<!-- INTEGRATION HEALTH -->
-<div id="integration-health-section" class="sec" style="margin-top:12px">
-  <div class="sec-header"><h2>🔌 Integration Health</h2><span class="sec-sub">Stale entities and integration scores</span><span id="health-score-badge" style="margin-left:8px;font-size:.8rem;color:var(--text3)"></span></div>
-  <div id="integration-health-list"><div class="skeleton skeleton-block"></div></div>
-</div>
-
-<!-- NL AUTOMATION CREATOR -->
-<div id="nl-automation-section" class="sec" style="margin-top:12px">
-  <div class="sec-header"><h2>✍️ Describe an Automation</h2><span class="sec-sub">Write in plain English — Habitus generates the YAML</span></div>
-  <div style="display:flex;gap:8px;margin-bottom:12px">
-    <input type="text" id="nl-input" placeholder='e.g. "Turn off lights at 11pm" or "When motion detected turn on hallway light"'
-      style="flex:1;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:.9rem"
-      oninput="nlPreview()" onkeydown="if(event.key==='Enter')nlPreview()">
-    <button onclick="nlPreview()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:10px 16px;cursor:pointer">Parse</button>
-  </div>
-  <div id="nl-preview" style="display:none">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <span id="nl-confidence" style="font-size:.8rem;color:var(--text3)"></span>
-      <button id="nl-add-btn" onclick="nlAddToHA()" style="background:var(--success,#4caf50);color:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:.85rem">Add to HA</button>
-    </div>
-    <div id="nl-clarifications" style="color:var(--warn,#ff9800);font-size:.82rem;margin-bottom:8px"></div>
-    <pre id="nl-yaml" style="background:var(--card2);border-radius:8px;padding:12px;font-size:.78rem;overflow-x:auto;max-height:300px;overflow-y:auto;white-space:pre-wrap"></pre>
-  </div>
-</div>
-
-<!-- DASHBOARD GENERATOR -->
-<div id="dashboard-generator-section" class="sec" style="margin-top:12px">
-  <div class="sec-header"><h2>🎨 Dashboard Generator</h2><span class="sec-sub">Optimised Lovelace dashboard from your usage patterns</span></div>
-  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-    <button onclick="generateDashboard()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 16px;cursor:pointer">Generate Dashboard</button>
-    <button onclick="copyDashboardYaml()" id="copy-dashboard-btn" style="display:none;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 16px;cursor:pointer">Copy YAML</button>
-    <button onclick="applyDashboard()" id="apply-dashboard-btn" style="display:none;background:var(--success,#4caf50);color:#fff;border:none;border-radius:8px;padding:8px 16px;cursor:pointer">Apply to HA</button>
-  </div>
-  <div id="dashboard-preview"><div style="color:var(--text3);font-size:.85rem">Click "Generate Dashboard" to create a Lovelace config from your usage patterns.</div></div>
-</div>
-
-<!-- RECENT ACTIVITY (changelog) -->
-<div id="changelog-section" class="sec" style="margin-top:12px">
-  <div class="sec-header"><h2>📋 Recent Activity</h2><span class="sec-sub">Automation changes and events</span></div>
-  <div id="changelog-list"><div class="skeleton skeleton-block"></div></div>
 </div>
 
 <!-- ENERGY & PATTERNS -->
@@ -1124,6 +1070,17 @@ pre.raw {
       <tbody id="mo-table"></tbody>
     </table>
   </div>
+  <!-- BATTERY STATUS -->
+  <div id="battery-status-section" class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>🔋 Battery Status</h2><span class="sec-sub">Device batteries sorted by urgency</span></div>
+    <div id="battery-status-list"><div class="skeleton skeleton-block"></div></div>
+  </div>
+  <!-- INTEGRATION HEALTH -->
+  <div id="integration-health-section" class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>🔌 Integration Health</h2><span class="sec-sub">Stale entities and integration scores</span><span id="health-score-badge" style="margin-left:8px;font-size:.8rem;color:var(--text3)"></span></div>
+    <div id="integration-health-list"><div class="skeleton skeleton-block"></div></div>
+  </div>
+
 </div>
 
 
@@ -1281,6 +1238,17 @@ pre.raw {
       </a>
     </div>
   </div>
+  <!-- DASHBOARD GENERATOR -->
+  <div id="dashboard-generator-section" class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>🎨 Dashboard Generator</h2><span class="sec-sub">Optimised Lovelace dashboard from your usage patterns</span></div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <button onclick="generateDashboard()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 16px;cursor:pointer">Generate Dashboard</button>
+      <button onclick="copyDashboardYaml()" id="copy-dashboard-btn" style="display:none;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 16px;cursor:pointer">Copy YAML</button>
+      <button onclick="applyDashboard()" id="apply-dashboard-btn" style="display:none;background:var(--success,#4caf50);color:#fff;border:none;border-radius:8px;padding:8px 16px;cursor:pointer">Apply to HA</button>
+    </div>
+    <div id="dashboard-preview"><div style="color:var(--text3);font-size:.85rem">Click "Generate Dashboard" to create a Lovelace config from your usage patterns.</div></div>
+  </div>
+
 </div>
 
 <!-- GEEK TAB -->
