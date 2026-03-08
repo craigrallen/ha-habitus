@@ -1251,6 +1251,24 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         if col not in features.columns:
             features[col] = 0.0
     out = features.fillna(0).reset_index()
+
+    # ── Power data quality check ──────────────────────────────────────────────
+    # If total_power_w is mostly zero, the power sensors have insufficient history.
+    # Zero-dominant power features corrupt the model (anything non-zero → score=100).
+    # Drop power columns when >95% of rows are zero — training uses behavioral
+    # features only, which are unaffected.
+    _power_cols = ["total_power_w", "grid_kwh_w"] + [c for c in out.columns if c.startswith("power_l") and c.endswith("_w")]
+    for _pc in _power_cols:
+        if _pc in out.columns:
+            _nonzero_pct = (out[_pc] > 0.5).mean()
+            if _nonzero_pct < 0.05:
+                log.warning(
+                    "Power feature '%s' is %.1f%% non-zero — insufficient history. "
+                    "Dropping from model (behavioral-only mode).",
+                    _pc, _nonzero_pct * 100,
+                )
+                out[_pc] = 0.0  # zero it out so it has no discriminative value
+
     log_perf_guardrail(
         "build_features",
         _t.time() - t0,

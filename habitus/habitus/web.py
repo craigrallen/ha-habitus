@@ -2532,9 +2532,15 @@ async function load() {
     document.getElementById('ha-automations-list').innerHTML = '<div style="color:var(--text3);padding:12px">No automations loaded yet. Next run should bring them through clean.</div>';
   }
 
-  // Weekly
+  // Weekly — warn if power data is all zeros (new sensors, no history yet)
   const wk=patterns.weekly||{};
   const days=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const allZeroPower=Object.values(wk).every(v=>(v.mean_power_w||0)<1);
+  if(allZeroPower && Object.keys(wk).length>0){
+    const pwEl=document.getElementById('wk-table');
+    if(pwEl) pwEl.closest('table')?.parentElement?.insertAdjacentHTML('beforebegin',
+      '<div style="background:var(--amber-bg,rgba(255,180,0,.12));border:1px solid var(--amber,#f59e0b);border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:.8rem;color:var(--amber,#f59e0b)">⚠ Power sensors have no historical data yet — model is running in behavioral-only mode. Patterns will populate as data accumulates.</div>');
+  }
   const mxW=Math.max(...Object.values(wk).map(v=>v.mean_power_w),1);
   document.getElementById('wk-table').innerHTML=days.map(d=>{
     const v=wk[d]||{mean_power_w:0};
