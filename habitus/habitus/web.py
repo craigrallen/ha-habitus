@@ -254,6 +254,8 @@ body {
   max-width: 1040px;
   margin: 0 auto;
   -webkit-font-smoothing: antialiased;
+  /* Reserve space for fixed bottom nav */
+  padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
 }
 
 /* ── Header ── */
@@ -275,33 +277,42 @@ body {
 .status-label { font-size: 0.78rem; color: var(--text2); }
 .last-run { font-size: 0.72rem; color: var(--text3); }
 
-/* ── Nav ── */
+/* ── Nav — fixed bottom tab bar ── */
 nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 200;
   display: flex;
-  gap: 0;
-  padding: 16px 24px 0;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 22px;
-  overflow-x: auto;
-  scrollbar-width: none;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  padding: 0;
+  margin: 0;
+  /* Safe area for notched phones */
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
-nav::-webkit-scrollbar { display: none; }
 nav button {
+  flex: 1;
   background: none;
   border: none;
   color: var(--text3);
-  padding: 8px 14px;
+  padding: 8px 4px 6px;
   cursor: pointer;
-  font-size: 0.82rem;
-  font-weight: 500;
   font-family: inherit;
-  border-bottom: 2px solid transparent;
-  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
   transition: color .15s;
-  letter-spacing: -0.01em;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
+.nav-icon { font-size: 1.3rem; line-height: 1; }
+.nav-label { font-size: 0.62rem; font-weight: 500; letter-spacing: .01em; white-space: nowrap; }
 nav button:hover { color: var(--text2); }
-nav button.active { color: var(--accent); border-bottom-color: var(--accent); }
+nav button.active { color: var(--accent); }
+nav button.active .nav-label { font-weight: 700; }
 
 /* ── Tabs ── */
 .tab { display: none; padding: 0 24px 32px; }
@@ -800,12 +811,24 @@ details.geek-block:not([open]) > summary::after { content: ' ▸'; color: var(--
 </div>
 
 <nav>
-  <button class="active" onclick="gotoTab('home',this)">🏠 Home</button>
-  <button onclick="gotoTab('suggestions',this)">💡 Suggestions</button>
-  <button onclick="gotoTab('automations',this)">🤖 Automations</button>
-  <button onclick="gotoTab('energy',this)">⚡ Energy</button>
-  <button onclick="gotoTab('health',this)">🏥 Health</button>
-  <button onclick="gotoTab('settings',this)">⚙️ Settings</button>
+  <button class="active" onclick="gotoTab('home',this)" title="Home">
+    <span class="nav-icon">🏠</span><span class="nav-label">Home</span>
+  </button>
+  <button onclick="gotoTab('suggestions',this)" title="Suggestions">
+    <span class="nav-icon">💡</span><span class="nav-label">Ideas</span>
+  </button>
+  <button onclick="gotoTab('automations',this)" title="Automations">
+    <span class="nav-icon">🤖</span><span class="nav-label">Autos</span>
+  </button>
+  <button onclick="gotoTab('energy',this)" title="Energy & Patterns">
+    <span class="nav-icon">⚡</span><span class="nav-label">Energy</span>
+  </button>
+  <button onclick="gotoTab('health',this)" title="Health & Devices">
+    <span class="nav-icon">🏥</span><span class="nav-label">Health</span>
+  </button>
+  <button onclick="gotoTab('settings',this)" title="Settings">
+    <span class="nav-icon">⚙️</span><span class="nav-label">Setup</span>
+  </button>
 </nav>
 
 <!-- ═══════════════════════════════════════════════════════════════ -->
