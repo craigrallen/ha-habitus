@@ -44,6 +44,8 @@ try:
         os.environ.setdefault("HABITUS_DAYS", str(_startup_us["days_history"]))
     if _startup_us.get("anomaly_sensitivity"):
         os.environ.setdefault("HABITUS_ANOMALY_SENSITIVITY", str(_startup_us["anomaly_sensitivity"]))
+    if _startup_us.get("power_proxy"):
+        os.environ.setdefault("HABITUS_POWER_PROXY", str(_startup_us["power_proxy"]))
 except Exception:
     pass
 
@@ -1296,6 +1298,18 @@ async function addYamlToHA(yaml, btn) {
     <div id="power-sensor-status" style="font-size:.78rem;color:var(--text3)"></div>
   </div>
 
+  <!-- Power Proxy Sensors -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>⚡ Power Proxy Sensors</h2></div>
+    <p style="color:var(--text3);font-size:.8rem;margin:0 0 8px">Optional. Used as historical fallback when primary sensors have no history yet. For a boat/hybrid setup: add shore power + battery discharge sensors — their sum covers all operating modes. Comma-separated entity IDs.</p>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+      <input id="power-proxy-input" type="text" placeholder="sensor.shore_power_w, sensor.battery_output_w"
+        style="flex:1;min-width:200px;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:.82rem">
+      <button class="btn btn-accent" onclick="savePowerProxy()" style="white-space:nowrap">Save</button>
+    </div>
+    <div id="power-proxy-status" style="font-size:.78rem;color:var(--text3)"></div>
+  </div>
+
   <!-- Analysis History Depth (was Geek tab) -->
   <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>📅 Analysis History Depth</h2></div>
@@ -1561,6 +1575,25 @@ async function addYamlToHA(yaml, btn) {
       }
     };
 
+    async function loadPowerProxy(){
+      try {
+        const d = await api('api/settings');
+        const proxy = (d.settings && d.settings.power_proxy) || '';
+        document.getElementById('power-proxy-input').value = proxy;
+        document.getElementById('power-proxy-status').textContent = proxy ? `Proxy: ${proxy}` : 'Not configured';
+      } catch(e) {}
+    }
+    window.savePowerProxy = async function(){
+      const val = (document.getElementById('power-proxy-input').value || '').trim();
+      const st = document.getElementById('power-proxy-status');
+      st.textContent = 'Saving…';
+      try {
+        const r = await apiPost('api/settings', {power_proxy: val});
+        st.textContent = r.ok ? (val ? `Saved: ${val}` : 'Cleared') : (r.error || 'Error');
+        st.style.color = r.ok ? 'var(--green)' : 'var(--red)';
+      } catch(e) { st.textContent = String(e); }
+    };
+
     async function loadTestingMode(){
       try {
         const d = await api('api/settings');
@@ -1644,6 +1677,7 @@ async function addYamlToHA(yaml, btn) {
     };
 
     loadPowerSensors();
+    loadPowerProxy();
     loadNotificationSetting();
     loadSensitivity();
     loadTestingMode();
@@ -3841,6 +3875,10 @@ def api_settings():
                 os.environ["HABITUS_ANOMALY_SENSITIVITY"] = str(sens)
             except (TypeError, ValueError):
                 pass
+        if "power_proxy" in data:
+            proxy_val = str(data["power_proxy"]).strip()
+            settings["power_proxy"] = proxy_val
+            os.environ["HABITUS_POWER_PROXY"] = proxy_val
         if "testing_mode" in data:
             tm = bool(data["testing_mode"])
             settings["testing_mode"] = tm

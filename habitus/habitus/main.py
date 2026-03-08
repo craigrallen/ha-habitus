@@ -1138,6 +1138,10 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     grid_kwh_w = pd.Series(dtype=float, name="grid_kwh_w")  # init before branches
     # Support comma-separated multi-phase sensors (e.g. L1,L2,L3 — summed)
     _power_entities = [e.strip() for e in _power_entity.split(",") if e.strip()] if _power_entity else []
+    # Power proxy sensors — used when primary sensors have insufficient history
+    # e.g. shore_power + battery_output_w covers all operating modes
+    _power_proxy = os.environ.get("HABITUS_POWER_PROXY", "").strip()
+    _proxy_entities = [e.strip() for e in _power_proxy.split(",") if e.strip()] if _power_proxy else []
     _phase_series: list[pd.Series] = []  # per-phase columns collected for later join
     _phase_count = 1
     if _power_entities:
@@ -1262,12 +1266,37 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         if _pc in out.columns:
             _nonzero_pct = (out[_pc] > 0.5).mean()
             if _nonzero_pct < 0.05:
-                log.warning(
-                    "Power feature '%s' is %.1f%% non-zero — insufficient history. "
-                    "Dropping from model (behavioral-only mode).",
-                    _pc, _nonzero_pct * 100,
-                )
-                out[_pc] = 0.0  # zero it out so it has no discriminative value
+                # Try proxy sensors before giving up on power features entirely.
+                # Proxy pattern: e.g. shore_power + battery_output_w
+                # shore ≈ 0 on battery, battery_out ≈ 0 on shore → sum covers both modes.
+                _proxy_filled = False
+                if _pc == "total_power_w" and _proxy_entities:
+                    _proxy_df = df[df["entity_id"].isin(_proxy_entities)].copy()
+                    if not _proxy_df.empty:
+                        _proxy_df["v"] = pd.to_numeric(_proxy_df["mean"], errors="coerce").clip(lower=0, upper=_max_w)
+                        _proxy_total = _proxy_df.groupby("hour")["v"].sum()
+                        _proxy_nonzero = (_proxy_total > 0.5).mean()
+                        if _proxy_nonzero >= 0.05:
+                            # Merge proxy into out — fill zeros in primary with proxy values
+                            _proxy_aligned = out.set_index("hour")["total_power_w"].copy() if "hour" in out.columns else out["total_power_w"].copy()
+                            _proxy_s = _proxy_total.reindex(_proxy_aligned.index, fill_value=0.0)
+                            # Where primary is 0, use proxy
+                            _merged = _proxy_aligned.where(_proxy_aligned > 0.5, _proxy_s)
+                            out["total_power_w"] = _merged.values if hasattr(_merged, "values") else _merged
+                            log.info(
+                                "Power proxy fallback: '%s' sensors fill total_power_w "
+                                "(%.1f%% non-zero → %.1f%% after proxy merge)",
+                                ",".join(_proxy_entities), _nonzero_pct * 100,
+                                (out["total_power_w"] > 0.5).mean() * 100,
+                            )
+                            _proxy_filled = True
+                if not _proxy_filled:
+                    log.warning(
+                        "Power feature '%s' is %.1f%% non-zero — insufficient history. "
+                        "Dropping from model (behavioral-only mode).",
+                        _pc, _nonzero_pct * 100,
+                    )
+                    out[_pc] = 0.0  # zero it out so it has no discriminative value
 
     log_perf_guardrail(
         "build_features",
@@ -1915,6 +1944,9 @@ async def run(days_history: int, mode: str = "full") -> None:
                 log.info("Loaded anomaly sensitivity: %s", os.environ["HABITUS_ANOMALY_SENSITIVITY"])
             except (TypeError, ValueError):
                 pass
+        if _saved.get("power_proxy") and not os.environ.get("HABITUS_POWER_PROXY"):
+            os.environ["HABITUS_POWER_PROXY"] = _saved["power_proxy"]
+            log.info("Loaded saved power proxy from settings: %s", _saved["power_proxy"])
     except Exception:
         pass
 
