@@ -22,9 +22,9 @@ import os
 from collections import Counter, defaultdict
 from typing import Any
 
-from .ha_db import managed_read_connection, resolve_ha_db_path, table_exists
-
 import numpy as np
+
+from .ha_db import managed_read_connection, resolve_ha_db_path, table_exists
 
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
@@ -234,7 +234,7 @@ def _cluster_events(events: list[dict]) -> list[dict]:
 
     from sklearn.cluster import KMeans
     # Choose k: min of 10, or number of distinct 100W buckets
-    n_buckets = len(set(int(p[0] // 100) for p in powers))
+    n_buckets = len({int(p[0] // 100) for p in powers})
     k = min(max(2, n_buckets), 10, len(events))
 
     km = KMeans(n_clusters=k, random_state=42, n_init=10)
@@ -244,7 +244,7 @@ def _cluster_events(events: list[dict]) -> list[dict]:
     clusters = []
     for i in range(k):
         mask = labels == i
-        cluster_events = [e for e, m in zip(events, mask) if m]
+        cluster_events = [e for e, m in zip(events, mask, strict=False) if m]
         if not cluster_events:
             continue
 
@@ -559,13 +559,140 @@ def _auto_detect_power_entity(db_path: str) -> str:
     return ""
 
 
+def _make_phase_label(phase_type: str, phases: list[str]) -> str:
+    """Build human-readable phase label from phase_type and phase list."""
+    if phase_type == "single":
+        return f"{phases[0]} (single phase)" if phases else "single phase"
+    elif phase_type == "two_phase_400v":
+        return f"{'+'.join(phases)} (400V two-phase)" if len(phases) >= 2 else "two-phase 400V"
+    elif phase_type == "two_phase_mixed":
+        return f"{'+'.join(phases)} (mixed)" if len(phases) >= 2 else "two-phase mixed"
+    elif phase_type == "three_phase":
+        return "L1+L2+L3 (three-phase)"
+    return ""
+
+
+def correlate_phase_edges(edges_by_phase: dict, window_sec: int = 120) -> list[dict]:
+    """Correlate edges detected independently per phase into multi-phase event groups.
+
+    Args:
+        edges_by_phase: {"L1": [(ts, delta_w), ...], "L2": [...], "L3": [...]}
+            where ts is a datetime or float timestamp.
+        window_sec: Maximum seconds between edges to consider correlated.
+
+    Returns:
+        List of correlated edge groups with phase attribution, each containing:
+        - ts: timestamp of the triggering edge
+        - total_delta_w: sum of deltas across all phases
+        - phase_type: "single" | "two_phase_400v" | "two_phase_mixed" | "three_phase"
+        - phases: sorted list of phase labels involved
+        - per_phase: dict of {phase: delta_w}
+    """
+    all_edges = []
+    for phase, edges in edges_by_phase.items():
+        for ts, delta in edges:
+            all_edges.append({"ts": ts, "delta": delta, "phase": phase})
+    all_edges.sort(key=lambda e: e["ts"])
+
+    groups = []
+    used: set[int] = set()
+    for i, edge in enumerate(all_edges):
+        if i in used:
+            continue
+        group = [edge]
+        used.add(i)
+        for j, other in enumerate(all_edges[i + 1:], i + 1):
+            if j in used:
+                continue
+            ts_i = edge["ts"]
+            ts_j = other["ts"]
+            # Support both datetime objects and float timestamps
+            if hasattr(ts_i, "total_seconds"):
+                diff_sec = abs(ts_j - ts_i)
+            else:
+                try:
+                    diff_sec = abs((ts_j - ts_i).total_seconds())
+                except AttributeError:
+                    diff_sec = abs(float(ts_j) - float(ts_i))
+            if diff_sec <= window_sec and other["phase"] != edge["phase"]:  # different phase only
+                group.append(other)
+                used.add(j)
+
+        phases_in_group = [e["phase"] for e in group]
+
+        if len(set(phases_in_group)) == 1:
+            phase_type = "single"
+        elif len(set(phases_in_group)) == 2:
+            deltas = [abs(e["delta"]) for e in group]
+            ratio = min(deltas) / max(deltas) if max(deltas) > 0 else 0
+            phase_type = "two_phase_400v" if ratio > 0.85 else "two_phase_mixed"
+        else:
+            phase_type = "three_phase"
+
+        groups.append({
+            "ts": edge["ts"],
+            "total_delta_w": sum(e["delta"] for e in group),
+            "phase_type": phase_type,
+            "phases": sorted(set(phases_in_group)),
+            "per_phase": {e["phase"]: e["delta"] for e in group},
+        })
+    return groups
+
+
+def _annotate_clusters_with_phase(
+    matched_clusters: list[dict],
+    correlated_groups: list[dict],
+) -> list[dict]:
+    """Annotate matched appliance clusters with phase information.
+
+    For each cluster, find the correlated edge group whose total_delta_w is
+    closest to the cluster's centroid_w, within ±35% tolerance.  When a match
+    is found, the cluster receives phase_type, phases, and phase_label fields.
+    Unmatched clusters get phase_type="single" as a safe default.
+    """
+    used_groups: set[int] = set()
+    annotated = []
+
+    for cluster in matched_clusters:
+        centroid = cluster["centroid_w"]
+        best_idx = None
+        best_diff = float("inf")
+
+        for idx, grp in enumerate(correlated_groups):
+            if idx in used_groups:
+                continue
+            total = abs(grp["total_delta_w"])
+            diff = abs(centroid - total) / max(total, 1)
+            if diff < 0.35 and diff < best_diff:
+                best_diff = diff
+                best_idx = idx
+
+        c = cluster.copy()
+        if best_idx is not None:
+            grp = correlated_groups[best_idx]
+            used_groups.add(best_idx)
+            c["phase_type"] = grp["phase_type"]
+            c["phases"] = grp["phases"]
+            c["per_phase"] = grp["per_phase"]
+        else:
+            c["phase_type"] = "single"
+            c["phases"] = ["L1"]
+            c["per_phase"] = {}
+
+        c["phase_label"] = _make_phase_label(c["phase_type"], c["phases"])
+        annotated.append(c)
+
+    return annotated
+
+
 def run_disaggregation(power_entity: str = "", days: int = 7) -> dict[str, Any]:
     """Run full NILM disaggregation pipeline.
 
-    1. Load aggregate power data
+    1. Load aggregate power data (single or multi-phase)
     2. Detect edges → pair into events → cluster by power level
     3. Match clusters to known/trained appliance signatures
-    4. Estimate current real-time breakdown
+    4. Annotate clusters with per-phase attribution (when multi-phase configured)
+    5. Estimate current real-time breakdown
     """
     if not power_entity:
         # Try to find the main power entity
@@ -587,18 +714,70 @@ def run_disaggregation(power_entity: str = "", days: int = 7) -> dict[str, Any]:
     if not power_entity:
         return {"error": "No power entity configured", "breakdown": []}
 
-    log.info("nilm: running disaggregation on %s (%d days)", power_entity, days)
+    # Parse comma-separated multi-phase entities
+    phase_entities = [e.strip() for e in power_entity.split(",") if e.strip()]
+    is_multi_phase = len(phase_entities) > 1
 
-    readings = _get_aggregate_power(power_entity, days=days)
+    log.info("nilm: running disaggregation on %s (%d days, phases=%d)",
+             power_entity, days, len(phase_entities))
+
+    # ── Aggregate readings (sum of phases for the main pipeline) ──────────────
+    if is_multi_phase:
+        # Load each phase separately, then sum per timestamp
+        all_phase_readings: dict[str, list[tuple[float, float]]] = {}
+        for ph_idx, eid in enumerate(phase_entities):
+            ph_label = f"L{ph_idx + 1}"
+            all_phase_readings[ph_label] = _get_aggregate_power(eid, days=days)
+
+        # Build combined total from all phases
+        from collections import defaultdict as _dd
+        ts_sums: dict[float, float] = _dd(float)
+        for ph_readings in all_phase_readings.values():
+            for ts, w in ph_readings:
+                ts_sums[ts] += w
+        readings: list[tuple[float, float]] = sorted(ts_sums.items())
+    else:
+        readings = _get_aggregate_power(phase_entities[0] if phase_entities else power_entity, days=days)
+        all_phase_readings = {}
+
     if len(readings) < 20:
         return {"error": "Insufficient data", "readings_count": len(readings), "breakdown": []}
 
-    learned_monitor_sigs = _learn_signatures_from_known_monitors(exclude_entity=power_entity, days=min(days, 30))
+    first_entity = phase_entities[0] if phase_entities else power_entity
+    learned_monitor_sigs = _learn_signatures_from_known_monitors(
+        exclude_entity=first_entity, days=min(days, 30)
+    )
 
     edges = _detect_edges(readings)
     events = _pair_edges(edges)
     clusters = _cluster_events(events)
     matched = _match_to_appliances(clusters, learned_sigs=learned_monitor_sigs)
+
+    # ── Per-phase correlation (multi-phase only) ───────────────────────────────
+    correlated_groups: list[dict] = []
+    if is_multi_phase and all_phase_readings:
+        edges_by_phase: dict[str, list[tuple[Any, float]]] = {}
+        for ph_label, ph_readings in all_phase_readings.items():
+            ph_edges = _detect_edges(ph_readings)
+            edges_by_phase[ph_label] = [
+                (
+                    datetime.datetime.fromtimestamp(e["timestamp"], tz=datetime.UTC),
+                    e["delta_w"],
+                )
+                for e in ph_edges
+            ]
+        correlated_groups = correlate_phase_edges(edges_by_phase, window_sec=120)
+        matched = _annotate_clusters_with_phase(matched, correlated_groups)
+        log.info("nilm: %d correlated phase-edge groups from %d phases",
+                 len(correlated_groups), len(phase_entities))
+    else:
+        # Single-phase: add default annotations so output schema is consistent
+        for c in matched:
+            c.setdefault("phase_type", "single")
+            c.setdefault("phases", ["L1"])
+            c.setdefault("per_phase", {})
+            c["phase_label"] = _make_phase_label(c["phase_type"], c["phases"])
+
     breakdown = _estimate_current_breakdown(readings, matched)
 
     # Energy breakdown (last 24h estimation)
@@ -620,6 +799,14 @@ def run_disaggregation(power_entity: str = "", days: int = 7) -> dict[str, Any]:
         for name, kwh in sorted(appliance_kwh.items(), key=lambda x: -x[1])
     ]
 
+    # Per-phase current wattage (most recent reading per phase)
+    phase_current_w: dict[str, float] = {}
+    if is_multi_phase and all_phase_readings:
+        for ph_label, ph_readings in all_phase_readings.items():
+            if ph_readings:
+                recent_ph = [w for _, w in ph_readings[-10:]]
+                phase_current_w[ph_label] = round(float(np.median(recent_ph)), 0)
+
     result = {
         "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
         "power_entity": power_entity,
@@ -629,12 +816,17 @@ def run_disaggregation(power_entity: str = "", days: int = 7) -> dict[str, Any]:
         "events_paired": len(events),
         "appliance_slots": len(matched),
         "learned_monitor_signatures": len(learned_monitor_sigs),
-        "monitor_signature_entities": sorted([v.get("entity_id", "") for v in learned_monitor_sigs.values() if v.get("entity_id")])[:50],
+        "monitor_signature_entities": sorted(
+            [v.get("entity_id", "") for v in learned_monitor_sigs.values() if v.get("entity_id")]
+        )[:50],
         "current_breakdown": breakdown,
         "current_total_w": round(float(np.median([w for _, w in readings[-10:]])), 0) if readings else 0,
         "discovered_appliances": matched,
         "energy_24h": energy_breakdown,
         "total_kwh_24h": round(total_kwh_24h, 2),
+        "phase_count": len(phase_entities) if phase_entities else 1,
+        "phase_current_w": phase_current_w,
+        "correlated_phase_groups": len(correlated_groups),
     }
 
     os.makedirs(DATA_DIR, exist_ok=True)
