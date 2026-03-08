@@ -1,7 +1,6 @@
 """Pattern discovery and automation suggestion engine — v2.0."""
 
 import datetime
-import json
 import logging
 import os
 from typing import Any
@@ -358,6 +357,22 @@ def discover_patterns(features: pd.DataFrame) -> dict[str, Any]:
         for i in range(7)
         if i in daily.index
     }
+    # Per-phase weekly profiles (only when multi-phase features are available)
+    if "power_l1_w" in features.columns:
+        for _ph in ["l1", "l2", "l3"]:
+            _ph_col = f"power_{_ph}_w"
+            if _ph_col not in features.columns:
+                continue
+            _daily_ph = (
+                features.groupby("day_of_week")
+                .agg(mean_power=(_ph_col, "mean"))
+                .round(2)
+            )
+            patterns[f"weekly_{_ph}"] = {
+                day_names[i]: {"mean_power_w": float(_daily_ph.loc[i, "mean_power"])}
+                for i in range(7)
+                if i in _daily_ph.index
+            }
     seasonal = (
         features.groupby("month")
         .agg(mean_power=("total_power_w", "mean"), mean_temp=("avg_temp_c", "mean"))
