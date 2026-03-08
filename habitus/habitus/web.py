@@ -1405,13 +1405,30 @@ async function addYamlToHA(yaml, btn) {
 
   <script>
   (function(){
-    let _powerSensors = [];  // [{entity_id, name, current_w}]
+    let _powerSensors = [];  // [{entity_id, name, current_w, group}]
 
     function buildOptions(selected='') {
-      const blank = `<option value="">— select sensor —</option>`;
-      return blank + _powerSensors.map(s =>
-        `<option value="${s.entity_id}"${s.entity_id===selected?' selected':''}>${s.name} (${s.current_w}W)</option>`
-      ).join('');
+      if (!_powerSensors.length) return '<option value="">No sensors found</option>';
+      const blank = '<option value="">— select sensor —</option>';
+      // Group sensors
+      const groups = {};
+      _powerSensors.forEach(s => {
+        const g = s.group || 'Other';
+        if (!groups[g]) groups[g] = [];
+        groups[g].push(s);
+      });
+      const groupOrder = ['Inverter / Total Load','Shore Power / Grid','Solar','Battery','Wind Turbine','Other'];
+      let html = blank;
+      groupOrder.forEach(g => {
+        if (!groups[g] || !groups[g].length) return;
+        html += `<optgroup label="${g}">`;
+        html += groups[g].map(s => {
+          const sel = s.entity_id === selected ? ' selected' : '';
+          return `<option value="${s.entity_id}"${sel}>${s.name} (${s.current_w}W)</option>`;
+        }).join('');
+        html += '</optgroup>';
+      });
+      return html;
     }
 
     function phaseLabel(i) { return i===0?'Phase 1 / Single':i===1?'Phase 2':'Phase 3'; }
@@ -3550,32 +3567,69 @@ def api_training_status():
 @app.route("/api/power_sensors")
 @app.route("/ingress/api/power_sensors")
 def api_power_sensors():
-    """Return all watt sensors from HA, plus current selection."""
+    """Return grouped watt sensors from HA, filtered and sorted by relevance."""
     import requests as req  # type: ignore[import-untyped]
 
     ha_url = os.environ.get("HA_URL", "http://supervisor/core")
     token = os.environ.get("SUPERVISOR_TOKEN", os.environ.get("HABITUS_HA_TOKEN", ""))
     current = os.environ.get("HABITUS_POWER_ENTITY", "")
+
+    # Patterns that indicate accumulated energy stats, NOT real-time watts
+    _ACCUM_SKIP = re.compile(
+        r"(weekly|daily|monthly|annual|lifetime|total_kwh|energy_kwh|yield|export|import"
+        r"|produced|consumed_kwh|statistics|stat_|24h_stat|_stat$|node.?id)",
+        re.IGNORECASE,
+    )
+    # Group keywords → group label (checked against entity_id + friendly_name)
+    _GROUPS: list[tuple[re.Pattern, str]] = [
+        (re.compile(r"inverter|combi|mcu|load_w|total.?load|combined.?watt", re.I), "Inverter / Total Load"),
+        (re.compile(r"shore.?power|grid.?power|mains|import.?w\b", re.I), "Shore Power / Grid"),
+        (re.compile(r"solar|pv|photovoltaic|panel", re.I), "Solar"),
+        (re.compile(r"battery|batt|soc.?w|charging.?w|house.?batt", re.I), "Battery"),
+        (re.compile(r"wind.?turb|turbine.?power", re.I), "Wind Turbine"),
+    ]
+    _MAX_PLAUSIBLE_W = 50_000  # >50kW = almost certainly an accumulator or bad sensor
+
     try:
         r = req.get(f"{ha_url}/api/states", headers={"Authorization": f"Bearer {token}"}, timeout=8)
-        sensors = []
+        raw = []
         for s in r.json():
             eid = s["entity_id"]
             uom = s["attributes"].get("unit_of_measurement", "")
-            if uom == "W" and eid.startswith("sensor."):
-                try:
-                    val = float(s["state"])
-                    sensors.append(
-                        {
-                            "entity_id": eid,
-                            "name": s["attributes"].get("friendly_name", eid),
-                            "current_w": round(val, 1),
-                        }
-                    )
-                except Exception:
-                    pass
-        sensors.sort(key=lambda x: -x["current_w"])
-        return jsonify({"sensors": sensors, "selected": current, "auto_detected": current})
+            if uom != "W" or not eid.startswith("sensor."):
+                continue
+            # Skip accumulated energy sensors and junk IDs
+            name = s["attributes"].get("friendly_name", eid)
+            if _ACCUM_SKIP.search(eid) or _ACCUM_SKIP.search(name):
+                continue
+            try:
+                val = float(s["state"])
+            except Exception:
+                continue
+            if val > _MAX_PLAUSIBLE_W:
+                continue  # silently drop implausible values
+            # Assign group
+            combined = f"{eid} {name}"
+            group = "Other"
+            for pat, label in _GROUPS:
+                if pat.search(combined):
+                    group = label
+                    break
+            raw.append({
+                "entity_id": eid,
+                "name": name,
+                "current_w": round(val, 1),
+                "group": group,
+            })
+
+        # Sort: put currently-selected first, then by group priority, then by wattage desc
+        group_order = ["Inverter / Total Load", "Shore Power / Grid", "Solar", "Battery", "Wind Turbine", "Other"]
+        raw.sort(key=lambda x: (
+            0 if x["entity_id"] in current.split(",") else 1,
+            group_order.index(x["group"]) if x["group"] in group_order else 99,
+            -x["current_w"],
+        ))
+        return jsonify({"sensors": raw, "selected": current, "auto_detected": current})
     except Exception as e:
         return jsonify({"error": str(e), "sensors": [], "selected": current})
 
