@@ -53,9 +53,14 @@ class TestIsDeviceSensor:
         # Short slug without aggregate keywords → accept as generic plug
         assert is_device_sensor("sensor.plug_1_power") is True
 
-    def test_is_device_sensor_long_non_device_slug(self):
-        # Very long slug without device hints → excluded by length heuristic
-        result = is_device_sensor("sensor." + "x" * 35 + "_power")
+    def test_is_device_sensor_non_power_domain_excluded(self):
+        # Financial/weather sensor without power suffix → excluded
+        result = is_device_sensor("sensor.bch_eur_high_today")
+        assert result is False
+
+    def test_is_device_sensor_humidity_excluded(self):
+        # Humidity sensor → excluded even with power suffix in combined
+        result = is_device_sensor("sensor.dark_sky_humidity_0h")
         assert result is False
 
 

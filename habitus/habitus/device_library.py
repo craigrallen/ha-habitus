@@ -24,16 +24,24 @@ _SUFFIX_STRIP = re.compile(
 )
 _DOMAIN_STRIP = re.compile(r"^sensor\.", re.IGNORECASE)
 
-# Keywords that suggest a sensor IS a per-device monitor (smart plug etc.)
+# Entity must have a device keyword OR a power-unit suffix to qualify.
+# A "short slug" heuristic is intentionally removed — it caused too many
+# false positives (currency sensors, weather readings, occupancy counts, etc.)
 _DEVICE_HINTS = re.compile(
     r"(kettle|fridge|freezer|dishwasher|washer|dryer|washing|tumble|oven|microwave|"
-    r"toaster|coffee|tv|television|computer|pc|laptop|printer|charger|heater|fan|"
-    r"pump|light|lamp|plug|socket|switch|aircon|ac_unit|boiler|hot.?water|"
-    r"router|nas|server|camera|doorbell)",
+    r"toaster|coffee|tv|television|computer|pc_power|laptop|printer|charger|"
+    r"heater|fan|pump|light|lamp|plug|socket|aircon|ac_unit|boiler|hot.?water|"
+    r"router|nas|server|camera|doorbell|watermaker|dehumidifier|vacuum)",
     re.IGNORECASE,
 )
 
-# Keywords that suggest a sensor is a PHASE/TOTAL/AGGREGATE (NOT a per-device sensor)
+# Entity ID must end with a power-unit suffix to qualify as a power sensor
+_POWER_SUFFIX = re.compile(
+    r"(_power|_watt|_watts|_consumption_w|_electric_consumption|_energy_w)$",
+    re.IGNORECASE,
+)
+
+# These domains/patterns are NEVER per-device power sensors
 _AGGREGATE_HINTS = re.compile(
     r"(total|combined|phase|l1|l2|l3|shore|grid|solar|pv_|_pv$|pv_array|photovoltaic|"
     r"inverter|mcu|charger.input|mains|house|whole.home|whole.house|main.meter|"
@@ -42,23 +50,41 @@ _AGGREGATE_HINTS = re.compile(
     re.IGNORECASE,
 )
 
+# Non-power sensor patterns — exclude weather, financial, environmental, diagnostic
+_NON_POWER = re.compile(
+    r"(humidity|temperature|temp_|_temp$|pressure|lux|illuminance|"
+    r"eur|usd|btc|bch|xrp|eth|coin|price|ask|bid|rate|index|"
+    r"dark_sky|weather|forecast|rain|wind|cloud|dew|uv_|"
+    r"signal|rssi|lqi|uptime|memory|cpu|disk|storage|space_used|"
+    r"activations|count|events|last_hour|percent|percentage|"
+    r"door|window|motion|occupancy|presence|_open$|_closed$|"
+    r"voltage|current_a$|_ampere|_amp$)",
+    re.IGNORECASE,
+)
+
 MAX_PLAUSIBLE_W = 25_000  # 25kW upper bound
+MIN_PLAUSIBLE_W = 1.0     # below 1W = not a real load (noise / always-zero sensors)
 
 
 def is_device_sensor(entity_id: str, name: str = "") -> bool:
-    """Return True if this W sensor likely monitors a single device."""
+    """Return True if this sensor likely monitors a single device's power consumption.
+
+    Rules (all must pass):
+    1. Not an aggregate/phase/generation sensor
+    2. Not a non-power domain (weather, financial, environmental, diagnostic)
+    3. Either has an explicit device keyword (kettle, fridge, etc.)
+       OR entity_id ends with a recognised power suffix (_power, _watt, etc.)
+    """
     combined = f"{entity_id} {name}".lower()
+    # Hard excludes
     if _AGGREGATE_HINTS.search(combined):
         return False
-    # Must look like a device (explicit hint keyword), OR be a generic plug/switch sensor
-    # that's NOT an aggregate (e.g. sensor.plug_1_power)
+    if _NON_POWER.search(combined):
+        return False
+    # Must have device hint keyword OR power suffix
     if _DEVICE_HINTS.search(combined):
         return True
-    # Generic plug pattern: sensor.xxx_power, sensor.xxx_watt where xxx is a short slug
-    slug = re.sub(r"^sensor\.", "", entity_id.lower())
-    slug = _SUFFIX_STRIP.sub("", slug)
-    # If slug is short (<30 chars) and not an aggregate → likely a plug
-    return len(slug) < 30 and not _AGGREGATE_HINTS.search(slug)
+    return bool(_POWER_SUFFIX.search(entity_id.lower()))
 
 
 def extract_device_name(entity_id: str) -> str:
@@ -84,6 +110,10 @@ def build_device_profile(series: pd.Series, entity_id: str) -> dict | None:
         return None
     vals = pd.to_numeric(series, errors="coerce").dropna().clip(lower=0, upper=MAX_PLAUSIBLE_W)
     if len(vals) < 24:  # need at least 24 hours
+        return None
+    # Reject sensors whose 95th-percentile is implausibly low — not a real power sensor
+    # (e.g. humidity 0-100%, currency rates, temperatures 0-40°C)
+    if float(vals.quantile(0.95)) < MIN_PLAUSIBLE_W:
         return None
 
     # Bimodal distribution → find on/off peaks
