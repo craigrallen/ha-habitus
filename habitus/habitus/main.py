@@ -1138,6 +1138,8 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     grid_kwh_w = pd.Series(dtype=float, name="grid_kwh_w")  # init before branches
     # Support comma-separated multi-phase sensors (e.g. L1,L2,L3 — summed)
     _power_entities = [e.strip() for e in _power_entity.split(",") if e.strip()] if _power_entity else []
+    _phase_series: list[pd.Series] = []  # per-phase columns collected for later join
+    _phase_count = 1
     if _power_entities:
         # Sum across all specified phases / sensors
         power = df[df["entity_id"].isin(_power_entities)].copy()
@@ -1145,6 +1147,16 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         total_power = power.groupby("hour")["v"].sum().rename("total_power_w")
         if len(_power_entities) > 1:
             log.info("Multi-phase power: summing %d sensors → total_power_w", len(_power_entities))
+            # Build individual per-phase columns alongside the summed total
+            for _ph_i, _ph_eid in enumerate(_power_entities):
+                _ph_df = df[df["entity_id"] == _ph_eid].copy()
+                _ph_df["v"] = pd.to_numeric(_ph_df["mean"], errors="coerce").clip(
+                    lower=0, upper=_max_w
+                )
+                _ph_col = f"power_l{_ph_i + 1}_w"
+                _ph_series = _ph_df.groupby("hour")["v"].max().rename(_ph_col)
+                _phase_series.append(_ph_series)
+            _phase_count = len(_power_entities)
     elif _energy_grid:
         # Grid kWh entity from HA Energy Dashboard — convert hourly delta to W
         grid = df[df["entity_id"] == _energy_grid].copy()
@@ -1175,6 +1187,11 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     features = hours.set_index("hour")
     for s in [total_power, avg_temp, activity, grid_kwh_w]:
         features = features.join(s, how="left")
+    # Per-phase power columns (only when multi-phase sensors configured)
+    for _ph_s in _phase_series:
+        features = features.join(_ph_s, how="left")
+        features[_ph_s.name] = features[_ph_s.name].fillna(0.0)
+    features["phase_count"] = _phase_count
     # Merge activity features from activity engine
     try:
         act_features = activity_engine.extract_activity_features(df)
@@ -1912,6 +1929,16 @@ async def run(days_history: int, mode: str = "full") -> None:
     _resolved_grid = os.environ.get("HABITUS_ENERGY_GRID", "").strip()
     if _resolved_power:
         state["power_entity"] = _resolved_power
+        # Persist per-phase mapping when multiple sensors configured
+        _resolved_power_entities = [e.strip() for e in _resolved_power.split(",") if e.strip()]
+        if len(_resolved_power_entities) > 1:
+            state["power_phases"] = {
+                f"L{i + 1}": eid for i, eid in enumerate(_resolved_power_entities)
+            }
+            state["phase_count"] = len(_resolved_power_entities)
+        else:
+            state.pop("power_phases", None)
+            state["phase_count"] = 1
     if _resolved_grid:
         state["energy_grid_entity"] = _resolved_grid
     if _resolved_power or _resolved_grid:
