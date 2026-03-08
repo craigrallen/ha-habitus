@@ -421,6 +421,18 @@ def set_progress(phase, done=0, total=0, rows=0, elapsed=0.0, eta=0.0):
     try:
         from .utils import atomic_write as _atomic_write  # noqa: PLC0415
         pct = round(done / total * 100) if total else 100
+        # Preserve started_at from an existing run so staleness detection works correctly.
+        # Only set it on the very first call of a run (when file doesn't exist yet or
+        # was cleared between runs).
+        started_at: str | None = None
+        if os.path.exists(PROGRESS_PATH):
+            with contextlib.suppress(Exception):
+                with open(PROGRESS_PATH) as _pf:
+                    _prev = json.load(_pf)
+                    if _prev.get("running"):
+                        started_at = _prev.get("started_at")
+        if started_at is None:
+            started_at = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00")
         _atomic_write(PROGRESS_PATH, {
             "running": True,
             "phase": phase,
@@ -430,6 +442,7 @@ def set_progress(phase, done=0, total=0, rows=0, elapsed=0.0, eta=0.0):
             "rows": rows,
             "elapsed_min": round(elapsed / 60, 1),
             "eta_min": round(eta / 60, 1),
+            "started_at": started_at,
         })
     except Exception:
         pass
@@ -438,6 +451,20 @@ def set_progress(phase, done=0, total=0, rows=0, elapsed=0.0, eta=0.0):
 def clear_progress():
     if os.path.exists(PROGRESS_PATH):
         os.remove(PROGRESS_PATH)
+
+
+def write_fetch_failed(reason: str = "fetch returned 0 rows") -> None:
+    """Write a fetch_failed status to progress.json so the UI surfaces the error."""
+    try:
+        from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+        _atomic_write(PROGRESS_PATH, {
+            "running": False,
+            "phase": "fetch_failed",
+            "reason": reason,
+            "failed_at": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+        })
+    except Exception:
+        pass
 
 
 def mark_last_completed_progress(
@@ -1656,6 +1683,44 @@ async def run(days_history: int, mode: str = "full") -> None:
     now_iso = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:00:00+00:00")
     state = load_state()
 
+    # ── Python-side staleness guard ────────────────────────────────────────────
+    # Belt-and-suspenders: if progress.json says running=true but started_at is
+    # >15 minutes old (or file mtime is >15 min old), the previous run crashed.
+    # Mark it stale_aborted so the UI reflects this, then proceed with a fresh run.
+    _STALE_THRESHOLD_S = 15 * 60  # 15 minutes
+    import time as _time  # noqa: PLC0415
+    if os.path.exists(PROGRESS_PATH):
+        _file_age_s = _time.time() - os.path.getmtime(PROGRESS_PATH)
+        with contextlib.suppress(Exception):
+            with open(PROGRESS_PATH) as _pf:
+                _prev_prog = json.load(_pf)
+            if _prev_prog.get("running"):
+                # Check started_at if present, otherwise fall back to file mtime
+                _started_at_str = _prev_prog.get("started_at")
+                if _started_at_str:
+                    try:
+                        _sa = datetime.datetime.fromisoformat(_started_at_str)
+                        _file_age_s = (datetime.datetime.now(datetime.UTC) - _sa).total_seconds()
+                    except Exception:
+                        pass
+                if _file_age_s > _STALE_THRESHOLD_S:
+                    log.warning(
+                        "Stale progress.json detected in Python runner (%.0f min old, running=true) "
+                        "— previous run likely crashed. Marking stale_aborted and proceeding.",
+                        _file_age_s / 60,
+                    )
+                    write_fetch_failed(
+                        f"stale_aborted: run started >15 min ago without completion "
+                        f"(age={_file_age_s/60:.1f}min)"
+                    )
+                    # Overwrite with a clean stale marker
+                    from .utils import atomic_write as _aw  # noqa: PLC0415
+                    _aw(PROGRESS_PATH, {
+                        "running": False,
+                        "phase": "stale_aborted",
+                        "stale_cleared_at": now_iso,
+                    })
+
     # Adaptive contamination — force retrain when training age crosses a tier boundary
     _stored_days = state.get("training_days", 0)
     if should_retrain_for_tier_change(state, _stored_days):
@@ -1826,7 +1891,8 @@ async def run(days_history: int, mode: str = "full") -> None:
     tracked_entity_count = len(stat_ids) + len(non_stat_ids)
 
     if not stat_ids and not non_stat_ids:
-        log.error("No behavioral sensors found")
+        log.error("No behavioral sensors found — aborting training with fetch_failed status")
+        write_fetch_failed("no_entities: get_stat_ids and get_behavioral_entity_ids both returned empty")
         return
 
     total_entities = get_ha_entity_count()
@@ -1890,9 +1956,22 @@ async def run(days_history: int, mode: str = "full") -> None:
 
             frames = [x for x in (df_stats, df_raw) if x is not None and not x.empty]
             if not frames:
-                log.warning("No data")
+                log.error(
+                    "fetch returned 0 rows for %d stat entities and %d raw entities — "
+                    "aborting training. Check DB path, HA connectivity, and history window.",
+                    len(stat_ids),
+                    len(non_stat_ids),
+                )
+                write_fetch_failed(
+                    f"fetch returned 0 rows (stat_entities={len(stat_ids)}, "
+                    f"raw_entities={len(non_stat_ids)})"
+                )
                 return
             df = pd.concat(frames, ignore_index=True)
+            if len(df) == 0:
+                log.error("DataFrame is empty after concat — aborting with fetch_failed")
+                write_fetch_failed("empty_df: concat of stat+raw frames produced 0 rows")
+                return
             log.info("Post-fetch: computing unique entity count...")
             unique_entity_count = int(df["entity_id"].nunique())
             log.info("Post-fetch: unique entities=%d", unique_entity_count)
@@ -1930,6 +2009,7 @@ async def run(days_history: int, mode: str = "full") -> None:
                 log.error("CRASH in build_features: %s", e)
                 traceback.print_exc()
                 raise
+            _fetch_row_count = len(df)  # capture before del for state.json
             del df
             set_progress("training", len(stat_ids), len(stat_ids), len(features), 0, 0)
             log.info(f"Training IsolationForest on {len(features):,} rows...")
@@ -2158,9 +2238,22 @@ async def run(days_history: int, mode: str = "full") -> None:
 
         frames = [x for x in (df_stats, df_raw) if x is not None and not x.empty]
         if not frames:
-            log.warning("No data returned")
+            log.error(
+                "fetch returned 0 rows for %d stat entities and %d raw entities — "
+                "aborting training. Check DB path, HA connectivity, and history window.",
+                len(stat_ids),
+                len(non_stat_ids),
+            )
+            write_fetch_failed(
+                f"fetch returned 0 rows (stat_entities={len(stat_ids)}, "
+                f"raw_entities={len(non_stat_ids)})"
+            )
             return
         df = pd.concat(frames, ignore_index=True)
+        if len(df) == 0:
+            log.error("DataFrame is empty after concat — aborting with fetch_failed")
+            write_fetch_failed("empty_df: concat of stat+raw frames produced 0 rows")
+            return
         log.info("Post-fetch: computing unique entity count...")
         unique_entity_count = int(df["entity_id"].nunique())
         log.info("Post-fetch: unique entities=%d", unique_entity_count)
@@ -2193,6 +2286,7 @@ async def run(days_history: int, mode: str = "full") -> None:
         state.update({"phase": "baselines_ready", "entity_count": tracked_entity_count})
         save_state(state)
         features = build_features(df)
+        _fetch_row_count = len(df)  # capture before del for state.json
         del df
         set_progress("training", len(stat_ids), len(stat_ids), len(features), 0, 0)
         log.info(f"Training IsolationForest on {len(features):,} rows...")
@@ -2417,6 +2511,7 @@ async def run(days_history: int, mode: str = "full") -> None:
             "top_anomaly": top_anomaly,
             "seasonal_models": seasonal.seasonal_status(),
             "contamination_tier": contamination_tier_name(training_days),
+            "fetch_row_count": locals().get("_fetch_row_count", 0),
         }
     )
     mark_last_completed_progress(
