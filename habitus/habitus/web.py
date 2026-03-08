@@ -706,21 +706,30 @@ pre.raw {
 }
 
 /* ── Collapsible sections ────────────────────────────────────── */
-.sec-header.collapsible {
-  cursor: pointer;
-  user-select: none;
-}
-.sec-header.collapsible::after {
-  content: ' ▾';
-  font-size: .75rem;
-  color: var(--text3);
-  margin-left: 6px;
-}
-.sec-header.collapsible.collapsed::after {
-  content: ' ▸';
-}
 .sec-body { overflow: hidden; transition: max-height 0.28s ease, opacity 0.2s; }
 .sec-body.collapsed { max-height: 0 !important; opacity: 0; pointer-events: none; }
+
+/* Toggle chevron button — sits at far right of header, only it triggers collapse */
+.sec-toggle-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text3);
+  font-size: .85rem;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  line-height: 1;
+  /* Large tap target for mobile */
+  min-width: 32px;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: manipulation;
+}
+.sec-toggle-btn:hover { color: var(--accent); background: var(--bg2); }
 
 /* ── Insight chips ───────────────────────────────────────────── */
 .insight-chip {
@@ -2691,15 +2700,13 @@ async function load() {
     if (!sectionId) return;
     const storageKey = 'habitus_collapsed_' + sectionId;
 
-    hdr.classList.add('collapsible');
+    // Wrap sibling content in sec-body if not already wrapped
     const secBody = (() => {
       let el = hdr.nextElementSibling;
       if (el && !el.classList.contains('sec-body')) {
         const wrapper = document.createElement('div');
         wrapper.className = 'sec-body';
-        while (hdr.nextElementSibling) {
-          wrapper.appendChild(hdr.nextElementSibling);
-        }
+        while (hdr.nextElementSibling) wrapper.appendChild(hdr.nextElementSibling);
         sec.appendChild(wrapper);
         return wrapper;
       }
@@ -2707,22 +2714,58 @@ async function load() {
     })();
     if (!secBody) return;
 
-    const collapsed = localStorage.getItem(storageKey) === '1';
-    if (collapsed) {
-      hdr.classList.add('collapsed');
-      secBody.classList.add('collapsed');
-      secBody.style.maxHeight = '0';
-    } else {
-      secBody.style.maxHeight = secBody.scrollHeight + 'px';
+    // Add a dedicated toggle chevron — only this triggers collapse, not the whole header.
+    // This prevents accidental collapse when the user taps buttons/selects inside the header.
+    const chevron = document.createElement('button');
+    chevron.className = 'sec-toggle-btn';
+    chevron.setAttribute('aria-label', 'Toggle section');
+    chevron.setAttribute('type', 'button');
+    hdr.appendChild(chevron);
+
+    function applyCollapsed(collapsed, animate) {
+      hdr.classList.toggle('collapsed', collapsed);
+      secBody.classList.toggle('collapsed', collapsed);
+      chevron.textContent = collapsed ? '▸' : '▾';
+      if (animate) {
+        secBody.style.maxHeight = collapsed ? '0' : secBody.scrollHeight + 'px';
+      } else {
+        secBody.style.maxHeight = collapsed ? '0' : (secBody.scrollHeight || 9999) + 'px';
+      }
     }
 
-    hdr.addEventListener('click', () => {
-      const isNowCollapsed = !hdr.classList.contains('collapsed');
-      hdr.classList.toggle('collapsed', isNowCollapsed);
-      secBody.classList.toggle('collapsed', isNowCollapsed);
-      secBody.style.maxHeight = isNowCollapsed ? '0' : secBody.scrollHeight + 'px';
-      localStorage.setItem(storageKey, isNowCollapsed ? '1' : '0');
+    const startCollapsed = localStorage.getItem(storageKey) === '1';
+    applyCollapsed(startCollapsed, false);
+
+    // Scroll guard: only fire toggle if touch didn't move (i.e. not a scroll).
+    let _touchY = null;
+    chevron.addEventListener('touchstart', e => { _touchY = e.touches[0].clientY; }, {passive: true});
+    chevron.addEventListener('touchend', e => {
+      const dy = Math.abs(e.changedTouches[0].clientY - (_touchY ?? e.changedTouches[0].clientY));
+      _touchY = null;
+      if (dy > 8) return; // was a scroll, ignore
+      e.preventDefault();
+      const nowCollapsed = !hdr.classList.contains('collapsed');
+      applyCollapsed(nowCollapsed, true);
+      localStorage.setItem(storageKey, nowCollapsed ? '1' : '0');
     });
+
+    // Mouse click (desktop)
+    chevron.addEventListener('click', e => {
+      // touchend already handled on mobile; skip double-fire
+      if (e.detail === 0) return;
+      const nowCollapsed = !hdr.classList.contains('collapsed');
+      applyCollapsed(nowCollapsed, true);
+      localStorage.setItem(storageKey, nowCollapsed ? '1' : '0');
+    });
+
+    // After dynamic content loads, expand height may be wrong — recalc on any mutation.
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(() => {
+        if (!hdr.classList.contains('collapsed')) {
+          secBody.style.maxHeight = secBody.scrollHeight + 'px';
+        }
+      }).observe(secBody);
+    }
   });
 }
 
