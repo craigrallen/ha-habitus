@@ -28,6 +28,18 @@ export HABITUS_DAYS="${DAYS}"
 RESCAN_FLAG="/data/.rescan_requested"
 STATE_FILE="/data/run_state.json"
 
+# ── Clear derived caches on every start (new code = stale caches invalid) ──
+# Keeps: state.json, run_state.json, model.pkl, scaler.pkl, baseline.json, progress.json
+# Removes: everything rebuilt by the post-train pipeline
+for _f in \
+  device_library.json suggestions.json smart_suggestions.json \
+  scene_analysis.json conflict_report.json automation_health.json \
+  routine_schedule.json guest_mode.json seasonal_suggestions.json \
+  cost_report.json integration_health.json entity_anomalies.json \
+  patterns.json ha_automations.json changelog.json dashboard.json; do
+  [ -f "/data/${_f}" ] && rm -f "/data/${_f}" && bashio::log.info "Cleared stale cache: ${_f}"
+done
+
 export HABITUS_VERSION=$(bashio::addon.version 2>/dev/null || echo "?")
 export HABITUS_MAX_POWER_KW=$(bashio::config "max_power_kw" 2>/dev/null || echo "25")
 export HABITUS_POWER_ENTITY=$(bashio::config "power_entity" 2>/dev/null || echo "")
