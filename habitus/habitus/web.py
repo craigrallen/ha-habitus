@@ -1133,6 +1133,12 @@ async function addYamlToHA(yaml, btn) {
     </div>
   </div>
 
+  <!-- Per-phase power summary (shown when multi-phase configured) -->
+  <div class="sec" id="phase-summary-section" style="display:none;margin-top:12px">
+    <div class="sec-header"><h2>⚡ Per-Phase Power</h2></div>
+    <div id="phase-summary-body" style="display:flex;gap:16px;flex-wrap:wrap;font-size:.85rem"></div>
+  </div>
+
   <!-- NILM Disaggregation -->
   <div class="sec" id="nilm-section" style="display:none;margin-top:12px">
     <div class="sec-header">
@@ -2556,7 +2562,34 @@ async function load() {
   loadEnergyWeather();
 
   // ── NILM Disaggregation ──
-  api('api/nilm').catch(()=>({breakdown:[]})).then(n => {
+  function _phaseBadge(a) {
+    if (!a.phase_type || a.phase_type === 'single') return '';
+    const label = a.phase_label || '';
+    if (!label) return '';
+    let bg = 'var(--text3)';
+    if (a.phase_type === 'two_phase_400v') bg = 'var(--amber,#f59e0b)';
+    else if (a.phase_type === 'three_phase') bg = '#8b5cf6';
+    else if (a.phase_type === 'two_phase_mixed') bg = 'var(--blue,#3b82f6)';
+    return `<span style="font-size:.68rem;background:${bg};color:#fff;padding:1px 5px;border-radius:3px;margin-left:4px">${label}</span>`;
+  }
+  Promise.all([
+    api('api/nilm').catch(()=>({breakdown:[]})),
+    api('api/state').catch(()=>({})),
+  ]).then(([n, st]) => {
+    // Per-phase summary panel
+    const phaseSec = document.getElementById('phase-summary-section');
+    if (st.power_phases && Object.keys(st.power_phases).length > 1) {
+      const phaseW = (n.phase_current_w) || {};
+      const phaseKeys = Object.keys(st.power_phases).sort();
+      const total = n.current_total_w || 0;
+      phaseSec.style.display = '';
+      document.getElementById('phase-summary-body').innerHTML =
+        phaseKeys.map(ph => `<div class="card" style="padding:8px 14px;text-align:center"><div style="font-size:.72rem;color:var(--text3)">${ph}</div><div style="font-size:1.1rem;font-weight:700">${phaseW[ph]||0}W</div></div>`).join('') +
+        `<div class="card" style="padding:8px 14px;text-align:center"><div style="font-size:.72rem;color:var(--text3)">Total</div><div style="font-size:1.1rem;font-weight:700">${total}W</div></div>`;
+    } else {
+      phaseSec.style.display = 'none';
+    }
+
     const sec = document.getElementById('nilm-section');
     if (!n.current_breakdown || n.current_breakdown.length === 0) {
       if (n.discovered_appliances && n.discovered_appliances.length > 0) sec.style.display='';
@@ -2585,7 +2618,7 @@ async function load() {
         '<div style="font-size:.82rem;margin-bottom:4px"><b>Discovered Appliance Slots</b></div>' +
         n.discovered_appliances.map(a => `
           <div class="card" style="padding:8px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">
-            <div>${a.icon} <b>${a.appliance}</b> (~${a.centroid_w}W) ${a.source==='user_trained'?'<span style="font-size:.65rem;background:var(--accent);color:#000;padding:1px 4px;border-radius:3px">trained</span>':''}</div>
+            <div>${a.icon} <b>${a.appliance}</b> (~${a.centroid_w}W) ${_phaseBadge(a)} ${a.source==='user_trained'?'<span style="font-size:.65rem;background:var(--accent);color:#000;padding:1px 4px;border-radius:3px">trained</span>':''}</div>
             <div style="font-size:.75rem;color:var(--text3)">${a.event_count} events · ${a.avg_duration_min}min avg · ${a.total_kwh} kWh · ${a.match_confidence}% match</div>
           </div>
         `).join('');
@@ -3307,6 +3340,15 @@ def api_state():
         eg = os.environ.get("HABITUS_ENERGY_GRID", "").strip()
         if eg:
             data["energy_grid_entity"] = eg
+    # Derive power_phases / phase_count from env if not yet in state file
+    if not data.get("power_phases"):
+        pe = data.get("power_entity", "") or os.environ.get("HABITUS_POWER_ENTITY", "")
+        ents = [e.strip() for e in pe.split(",") if e.strip()]
+        if len(ents) > 1:
+            data["power_phases"] = {f"L{i + 1}": eid for i, eid in enumerate(ents)}
+            data["phase_count"] = len(ents)
+    if not data.get("phase_count"):
+        data["phase_count"] = len(data.get("power_phases", {})) or 1
     return jsonify(data)
 
 
