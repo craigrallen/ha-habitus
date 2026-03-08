@@ -778,6 +778,19 @@ def run_disaggregation(power_entity: str = "", days: int = 7) -> dict[str, Any]:
             c.setdefault("per_phase", {})
             c["phase_label"] = _make_phase_label(c["phase_type"], c["phases"])
 
+    # ── Enrich unnamed slots with device library matches ──────────────────────
+    try:
+        from . import device_library as _dl  # noqa: PLC0415
+        for slot in matched:
+            if not slot.get("name") or slot.get("name", "").startswith("Device "):
+                _match = _dl.match_wattage_to_device(slot.get("watts", slot.get("centroid_w", 0)))
+                if _match:
+                    slot["name"] = _match["name"]
+                    slot["matched_from_library"] = True
+                    slot["library_confidence"] = _match["confidence"]
+    except Exception as _e:
+        log.debug("Device library enrichment skipped: %s", _e)
+
     breakdown = _estimate_current_breakdown(readings, matched)
 
     # Energy breakdown (last 24h estimation)

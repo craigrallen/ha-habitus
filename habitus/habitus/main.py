@@ -1662,7 +1662,11 @@ def publish_dashboard_entities(
 
 # ── Post-train analysis pipeline ──────────────────────────────────────────────
 
-def _run_post_analysis(state: dict, stat_ids: list[str]) -> None:
+def _run_post_analysis(
+    state: dict,
+    stat_ids: list[str],
+    raw_df: "pd.DataFrame | None" = None,
+) -> None:
     """Run all secondary feature modules after the main training pipeline completes.
 
     Each module is wrapped in try/except so a failure in one never aborts the
@@ -1670,7 +1674,9 @@ def _run_post_analysis(state: dict, stat_ids: list[str]) -> None:
     """
     import time as _t
 
-    set_progress("post_analysis", 0, 8, 0, 0, 0)
+    from . import device_library as _dl  # noqa: PLC0415
+
+    set_progress("post_analysis", 0, 9, 0, 0, 0)
 
     _steps = [
         ("routine_builder",     lambda: _routine_builder.run()),
@@ -1681,6 +1687,7 @@ def _run_post_analysis(state: dict, stat_ids: list[str]) -> None:
         ("automation_health",   lambda: _automation_health.save_health(_automation_health.run_health_check())),
         ("guest_mode",          lambda: _guest_mode.run()),
         ("seasonal_adapter",    lambda: _seasonal_adapter.run()),
+        ("device_library",      lambda: _dl.save_library(_dl.build_library_from_features(raw_df))),
     ]
 
     for i, (name, fn) in enumerate(_steps, 1):
@@ -1963,6 +1970,9 @@ async def run(days_history: int, mode: str = "full") -> None:
         len(non_stat_ids),
     )
 
+    # Raw DataFrame captured for device library (set in training branches, None if score-only)
+    _raw_df_for_library: pd.DataFrame | None = None
+
     if state.get("data_to") and os.path.exists(MODEL_PATH):
         # Incremental
         fetch_from = state["data_to"]
@@ -2071,6 +2081,7 @@ async def run(days_history: int, mode: str = "full") -> None:
                 traceback.print_exc()
                 raise
             _fetch_row_count = len(df)  # capture before del for state.json
+            _raw_df_for_library = df  # capture for device library before deletion
             del df
             set_progress("training", len(stat_ids), len(stat_ids), len(features), 0, 0)
             log.info(f"Training IsolationForest on {len(features):,} rows...")
@@ -2348,6 +2359,7 @@ async def run(days_history: int, mode: str = "full") -> None:
         save_state(state)
         features = build_features(df)
         _fetch_row_count = len(df)  # capture before del for state.json
+        _raw_df_for_library = df  # capture for device library before deletion
         del df
         set_progress("training", len(stat_ids), len(stat_ids), len(features), 0, 0)
         log.info(f"Training IsolationForest on {len(features):,} rows...")
@@ -2546,7 +2558,7 @@ async def run(days_history: int, mode: str = "full") -> None:
         #     state["data_from"] = actual_start
 
     # ── Post-analysis pipeline — runs secondary feature modules ──────────────
-    _run_post_analysis(state, stat_ids)
+    _run_post_analysis(state, stat_ids, raw_df=_raw_df_for_library)
 
     # Per-entity and activity scoring
     entity_anomalies = anomaly_breakdown.score_entities()

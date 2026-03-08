@@ -1150,6 +1150,14 @@ async function addYamlToHA(yaml, btn) {
     <div id="nilm-energy" style="margin-top:8px"></div>
   </div>
 
+  <div class="sec" id="sec-device-breakdown" style="margin-top:12px">
+    <div class="sec-header">
+      <h2>🔌 Device Energy Breakdown</h2>
+      <span class="sec-sub">Per-device usage learned from smart plugs &amp; named sensors</span>
+    </div>
+    <div id="device-breakdown-list"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+  </div>
+
   <div class="two-col" style="margin-top:12px">
     <div class="sec">
       <div class="sec-header"><h2>Weekly Profile</h2></div>
@@ -2647,6 +2655,30 @@ async function load() {
     }
   });
 
+  // ── Device Energy Breakdown (smart plugs / named W sensors) ──
+  api('api/device_library').catch(()=>({devices:[]})).then(d => {
+    const el = document.getElementById('device-breakdown-list');
+    if (!el) return;
+    if (!d.devices || !d.devices.length) {
+      el.innerHTML = '<div style="color:var(--text3);padding:12px;font-size:.82rem">No device data yet — needs a full retrain with smart plug sensors configured.</div>';
+      return;
+    }
+    el.innerHTML = d.devices.map(dev => {
+      const alwaysOn = dev.is_always_on ? '<span class="badge b-muted" style="font-size:.68rem">always-on</span>' : '';
+      const conf = dev.confidence > 0.7 ? '' : '<span class="badge b-muted" style="font-size:.65rem">low confidence</span>';
+      return '<div class="card" style="margin-bottom:8px;padding:12px">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">' +
+        '<div style="font-weight:600;font-size:.9rem">' + dev.name + ' ' + alwaysOn + conf + '</div>' +
+        '<div style="font-size:.85rem;font-weight:600;color:var(--accent)">' + dev.daily_kwh + ' kWh/day</div>' +
+        '</div>' +
+        '<div style="font-size:.75rem;color:var(--text3)">' +
+        dev.on_w + 'W active \xb7 ' + dev.off_w + 'W standby' +
+        (dev.cycles_per_day > 0 ? ' \xb7 ' + dev.cycles_per_day + ' cycles/day \xb7 ' + dev.typical_on_min + ' min/cycle' : '') +
+        '</div>' +
+        '</div>';
+    }).join('');
+  });
+
   // ── Device Training ──
   api('api/power_sensors').catch(()=>({sensors:[]})).then(ps => {
     const sel = document.getElementById('train-power-entity');
@@ -3865,6 +3897,13 @@ def api_nilm_run():
         days=data.get("days", 7),
     )
     return jsonify(result)
+
+@app.route("/api/device_library")
+@app.route("/ingress/api/device_library")
+def api_device_library():
+    """Return per-device energy breakdown from smart plug / named W sensor data."""
+    from . import device_library as _dl  # noqa: PLC0415
+    return jsonify({"devices": _dl.energy_breakdown()})
 
 @app.route("/api/feedback", methods=["POST"])
 @app.route("/ingress/api/feedback", methods=["POST"])
