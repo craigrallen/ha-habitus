@@ -35,8 +35,10 @@ _DEVICE_HINTS = re.compile(
 
 # Keywords that suggest a sensor is a PHASE/TOTAL/AGGREGATE (NOT a per-device sensor)
 _AGGREGATE_HINTS = re.compile(
-    r"(total|combined|phase|l1|l2|l3|shore|grid|solar|inverter|mcu|charger.input|"
-    r"mains|house|whole.home|whole.house|main.meter|smart.meter|net.energy)",
+    r"(total|combined|phase|l1|l2|l3|shore|grid|solar|pv_|_pv$|pv_array|photovoltaic|"
+    r"inverter|mcu|charger.input|mains|house|whole.home|whole.house|main.meter|"
+    r"smart.meter|net.energy|generation|produced|yield|epever|victron|mppt|"
+    r"battery_power|battery_charge|battery_discharge|_production)",
     re.IGNORECASE,
 )
 
