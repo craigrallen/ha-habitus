@@ -715,13 +715,9 @@ pre.raw {
   flex-shrink: 0;
   background: none;
   border: none;
-  color: var(--text3);
-  font-size: .85rem;
   cursor: pointer;
   padding: 4px 6px;
   border-radius: 4px;
-  line-height: 1;
-  /* Large tap target for mobile */
   min-width: 32px;
   min-height: 32px;
   display: flex;
@@ -729,7 +725,22 @@ pre.raw {
   justify-content: center;
   touch-action: manipulation;
 }
-.sec-toggle-btn:hover { color: var(--accent); background: var(--bg2); }
+.sec-toggle-btn:hover .sec-chevron { border-color: var(--accent); }
+/* CSS-only chevron — no Unicode, renders correctly on all WebViews */
+.sec-chevron {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--text3);
+  border-bottom: 2px solid var(--text3);
+  transform: rotate(45deg);
+  transition: transform 0.2s ease;
+  margin-top: -3px; /* optical center */
+}
+.sec-chevron.up {
+  transform: rotate(-135deg);
+  margin-top: 3px;
+}
 
 /* ── Insight chips ───────────────────────────────────────────── */
 .insight-chip {
@@ -2692,7 +2703,12 @@ async function load() {
     }
   })();
 
-  // ── Section collapse/expand (backed by localStorage) ──
+  // ── Section collapse/expand — run once only ──
+  if (!window._habitusCollapseInit) initCollapsible();
+}
+
+function initCollapsible() {
+  window._habitusCollapseInit = true;
   document.querySelectorAll('.sec-header').forEach(hdr => {
     const sec = hdr.closest('.sec');
     if (!sec) return;
@@ -2720,12 +2736,13 @@ async function load() {
     chevron.className = 'sec-toggle-btn';
     chevron.setAttribute('aria-label', 'Toggle section');
     chevron.setAttribute('type', 'button');
+    chevron.innerHTML = '<span class="sec-chevron"></span>';
     hdr.appendChild(chevron);
 
     function applyCollapsed(collapsed, animate) {
       hdr.classList.toggle('collapsed', collapsed);
       secBody.classList.toggle('collapsed', collapsed);
-      chevron.textContent = collapsed ? '▸' : '▾';
+      chevron.querySelector('.sec-chevron').classList.toggle('up', !collapsed);
       if (animate) {
         secBody.style.maxHeight = collapsed ? '0' : secBody.scrollHeight + 'px';
       } else {
