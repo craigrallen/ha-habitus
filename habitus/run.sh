@@ -27,6 +27,7 @@ export HABITUS_DAYS="${DAYS}"
 
 RESCAN_FLAG="/data/.rescan_requested"
 STATE_FILE="/data/run_state.json"
+export HABITUS_VERSION=$(bashio::addon.version 2>/dev/null || echo "unknown")
 
 # ── Cache invalidation strategy ─────────────────────────────────────────────
 # Testing mode (/data/.testing_mode exists): clear all derived caches + auto-retrain
@@ -68,7 +69,7 @@ if [ "$_DO_RETRAIN" = "true" ]; then
   touch /data/.retrain_on_start
 fi
 
-export HABITUS_VERSION=$(bashio::addon.version 2>/dev/null || echo "?")
+# HABITUS_VERSION already exported above
 export HABITUS_MAX_POWER_KW=$(bashio::config "max_power_kw" 2>/dev/null || echo "25")
 export HABITUS_POWER_ENTITY=$(bashio::config "power_entity" 2>/dev/null || echo "")
 export HABITUS_KWH_PRICE=$(bashio::config "kwh_price" 2>/dev/null || echo "0.30")
