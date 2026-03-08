@@ -31,6 +31,22 @@ HA_AUTOMATIONS_PATH = os.path.join(DATA_DIR, "ha_automations.json")
 
 app = Flask(__name__)
 
+# ── Restore user settings into env at web-process startup ────────────────────
+# run.sh sets HABITUS_POWER_ENTITY from the HA add-on config options, which
+# doesn't include settings saved via the UI (state.json user_settings).
+# Restore them here so the web process and first training run see the right values.
+try:
+    with open(os.path.join(DATA_DIR, "state.json")) as _startup_sf:
+        _startup_us = json.load(_startup_sf).get("user_settings", {})
+    if _startup_us.get("power_entity") and not os.environ.get("HABITUS_POWER_ENTITY"):
+        os.environ["HABITUS_POWER_ENTITY"] = _startup_us["power_entity"]
+    if _startup_us.get("days_history"):
+        os.environ.setdefault("HABITUS_DAYS", str(_startup_us["days_history"]))
+    if _startup_us.get("anomaly_sensitivity"):
+        os.environ.setdefault("HABITUS_ANOMALY_SENSITIVITY", str(_startup_us["anomaly_sensitivity"]))
+except Exception:
+    pass
+
 
 def _read(path, default=None):
     try:
@@ -3670,7 +3686,18 @@ def api_power_sensors():
 
     ha_url = os.environ.get("HA_URL", "http://supervisor/core")
     token = os.environ.get("SUPERVISOR_TOKEN", os.environ.get("HABITUS_HA_TOKEN", ""))
-    current = os.environ.get("HABITUS_POWER_ENTITY", "")
+    current = os.environ.get("HABITUS_POWER_ENTITY", "").strip()
+    if not current:
+        # Web process env is set from run.sh (HA add-on config), which may not include
+        # user-saved settings. Fall back to state.json user_settings on every request.
+        try:
+            with open(os.path.join(DATA_DIR, "state.json")) as _sf:
+                _us = json.load(_sf).get("user_settings", {})
+            current = _us.get("power_entity", "").strip()
+            if current:
+                os.environ["HABITUS_POWER_ENTITY"] = current  # cache for this process
+        except Exception:
+            pass
 
     # Patterns that indicate accumulated energy stats, NOT real-time watts
     _ACCUM_SKIP = re.compile(
