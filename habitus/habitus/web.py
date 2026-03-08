@@ -797,6 +797,45 @@ details.geek-block:not([open]) > summary::after { content: ' ▸'; color: var(--
 </head>
 <body>
 
+<script>
+// ── Core utilities (hoisted early so inline script blocks can call them) ──────
+async function api(endpoint, opts={}) {
+  const r = await fetch(endpoint, opts);
+  if (!r.ok) { const e = await r.json().catch(()=>({error:r.statusText})); throw new Error(e.error||r.statusText); }
+  return r.json();
+}
+async function apiPost(endpoint, body) {
+  return api(endpoint, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+}
+function copyText(text) {
+  return navigator.clipboard.writeText(text).then(()=>toast('Copied ✓'));
+}
+function toast(msg, type='ts') {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = msg; el.className = 'toast show ' + type;
+  setTimeout(()=>el.className='toast', 3000);
+}
+async function addYamlToHA(yaml, btn) {
+  if (!yaml?.trim()) { toast('No YAML to add','te'); return; }
+  const orig = btn?.textContent;
+  if (btn) { btn.disabled=true; btn.textContent='Adding…'; }
+  try {
+    const d = await apiPost('api/add_automation', {yaml});
+    if (d.ok) {
+      if (btn) btn.textContent = '✓ Added';
+      toast('Automation added to HA ✓');
+    } else {
+      if (btn) { btn.disabled=false; btn.textContent=orig; }
+      toast(d.error||'Failed to add','te');
+    }
+  } catch(e) {
+    if (btn) { btn.disabled=false; btn.textContent=orig; }
+    toast(e.message||'Error','te');
+  }
+}
+</script>
+
 <div class="header">
   <div class="header-left">
     <h1>Habitus <span class="version" id="hdr-version">v—</span></h1>
@@ -1206,7 +1245,10 @@ details.geek-block:not([open]) > summary::after { content: ' ▸'; color: var(--
     </div>
 
     <div id="schedule-info" style="margin-top:12px"></div>
-    <pre class="raw" id="raw-state" style="margin-top:12px">Loading...</pre>
+    <details style="margin-top:12px">
+      <summary style="font-size:.75rem;color:var(--text3);cursor:pointer;user-select:none">🔍 Raw state JSON</summary>
+      <pre class="raw" id="raw-state" style="margin-top:6px;max-height:300px;overflow:auto">Loading...</pre>
+    </details>
   </div>
 
   <!-- Power Source -->
