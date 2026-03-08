@@ -54,11 +54,11 @@ def _classify_time_cluster(hour: int) -> str:
 def _detect_arrival_departure(steps: list[dict[str, Any]]) -> str | None:
     """Detect if a sequence looks like arrival or departure."""
     entities = [s.get("entity_id", "") for s in steps]
-    entity_str = " ".join(entities).lower()
-    states = [s.get("state", "") for s in steps]
+    " ".join(entities).lower()
+    [s.get("state", "") for s in steps]
 
     has_presence = any("person." in e or "presence" in e or "occupancy" in e for e in entities)
-    has_door = any("door" in e for e in entities)
+    any("door" in e for e in entities)
 
     if has_presence:
         # Check if person goes to 'home' (arrival) or 'not_home' (departure)
@@ -136,18 +136,16 @@ def mine_sequences(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen_keys: set[tuple] = set()
 
     for seq_key, occurrences in sequence_occurrences.items():
-        unique_days = set(day for day, _ in occurrences)
+        unique_days = {day for day, _ in occurrences}
         if len(unique_days) < MIN_FREQUENCY_DAYS:
             continue
 
         # Avoid duplicate sub-sequences
         skip = False
         for existing_key in seen_keys:
-            if len(existing_key) > len(seq_key):
-                # Check if seq_key is a prefix of existing_key
-                if existing_key[:len(seq_key)] == seq_key:
-                    skip = True
-                    break
+            if len(existing_key) > len(seq_key) and existing_key[:len(seq_key)] == seq_key:
+                skip = True
+                break
         if skip:
             continue
 

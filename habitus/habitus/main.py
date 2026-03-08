@@ -19,19 +19,48 @@ import requests  # type: ignore[import-untyped]
 import websockets
 
 from . import activity as activity_engine
-from . import anomaly_breakdown, automation_gap, automation_score, drift, phantom, seasonal
-from . import (activity_hmm, appliance_fingerprint, automation_builder, conflict_detector,
-                correlation_engine, dynamic_automations, energy_forecast, ha_areas,
-                markov_chain, nilm_disaggregator, room_predictor, routine_predictor,
-                scene_detector, sequence_miner)
+from . import (
+    activity_hmm,
+    anomaly_breakdown,
+    appliance_fingerprint,
+    automation_builder,
+    automation_gap,
+    automation_score,
+    conflict_detector,
+    correlation_engine,
+    drift,
+    dynamic_automations,
+    energy_forecast,
+    ha_areas,
+    markov_chain,
+    nilm_disaggregator,
+    phantom,
+    room_predictor,
+    routine_predictor,
+    scene_detector,
+    seasonal,
+    sequence_miner,
+)
+from . import (
+    automation_health as _automation_health,
+)
+from . import (
+    battery_watchdog as _battery_watchdog,
+)
+from . import (
+    changelog as _changelog,
+)
+from . import (
+    guest_mode as _guest_mode,
+)
+from . import (
+    integration_health as _integration_health,
+)
 from . import patterns as pattern_engine
 from . import (
     routine_builder as _routine_builder,
-    battery_watchdog as _battery_watchdog,
-    integration_health as _integration_health,
-    changelog as _changelog,
-    automation_health as _automation_health,
-    guest_mode as _guest_mode,
+)
+from . import (
     seasonal_adapter as _seasonal_adapter,
 )
 
@@ -208,8 +237,7 @@ def log_perf_guardrail(
         warn_ms=warn_ms,
     )
     msg = (
-        "Perf[%s]: %dms · rows=%d · entities=%d · rows/s=%.1f"
-        % (
+        "Perf[{}]: {}ms · rows={} · entities={} · rows/s={:.1f}".format(
             summary["stage"],
             summary["elapsed_ms"],
             summary["rows"],
@@ -218,7 +246,7 @@ def log_perf_guardrail(
         )
     )
     if summary["warn_exceeded"]:
-        log.warning("%s (guardrail %dms exceeded)", msg, summary["warn_ms"])
+        log.warning("%s (guardrail %dms exceeded)", msg, summary["warn_ms"])  # noqa: G004
     else:
         log.info("%s", msg)
     return summary
@@ -426,11 +454,10 @@ def set_progress(phase, done=0, total=0, rows=0, elapsed=0.0, eta=0.0):
         # was cleared between runs).
         started_at: str | None = None
         if os.path.exists(PROGRESS_PATH):
-            with contextlib.suppress(Exception):
-                with open(PROGRESS_PATH) as _pf:
-                    _prev = json.load(_pf)
-                    if _prev.get("running"):
-                        started_at = _prev.get("started_at")
+            with contextlib.suppress(Exception), open(PROGRESS_PATH) as _pf:
+                _prev = json.load(_pf)
+                if _prev.get("running"):
+                    started_at = _prev.get("started_at")
         if started_at is None:
             started_at = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00")
         _atomic_write(PROGRESS_PATH, {
@@ -612,10 +639,8 @@ async def get_stat_ids() -> tuple[list[str], int]:
         )
         return behavioral, len(all_ids)
     except Exception as e:
-        try:
+        with contextlib.suppress(Exception):
             conn.close()
-        except Exception:
-            pass
         raise RuntimeError(f"SQLite stats_meta read failed: {e}") from e
 
 
@@ -631,10 +656,8 @@ async def get_behavioral_entity_ids() -> list[str]:
         conn.close()
         return [e for e in ids if e and is_behavioral(e)]
     except Exception as e:
-        try:
+        with contextlib.suppress(Exception):
             conn.close()
-        except Exception:
-            pass
         raise RuntimeError(f"SQLite states_meta read failed: {e}") from e
 
 
@@ -729,10 +752,8 @@ def fetch_recent_raw_history(entity_ids: list[str], start_iso: str, end_iso: str
             conn.close()
         except Exception as e:
             log.warning("SQLite raw history read failed: %s", e)
-            try:
+            with contextlib.suppress(Exception):
                 conn.close()
-            except Exception:
-                pass
             rows = []
 
         if rows:
@@ -823,10 +844,8 @@ def get_ha_entity_count() -> int:
         conn.close()
         return total
     except Exception:
-        try:
+        with contextlib.suppress(Exception):
             conn.close()
-        except Exception:
-            pass
         return 0
 
 
@@ -2016,7 +2035,7 @@ async def run(days_history: int, mode: str = "full") -> None:
                 features = build_features(df)
                 log.info("Feature matrix built: %d rows", len(features))
             except Exception as e:
-                import traceback, sys
+                import traceback
                 log.error("CRASH in build_features: %s", e)
                 traceback.print_exc()
                 raise

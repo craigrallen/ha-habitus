@@ -1,6 +1,7 @@
 """Habitus v2.1 — polished web UI."""
 
 import json
+import logging
 import os
 import re
 
@@ -3673,7 +3674,7 @@ def api_scene_analysis():
         results = _sa.run_scene_analysis(force=True)
         return jsonify({"suggestions": results, "count": len(results)})
     except Exception as e:
-        log.warning("api_scene_analysis failed: %s", e)
+        logging.getLogger("habitus").warning("api_scene_analysis failed: %s", e)
         return jsonify({"suggestions": [], "count": 0, "error": str(e)})
 
 
@@ -3700,7 +3701,7 @@ def api_smart_suggestions():
             data["suggestions"] = suggestions
             data["count"] = len(suggestions)
         except Exception as e:
-            log.warning("suggestion_feedback apply failed: %s", e)
+            logging.getLogger("habitus").warning("suggestion_feedback apply failed: %s", e)
     return jsonify(data)
 
 
@@ -3751,7 +3752,7 @@ def api_feedback():
 @app.route("/ingress/api/anomaly_feedback", methods=["POST"])
 def api_anomaly_feedback():
     """Record user feedback on an anomaly."""
-    from .feedback import record_feedback, get_feedback_stats
+    from .feedback import get_feedback_stats, record_feedback
     data = request.get_json() or {}
     action = data.get("action", "dismissed")
     entry = record_feedback(
@@ -3916,7 +3917,7 @@ def api_entities():
                 })
         entities.sort(key=lambda x: x["entity_id"])
         return jsonify(entities)
-    except Exception as e:
+    except Exception:
         return jsonify([])
 
 
@@ -4022,6 +4023,7 @@ def api_apply_lovelace():
     """Apply generated dashboard YAML to HA (POST to Lovelace config endpoint)."""
     import requests as req  # type: ignore[import-untyped]
     import yaml as _yaml
+
     from . import dashboard_generator
     yaml_str = dashboard_generator.load_dashboard_yaml()
     if not yaml_str:

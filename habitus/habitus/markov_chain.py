@@ -5,7 +5,6 @@ Pure Python, no external dependencies. Lightweight but powerful.
 """
 
 import datetime
-import json
 import logging
 import os
 import sqlite3
@@ -72,10 +71,9 @@ def build_markov_model(entity_to_area: dict[str, str], days: int = 30) -> dict[s
     for eid, state, ts in rows:
         event = f"{eid}:{state}"
 
-        if prev_event and (ts - prev_ts) <= MAX_TRANSITION_SEC:
-            if event != prev_event:  # Skip self-transitions
-                transition_counts[prev_event][event] += 1
-                state_counts[prev_event] += 1
+        if prev_event and (ts - prev_ts) <= MAX_TRANSITION_SEC and event != prev_event:  # Skip self-transitions
+            transition_counts[prev_event][event] += 1
+            state_counts[prev_event] += 1
 
         prev_event = event
         prev_ts = ts
