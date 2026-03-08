@@ -1136,11 +1136,15 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     _energy_rates = [e.strip() for e in os.environ.get("HABITUS_ENERGY_RATES", "").split(",") if e.strip()]
 
     grid_kwh_w = pd.Series(dtype=float, name="grid_kwh_w")  # init before branches
-    if _power_entity:
-        # Explicit override — use as-is (watts)
-        power = df[df["entity_id"] == _power_entity].copy()
+    # Support comma-separated multi-phase sensors (e.g. L1,L2,L3 — summed)
+    _power_entities = [e.strip() for e in _power_entity.split(",") if e.strip()] if _power_entity else []
+    if _power_entities:
+        # Sum across all specified phases / sensors
+        power = df[df["entity_id"].isin(_power_entities)].copy()
         power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(lower=0, upper=_max_w)
-        total_power = power.groupby("hour")["v"].max().rename("total_power_w")
+        total_power = power.groupby("hour")["v"].sum().rename("total_power_w")
+        if len(_power_entities) > 1:
+            log.info("Multi-phase power: summing %d sensors → total_power_w", len(_power_entities))
     elif _energy_grid:
         # Grid kWh entity from HA Energy Dashboard — convert hourly delta to W
         grid = df[df["entity_id"] == _energy_grid].copy()

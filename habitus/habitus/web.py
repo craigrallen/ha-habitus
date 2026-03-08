@@ -1255,14 +1255,15 @@ async function addYamlToHA(yaml, btn) {
   <!-- Power Source -->
   <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>Power Source</h2></div>
-    <p style="color:var(--text3);font-size:.8rem;margin:0 0 12px">Habitus auto-detects your main power sensor. Override it here if the wrong one was selected.</p>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <select id="power-sensor-select" style="flex:1;min-width:200px;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:.85rem">
-        <option value="">Loading sensors…</option>
-      </select>
+    <p style="color:var(--text3);font-size:.8rem;margin:0 0 8px">Select 1–3 sensors. Multiple sensors are summed — use this for 3-phase setups where each phase has its own sensor.</p>
+    <div id="power-phase-rows" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px">
+      <!-- Phase rows injected by JS -->
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+      <button class="btn" id="add-phase-btn" onclick="addPhaseRow()" style="font-size:.78rem">+ Add phase</button>
       <button class="btn btn-accent" onclick="savePowerSensor()" style="white-space:nowrap">Save &amp; Retrain</button>
     </div>
-    <div id="power-sensor-status" style="margin-top:8px;font-size:.78rem;color:var(--text3)"></div>
+    <div id="power-sensor-status" style="font-size:.78rem;color:var(--text3)"></div>
   </div>
 
   <!-- Analysis History Depth (was Geek tab) -->
@@ -1398,44 +1399,85 @@ async function addYamlToHA(yaml, btn) {
 
   <script>
   (function(){
+    let _powerSensors = [];  // [{entity_id, name, current_w}]
+
+    function buildOptions(selected='') {
+      const blank = `<option value="">— select sensor —</option>`;
+      return blank + _powerSensors.map(s =>
+        `<option value="${s.entity_id}"${s.entity_id===selected?' selected':''}>${s.name} (${s.current_w}W)</option>`
+      ).join('');
+    }
+
+    function phaseLabel(i) { return i===0?'Phase 1 / Single':i===1?'Phase 2':'Phase 3'; }
+
+    window.addPhaseRow = function(selected='') {
+      const rows = document.getElementById('power-phase-rows');
+      const idx = rows.children.length;
+      if (idx >= 3) return;
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:6px;align-items:center';
+      row.innerHTML = `
+        <span style="font-size:.75rem;color:var(--text3);min-width:60px">${phaseLabel(idx)}</span>
+        <select class="power-phase-sel" style="flex:1;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:.82rem">
+          ${buildOptions(selected)}
+        </select>
+        ${idx>0?`<button onclick="this.parentElement.remove();updateAddBtn()" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:1rem;padding:4px">✕</button>`:''}
+      `;
+      rows.appendChild(row);
+      updateAddBtn();
+    };
+
+    window.updateAddBtn = function() {
+      const rows = document.getElementById('power-phase-rows');
+      const btn = document.getElementById('add-phase-btn');
+      if (btn) btn.style.display = rows.children.length >= 3 ? 'none' : '';
+    };
+
     async function loadPowerSensors(){
-      const sel = document.getElementById('power-sensor-select');
       const status = document.getElementById('power-sensor-status');
       try {
         const d = await api('api/power_sensors');
-        sel.innerHTML = '';
-        if (d.sensors.length === 0) {
-          sel.innerHTML = '<option value="">No watt sensors found</option>';
+        _powerSensors = d.sensors || [];
+        if (!_powerSensors.length) {
+          status.textContent = 'No watt sensors found';
           return;
         }
-        d.sensors.forEach(s => {
-          const opt = document.createElement('option');
-          opt.value = s.entity_id;
-          opt.textContent = `${s.name} (${s.current_w}W)`;
-          if (s.entity_id === d.selected) opt.selected = true;
-          sel.appendChild(opt);
+        // Parse current selection (may be comma-separated for multi-phase)
+        const current = (d.selected || '').split(',').map(s=>s.trim()).filter(Boolean);
+        // Render rows
+        const rows = document.getElementById('power-phase-rows');
+        rows.innerHTML = '';
+        const toAdd = current.length ? current : [d.selected || ''];
+        toAdd.forEach(eid => addPhaseRow(eid));
+        // Update all existing selects with full options
+        document.querySelectorAll('.power-phase-sel').forEach(sel => {
+          const cur = sel.value;
+          sel.innerHTML = buildOptions(cur);
         });
-        if (d.selected) {
-          status.textContent = `Auto-detected: ${d.selected}`;
-        }
+        const label = current.length > 1 ? `${current.length} phases configured` : (d.selected ? `Auto-detected: ${d.selected}` : 'Not configured');
+        status.textContent = label;
       } catch(e) {
-        sel.innerHTML = '<option value="">Error loading sensors</option>';
+        document.getElementById('power-sensor-status').textContent = 'Error loading sensors';
       }
     }
+
     window.savePowerSensor = async function(){
-      const sel = document.getElementById('power-sensor-select');
       const status = document.getElementById('power-sensor-status');
-      const eid = sel.value;
-      if (!eid) return;
+      const vals = [...document.querySelectorAll('.power-phase-sel')]
+        .map(s=>s.value).filter(Boolean);
+      if (!vals.length) { status.textContent = 'Select at least one sensor'; return; }
+      const combined = vals.join(',');
       status.textContent = 'Saving…';
+      status.style.color = 'var(--text3)';
       try {
-        const d = await apiPost('api/settings', {power_entity: eid});
+        const d = await apiPost('api/settings', {power_entity: combined});
         if (d.ok) {
-          status.textContent = `✓ Saved: ${eid} — triggering retrain…`;
+          const label = vals.length > 1 ? `✓ Saved ${vals.length} phases (summed)` : `✓ Saved: ${vals[0]}`;
+          status.textContent = label + ' — retraining…';
           status.style.color = 'var(--green)';
           setTimeout(async () => {
-            await api('api/rescan', {method:'POST'});
-            status.textContent = `✓ Saved: ${eid} — retraining started`;
+            await apiPost('api/rescan', {});
+            status.textContent = label + ' — retrain started';
           }, 500);
         } else {
           status.textContent = `Error: ${d.error}`;
