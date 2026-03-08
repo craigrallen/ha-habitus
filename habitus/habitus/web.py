@@ -1616,6 +1616,7 @@ function gotoTab(id, btn) {
   document.querySelectorAll('nav button').forEach(b=>b.classList.remove('active'));
   const tabEl = document.getElementById('tab-'+tabId);
   if (tabEl) tabEl.classList.add('active');
+  window.scrollTo({top:0, behavior:'instant'});
   if (btn) {
     btn.classList.add('active');
   } else {
@@ -2041,13 +2042,18 @@ async function load() {
 
   // Patterns summary
   const r = patterns.daily_routine||{};
+  const allPowerZero = r.peak_usage_watts === 0 && r.night_baseline_watts === 0;
+  const noPowerWarning = (allPowerZero && !state.power_entity)
+    ? `<div style="background:var(--amber-bg,rgba(255,180,0,.12));border:1px solid var(--amber);border-radius:8px;padding:8px 12px;margin-top:8px;font-size:.78rem;color:var(--amber)">
+        ⚠ No power sensor configured — go to <a href="#" onclick="gotoTab('settings',null);return false;" style="color:var(--accent)">Setup → Power Source</a> and save a sensor, then retrain.
+       </div>` : '';
   document.getElementById('pat-summary').innerHTML = r.peak_usage_hour != null ? `
     <div class="pat-grid">
       <div class="pat-item"><div class="pi-label">Est. Wakeup</div><div class="pi-val">${r.estimated_wakeup_hour!=null?r.estimated_wakeup_hour+':00':'—'}</div></div>
       <div class="pat-item"><div class="pi-label">Est. Sleep</div><div class="pi-val">${r.estimated_sleep_hour!=null?r.estimated_sleep_hour+':00':'—'}</div></div>
-      <div class="pat-item"><div class="pi-label">Peak Hour</div><div class="pi-val">${r.peak_usage_hour}:00 · ${r.peak_usage_watts}W</div></div>
+      <div class="pat-item"><div class="pi-label">Peak Hour</div><div class="pi-val">${r.peak_usage_hour}:00 · ${fmtW(r.peak_usage_watts)}</div></div>
       <div class="pat-item"><div class="pi-label">Night Base</div><div class="pi-val">${fmtW(r.night_baseline_watts)}</div></div>
-    </div>` : '<div style="color:var(--text3);font-size:.82rem">No patterns yet — baseline first, then flow.</div>';
+    </div>${noPowerWarning}` : '<div style="color:var(--text3);font-size:.82rem">No patterns yet — baseline first, then flow.</div>';
 
   // Top anomalies (dismissable)
   const dismissedAnomalies = loadDismissedAnomalies();
@@ -2774,6 +2780,14 @@ async function load() {
 
 function initCollapsible() {
   window._habitusCollapseInit = true;
+  // Clear stale collapse state when version changes (e.g. after buggy 3.10.2 left bad state)
+  try {
+    const _ver = (document.getElementById('hdr-version')||{}).textContent||'';
+    if (localStorage.getItem('habitus_ui_version') !== _ver) {
+      Object.keys(localStorage).filter(k=>k.startsWith('habitus_collapsed_')).forEach(k=>localStorage.removeItem(k));
+      localStorage.setItem('habitus_ui_version', _ver);
+    }
+  } catch(e) {}
   document.querySelectorAll('.sec-header').forEach(hdr => {
     const sec = hdr.closest('.sec');
     if (!sec) return;
@@ -3241,6 +3255,15 @@ def api_state():
     import os
     data = _read(STATE_PATH) or {}
     data["version"] = os.environ.get("HABITUS_VERSION", "?")
+    # Supplement from live env if state file is missing these (e.g. before first retrain)
+    if not data.get("power_entity"):
+        pe = os.environ.get("HABITUS_POWER_ENTITY", "").strip()
+        if pe:
+            data["power_entity"] = pe
+    if not data.get("energy_grid_entity"):
+        eg = os.environ.get("HABITUS_ENERGY_GRID", "").strip()
+        if eg:
+            data["energy_grid_entity"] = eg
     return jsonify(data)
 
 

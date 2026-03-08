@@ -1884,6 +1884,17 @@ async def run(days_history: int, mode: str = "full") -> None:
             os.environ["HABITUS_WATER_ENTITIES"] = ",".join(energy["water"])
             log.info("Water meters: %s", energy["water"])
 
+    # Persist resolved power/energy entities to state so UI and next run see them
+    _resolved_power = os.environ.get("HABITUS_POWER_ENTITY", "").strip()
+    _resolved_grid = os.environ.get("HABITUS_ENERGY_GRID", "").strip()
+    if _resolved_power:
+        state["power_entity"] = _resolved_power
+    if _resolved_grid:
+        state["energy_grid_entity"] = _resolved_grid
+    if _resolved_power or _resolved_grid:
+        save_state(state)
+        log.info("Power entity persisted to state: power=%s grid=%s", _resolved_power or "—", _resolved_grid or "—")
+
     stat_ids, total_stat_ids = await get_stat_ids()
     behavioral_entity_ids = await get_behavioral_entity_ids()
     stat_id_set = set(stat_ids)
