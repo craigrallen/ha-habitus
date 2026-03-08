@@ -3573,6 +3573,37 @@ def api_full_train():
     return jsonify({"ok": True, "message": f"Full {days}d training started"})
 
 
+@app.route("/api/clear_derived_cache", methods=["POST"])
+@app.route("/ingress/api/clear_derived_cache", methods=["POST"])
+def api_clear_derived_cache():
+    """Delete derived/cached JSON files (device_library, suggestions, patterns etc.)
+    without touching the trained model. Safe to call any time — next training rebuilds them."""
+    _cache_files = [
+        "device_library.json",
+        "suggestions.json",
+        "smart_suggestions.json",
+        "scene_analysis.json",
+        "conflict_report.json",
+        "automation_health.json",
+        "routine_schedule.json",
+        "guest_mode.json",
+        "seasonal_suggestions.json",
+        "cost_report.json",
+        "integration_health.json",
+        "entity_anomalies.json",
+    ]
+    removed = []
+    for fname in _cache_files:
+        p = os.path.join(DATA_DIR, fname)
+        if os.path.exists(p):
+            try:
+                os.remove(p)
+                removed.append(fname)
+            except Exception:
+                pass
+    return jsonify({"ok": True, "removed": removed})
+
+
 @app.route("/api/rescan", methods=["POST"])
 @app.route("/ingress/api/rescan", methods=["POST"])
 def api_rescan():
