@@ -32,19 +32,19 @@ class TestContaminationForDays:
         assert contamination_for_days(13) == 0.01
 
     def test_growing_tier_14_to_29_days(self):
-        assert contamination_for_days(14) == 0.02
-        assert contamination_for_days(20) == 0.02
-        assert contamination_for_days(29) == 0.02
+        assert contamination_for_days(14) == 0.015
+        assert contamination_for_days(20) == 0.015
+        assert contamination_for_days(29) == 0.015
 
     def test_mature_tier_30_to_89_days(self):
-        assert contamination_for_days(30) == 0.04
-        assert contamination_for_days(60) == 0.04
-        assert contamination_for_days(89) == 0.04
+        assert contamination_for_days(30) == 0.02
+        assert contamination_for_days(60) == 0.02
+        assert contamination_for_days(89) == 0.02
 
     def test_established_tier_90_plus_days(self):
-        assert contamination_for_days(90) == 0.05
-        assert contamination_for_days(180) == 0.05
-        assert contamination_for_days(365) == 0.05
+        assert contamination_for_days(90) == 0.03
+        assert contamination_for_days(180) == 0.03
+        assert contamination_for_days(365) == 0.03
 
     def test_values_are_monotonically_non_decreasing(self):
         breakpoints = [0, 7, 14, 30, 90]
@@ -191,7 +191,7 @@ class TestTrainModelContamination:
             train_model(features, training_days=120)
 
         assert len(captured) == 1
-        assert captured[0] == pytest.approx(0.05)
+        assert captured[0] == pytest.approx(0.03)
 
     def test_default_training_days_zero_uses_warmup(self):
         """Default training_days=0 should give warmup contamination."""

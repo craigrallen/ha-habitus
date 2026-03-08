@@ -271,10 +271,10 @@ def contamination_for_days(days: int) -> float:
     if days < 14:
         return 0.01
     if days < 30:
-        return 0.02
+        return 0.015
     if days < 90:
-        return 0.04
-    return 0.05
+        return 0.02
+    return 0.03  # established — ~3% expected anomaly rate (was 5%, too aggressive)
 
 
 def contamination_tier_name(days: int) -> str:
@@ -1338,13 +1338,24 @@ def score_current(features):
     if not row.empty:
         X = row[FEATURE_COLS].values
     else:
-        # Fallback: build a zero-padded row matching FEATURE_COLS exactly
-        zeros = [0.0] * len(FEATURE_COLS)
-        zeros[FEATURE_COLS.index("hour_of_day")] = now.hour
-        zeros[FEATURE_COLS.index("day_of_week")] = now.weekday()
-        zeros[FEATURE_COLS.index("is_weekend")] = int(now.weekday() >= 5)
-        zeros[FEATURE_COLS.index("month")] = now.month
-        X = np.array([zeros])
+        # Fallback: use the closest historical hour with the same hour-of-day and
+        # day-of-week — far better than zeros which score as maximally anomalous.
+        same_slot = features[
+            (features["hour"].dt.hour == now.hour)
+            & (features["hour"].dt.dayofweek == now.weekday())
+        ]
+        if not same_slot.empty:
+            X = same_slot.tail(1)[FEATURE_COLS].values
+            log.info("score_current: using closest same-slot row (no current-hour data)")
+        else:
+            # Last resort: nearest hour to now in the data
+            nearest = features.iloc[(features["hour"] - pd.Timestamp(now)).abs().argsort()[:1]]
+            if not nearest.empty:
+                X = nearest[FEATURE_COLS].values
+                log.info("score_current: using nearest row fallback")
+            else:
+                log.warning("score_current: no rows available, returning 0")
+                return 0
     score, model_used = seasonal.score_with_best_model(X)
     log.info(f"Scored with {model_used} model")
     return score
@@ -1879,6 +1890,13 @@ async def run(days_history: int, mode: str = "full") -> None:
         if "notify_on_anomaly" in _saved:
             os.environ["HABITUS_NOTIFY_ON"] = "true" if bool(_saved.get("notify_on_anomaly")) else "false"
             log.info("Loaded saved notify setting from settings: %s", os.environ["HABITUS_NOTIFY_ON"])
+        if "anomaly_sensitivity" in _saved:
+            try:
+                sens = float(_saved["anomaly_sensitivity"])
+                os.environ["HABITUS_ANOMALY_SENSITIVITY"] = str(max(0.3, min(3.0, sens)))
+                log.info("Loaded anomaly sensitivity: %s", os.environ["HABITUS_ANOMALY_SENSITIVITY"])
+            except (TypeError, ValueError):
+                pass
     except Exception:
         pass
 

@@ -1297,6 +1297,21 @@ async function addYamlToHA(yaml, btn) {
     </div>
   </div>
 
+  <!-- Anomaly Sensitivity -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>🎯 Anomaly Sensitivity</h2></div>
+    <p style="color:var(--text3);font-size:.8rem;margin:0 0 10px">How aggressively Habitus flags unusual behaviour. Lower = fewer false alarms.</p>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+      <select id="sensitivity-select" style="background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:.85rem">
+        <option value="0.6">Low — only flag obvious anomalies</option>
+        <option value="1.0" selected>Medium — balanced (default)</option>
+        <option value="1.5">High — catch subtle changes</option>
+      </select>
+      <button class="btn btn-accent" onclick="saveSensitivity()">Save</button>
+    </div>
+    <div id="sensitivity-status" style="font-size:.78rem;color:var(--text3)"></div>
+  </div>
+
   <!-- Notifications -->
   <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>Notifications</h2></div>
@@ -1520,6 +1535,25 @@ async function addYamlToHA(yaml, btn) {
       }
     };
 
+    async function loadSensitivity(){
+      try {
+        const d = await api('api/settings');
+        const v = (d.settings && d.settings.anomaly_sensitivity) ? String(d.settings.anomaly_sensitivity) : '1.0';
+        const sel = document.getElementById('sensitivity-select');
+        if (sel) { sel.value = ['0.6','1.0','1.5'].includes(v) ? v : '1.0'; }
+      } catch(e) {}
+    }
+    window.saveSensitivity = async function(){
+      const sel = document.getElementById('sensitivity-select');
+      const st = document.getElementById('sensitivity-status');
+      const val = parseFloat(sel.value);
+      try {
+        const d = await apiPost('api/settings', {anomaly_sensitivity: val});
+        if (d.ok) { st.textContent = '✓ Saved'; st.style.color='var(--green)'; }
+        else { st.textContent = d.error||'Error'; st.style.color='var(--red)'; }
+      } catch(e) { st.textContent = String(e); st.style.color='var(--red)'; }
+    };
+
     async function loadNotificationSetting(){
       const btn = document.getElementById('notify-toggle-btn');
       const st = document.getElementById('notify-toggle-status');
@@ -1559,6 +1593,7 @@ async function addYamlToHA(yaml, btn) {
 
     loadPowerSensors();
     loadNotificationSetting();
+    loadSensitivity();
   })();
   </script>
 
@@ -3697,6 +3732,14 @@ def api_settings():
             notify_on = bool(data["notify_on_anomaly"])
             settings["notify_on_anomaly"] = notify_on
             os.environ["HABITUS_NOTIFY_ON"] = "true" if notify_on else "false"
+        if "anomaly_sensitivity" in data:
+            try:
+                sens = float(data["anomaly_sensitivity"])
+                sens = max(0.3, min(3.0, sens))
+                settings["anomaly_sensitivity"] = sens
+                os.environ["HABITUS_ANOMALY_SENSITIVITY"] = str(sens)
+            except (TypeError, ValueError):
+                pass
         state["user_settings"] = settings
         try:
             with open(state_path, "w") as f:
