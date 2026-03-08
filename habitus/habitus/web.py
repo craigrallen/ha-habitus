@@ -1313,6 +1313,16 @@ async function addYamlToHA(yaml, btn) {
     </div>
   </div>
 
+  <!-- Testing Mode -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>🧪 Testing Mode</h2></div>
+    <p style="color:var(--text3);font-size:.8rem;margin:0 0 10px">When ON: clears all derived caches and retrains on every restart. Use while debugging. Turn OFF when stable — normal mode only clears caches when the version changes.</p>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button id="testing-mode-btn" class="btn" onclick="toggleTestingMode()" style="min-width:140px">Loading…</button>
+      <span id="testing-mode-status" style="font-size:.78rem;color:var(--text3)"></span>
+    </div>
+  </div>
+
   <!-- Anomaly Sensitivity -->
   <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>🎯 Anomaly Sensitivity</h2></div>
@@ -1551,6 +1561,32 @@ async function addYamlToHA(yaml, btn) {
       }
     };
 
+    async function loadTestingMode(){
+      try {
+        const d = await api('api/settings');
+        const on = !!(d.settings && d.settings.testing_mode);
+        const btn = document.getElementById('testing-mode-btn');
+        const st = document.getElementById('testing-mode-status');
+        btn.textContent = on ? '🧪 Testing Mode: ON' : 'Testing Mode: OFF';
+        btn.className = on ? 'btn btn-danger' : 'btn';
+        st.textContent = on ? 'Caches cleared + retrain on every restart' : 'Smart invalidation (default)';
+        st.style.color = on ? 'var(--amber)' : 'var(--text3)';
+      } catch(e) {}
+    }
+    window.toggleTestingMode = async function(){
+      const btn = document.getElementById('testing-mode-btn');
+      const st = document.getElementById('testing-mode-status');
+      btn.disabled = true;
+      try {
+        const d = await api('api/settings');
+        const current = !!(d.settings && d.settings.testing_mode);
+        const r = await apiPost('api/settings', {testing_mode: !current});
+        if (r.ok) { await loadTestingMode(); }
+        else { st.textContent = r.error || 'Error'; }
+      } catch(e) { st.textContent = String(e); }
+      btn.disabled = false;
+    };
+
     async function loadSensitivity(){
       try {
         const d = await api('api/settings');
@@ -1610,6 +1646,7 @@ async function addYamlToHA(yaml, btn) {
     loadPowerSensors();
     loadNotificationSetting();
     loadSensitivity();
+    loadTestingMode();
   })();
   </script>
 
@@ -3798,6 +3835,14 @@ def api_settings():
                 os.environ["HABITUS_ANOMALY_SENSITIVITY"] = str(sens)
             except (TypeError, ValueError):
                 pass
+        if "testing_mode" in data:
+            tm = bool(data["testing_mode"])
+            settings["testing_mode"] = tm
+            flag = os.path.join(DATA_DIR, ".testing_mode")
+            if tm:
+                open(flag, "w").close()
+            elif os.path.exists(flag):
+                os.remove(flag)
         state["user_settings"] = settings
         try:
             with open(state_path, "w") as f:

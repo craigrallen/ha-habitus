@@ -28,20 +28,45 @@ export HABITUS_DAYS="${DAYS}"
 RESCAN_FLAG="/data/.rescan_requested"
 STATE_FILE="/data/run_state.json"
 
-# ── Clear derived caches on every start (new code = stale caches invalid) ──
-# Keeps: state.json, run_state.json, model.pkl, scaler.pkl, baseline.json, progress.json
-# Removes: everything rebuilt by the post-train pipeline
-for _f in \
-  device_library.json suggestions.json smart_suggestions.json \
-  scene_analysis.json conflict_report.json automation_health.json \
-  routine_schedule.json guest_mode.json seasonal_suggestions.json \
-  cost_report.json integration_health.json entity_anomalies.json \
-  patterns.json ha_automations.json changelog.json dashboard.json; do
-  [ -f "/data/${_f}" ] && rm -f "/data/${_f}" && bashio::log.info "Cleared stale cache: ${_f}"
-done
+# ── Cache invalidation strategy ─────────────────────────────────────────────
+# Testing mode (/data/.testing_mode exists): clear all derived caches + auto-retrain
+#   on every start. Use while actively debugging.
+# Normal mode (default): only clear caches when the version stamp changes,
+#   and never auto-retrain (scheduled training handles it).
+CURRENT_VERSION="${HABITUS_VERSION}"
+STAMP_FILE="/data/.cache_version"
+CACHED_VERSION=""
+[ -f "$STAMP_FILE" ] && CACHED_VERSION=$(cat "$STAMP_FILE" 2>/dev/null)
 
-# ── Mark that a retrain is needed after cache clear ─────────────────────────
-touch /data/.retrain_on_start
+if [ -f "/data/.testing_mode" ]; then
+  bashio::log.info "Testing mode ON — clearing all derived caches and scheduling retrain"
+  _DO_CLEAR=true
+  _DO_RETRAIN=true
+elif [ "$CURRENT_VERSION" != "$CACHED_VERSION" ]; then
+  bashio::log.info "Version changed (${CACHED_VERSION} → ${CURRENT_VERSION}) — clearing derived caches"
+  _DO_CLEAR=true
+  _DO_RETRAIN=false
+else
+  bashio::log.info "Cache valid (v${CURRENT_VERSION}) — skipping cache clear"
+  _DO_CLEAR=false
+  _DO_RETRAIN=false
+fi
+
+if [ "$_DO_CLEAR" = "true" ]; then
+  for _f in \
+    device_library.json suggestions.json smart_suggestions.json \
+    scene_analysis.json conflict_report.json automation_health.json \
+    routine_schedule.json guest_mode.json seasonal_suggestions.json \
+    cost_report.json integration_health.json entity_anomalies.json \
+    patterns.json ha_automations.json changelog.json dashboard.json; do
+    [ -f "/data/${_f}" ] && rm -f "/data/${_f}" && bashio::log.info "Cleared: ${_f}"
+  done
+  echo "$CURRENT_VERSION" > "$STAMP_FILE"
+fi
+
+if [ "$_DO_RETRAIN" = "true" ]; then
+  touch /data/.retrain_on_start
+fi
 
 export HABITUS_VERSION=$(bashio::addon.version 2>/dev/null || echo "?")
 export HABITUS_MAX_POWER_KW=$(bashio::config "max_power_kw" 2>/dev/null || echo "25")
