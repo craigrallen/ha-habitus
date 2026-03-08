@@ -80,9 +80,17 @@ start_web(int(os.environ.get('INGRESS_PORT','8099')))
     fi
 
     if [ -f /data/progress.json ] && grep -q '"running"[[:space:]]*:[[:space:]]*true' /data/progress.json 2>/dev/null; then
-        bashio::log.info "Training already running — skip scheduler tick"
-        sleep 30
-        continue
+        # Staleness check: if file is >10 minutes old with running=true, the previous
+        # run crashed and left a stale lock. Treat as stale and proceed.
+        if find /data/progress.json -mmin +10 2>/dev/null | grep -q .; then
+            bashio::log.warning "Stale progress.json detected (>10 min old, running=true) — previous run likely crashed. Clearing stale lock and proceeding."
+            # Overwrite with a stale_aborted marker so the UI shows what happened
+            echo '{"running":false,"phase":"stale_aborted","stale_cleared_at":"'"$(date -u +%Y-%m-%dT%H:%M:%S+00:00)"'"}' > /data/progress.json
+        else
+            bashio::log.info "Training already running — skip scheduler tick"
+            sleep 30
+            continue
+        fi
     fi
 
     if [ -f "$RESCAN_FLAG" ]; then
