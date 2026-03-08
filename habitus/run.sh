@@ -40,6 +40,9 @@ for _f in \
   [ -f "/data/${_f}" ] && rm -f "/data/${_f}" && bashio::log.info "Cleared stale cache: ${_f}"
 done
 
+# ── Mark that a retrain is needed after cache clear ─────────────────────────
+touch /data/.retrain_on_start
+
 export HABITUS_VERSION=$(bashio::addon.version 2>/dev/null || echo "?")
 export HABITUS_MAX_POWER_KW=$(bashio::config "max_power_kw" 2>/dev/null || echo "25")
 export HABITUS_POWER_ENTITY=$(bashio::config "power_entity" 2>/dev/null || echo "")
@@ -108,6 +111,13 @@ start_web(int(os.environ.get('INGRESS_PORT','8099')))
     if [ -f "$RESCAN_FLAG" ]; then
         bashio::log.info "Full rescan — wiping state"
         rm -f "$RESCAN_FLAG" "$STATE_FILE" /data/model*.pkl /data/scaler*.pkl
+        FIRST_RUN=true
+    fi
+
+    # Auto-retrain after startup cache clear (set by cache wipe block above)
+    if [ -f "/data/.retrain_on_start" ]; then
+        bashio::log.info "Post-update retrain triggered (cache was cleared on start)"
+        rm -f "/data/.retrain_on_start"
         FIRST_RUN=true
     fi
 
