@@ -1507,7 +1507,7 @@ async function addYamlToHA(yaml, btn) {
         <select class="power-phase-sel" style="flex:1;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:.82rem">
           ${buildOptions(selected)}
         </select>
-        ${idx>0?`<button onclick="this.parentElement.remove();updateAddBtn()" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:1rem;padding:4px">✕</button>`:''}
+        ${idx>0?`<button onclick="this.parentElement.remove();updateAddBtn()" style="background:none;border:none;color:var(--red,#ef4444);cursor:pointer;font-size:1.1rem;padding:4px 6px;line-height:1" title="Remove phase">✕</button>`:''}
       `;
       rows.appendChild(row);
       updateAddBtn();
@@ -1517,6 +1517,11 @@ async function addYamlToHA(yaml, btn) {
       const rows = document.getElementById('power-phase-rows');
       const btn = document.getElementById('add-phase-btn');
       if (btn) btn.style.display = rows.children.length >= 3 ? 'none' : '';
+      // Re-measure all open sec-body containers so dynamic content never gets clipped.
+      // The collapsible init sets max-height once; we must refresh it when rows are added/removed.
+      document.querySelectorAll('.sec-body:not(.collapsed)').forEach(b => {
+        b.style.maxHeight = b.scrollHeight + 'px';
+      });
     };
 
     async function loadPowerSensors(){
