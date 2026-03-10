@@ -1301,10 +1301,12 @@ async function addYamlToHA(yaml, btn) {
   <!-- Power Proxy Sensors -->
   <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>⚡ Power Proxy Sensors</h2></div>
-    <p style="color:var(--text3);font-size:.8rem;margin:0 0 8px">Optional. Used as historical fallback when primary sensors have no history yet. For a boat/hybrid setup: add shore power + battery discharge sensors — their sum covers all operating modes. Comma-separated entity IDs.</p>
+    <p style="color:var(--text3);font-size:.8rem;margin:0 0 8px">Optional fallback when primary sensors have no history. For boats: add shore power + battery discharge — their sum covers all operating modes.</p>
+    <div id="power-proxy-rows" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px">
+      <!-- Proxy rows injected by JS -->
+    </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
-      <input id="power-proxy-input" type="text" placeholder="sensor.shore_power_w, sensor.battery_output_w"
-        style="flex:1;min-width:200px;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:.82rem">
+      <button class="btn" id="add-proxy-btn" onclick="addProxyRow()" style="font-size:.78rem">+ Add sensor</button>
       <button class="btn btn-accent" onclick="savePowerProxy()" style="white-space:nowrap">Save</button>
     </div>
     <div id="power-proxy-status" style="font-size:.78rem;color:var(--text3)"></div>
@@ -1580,21 +1582,54 @@ async function addYamlToHA(yaml, btn) {
       }
     };
 
+    window.addProxyRow = function(selected='') {
+      const rows = document.getElementById('power-proxy-rows');
+      if (rows.children.length >= 6) return;
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:6px;align-items:center';
+      row.innerHTML = `
+        <select class="power-proxy-sel" style="flex:1;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:.82rem">
+          ${buildOptions(selected)}
+        </select>
+        <button onclick="this.parentElement.remove();updateProxyBtn()" style="background:none;border:none;color:var(--red,#ef4444);cursor:pointer;font-size:1.1rem;padding:4px 6px;line-height:1" title="Remove">✕</button>
+      `;
+      rows.appendChild(row);
+      updateProxyBtn();
+    };
+    window.updateProxyBtn = function() {
+      const rows = document.getElementById('power-proxy-rows');
+      const btn = document.getElementById('add-proxy-btn');
+      if (btn) btn.style.display = rows.children.length >= 6 ? 'none' : '';
+      document.querySelectorAll('.sec-body:not(.collapsed)').forEach(b => {
+        b.style.maxHeight = b.scrollHeight + 'px';
+      });
+    };
     async function loadPowerProxy(){
       try {
         const d = await api('api/settings');
         const proxy = (d.settings && d.settings.power_proxy) || '';
-        document.getElementById('power-proxy-input').value = proxy;
-        document.getElementById('power-proxy-status').textContent = proxy ? `Proxy: ${proxy}` : 'Not configured';
+        const rows = document.getElementById('power-proxy-rows');
+        rows.innerHTML = '';
+        const eids = proxy.split(',').map(s=>s.trim()).filter(Boolean);
+        if (eids.length) {
+          eids.forEach(eid => addProxyRow(eid));
+        }
+        // Refresh selects with full sensor options
+        document.querySelectorAll('.power-proxy-sel').forEach(sel => {
+          const cur = sel.value;
+          sel.innerHTML = buildOptions(cur);
+        });
+        document.getElementById('power-proxy-status').textContent = eids.length ? `${eids.length} proxy sensor(s) configured` : 'Not configured';
       } catch(e) {}
     }
     window.savePowerProxy = async function(){
-      const val = (document.getElementById('power-proxy-input').value || '').trim();
+      const sels = document.querySelectorAll('.power-proxy-sel');
+      const val = Array.from(sels).map(s=>s.value).filter(Boolean).join(',');
       const st = document.getElementById('power-proxy-status');
       st.textContent = 'Saving…';
       try {
         const r = await apiPost('api/settings', {power_proxy: val});
-        st.textContent = r.ok ? (val ? `Saved: ${val}` : 'Cleared') : (r.error || 'Error');
+        st.textContent = r.ok ? (val ? `Saved: ${val.split(',').length} sensor(s)` : 'Cleared') : (r.error || 'Error');
         st.style.color = r.ok ? 'var(--green)' : 'var(--red)';
       } catch(e) { st.textContent = String(e); }
     };
@@ -1681,8 +1716,7 @@ async function addYamlToHA(yaml, btn) {
       btn.disabled = false;
     };
 
-    loadPowerSensors();
-    loadPowerProxy();
+    loadPowerSensors().then(() => loadPowerProxy());
     loadNotificationSetting();
     loadSensitivity();
     loadTestingMode();
@@ -3829,10 +3863,9 @@ def api_power_sensors():
                 "group": group,
             })
 
-        # Sort: put currently-selected first, then by group priority, then by wattage desc
+        # Sort: by group priority, then wattage desc (no "selected first" — that caused duplicates)
         group_order = ["Inverter / Total Load", "Shore Power / Grid", "Solar", "Battery", "Wind Turbine", "Other"]
         raw.sort(key=lambda x: (
-            0 if x["entity_id"] in current.split(",") else 1,
             group_order.index(x["group"]) if x["group"] in group_order else 99,
             -x["current_w"],
         ))
