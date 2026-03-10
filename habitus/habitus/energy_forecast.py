@@ -7,17 +7,15 @@ to predict tomorrow's energy usage with uncertainty bands.
 """
 
 import datetime
-import json
 import logging
-import math
 import os
 import sqlite3
 from collections import defaultdict
 from typing import Any
 
-from .ha_db import resolve_ha_db_path
-
 import numpy as np
+
+from .ha_db import resolve_ha_db_path
 
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
@@ -43,37 +41,74 @@ def _get_daily_energy_and_weather(days: int = 90) -> list[dict]:
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
 
+        # Prefer user-configured entities from env (set via Setup UI)
+        _cfg_energy = os.environ.get("HABITUS_ENERGY_ENTITY", "").strip()
+        _cfg_temp = os.environ.get("HABITUS_TEMP_ENTITY", "").strip()
+
         # Find energy entity (cumulative kWh meter)
+        # Exclude per-device sensors and prefer grid/total meters
+        _ENERGY_EXCLUDE = ("production", "solar", "pv", "battery", "epever", "today", "this_month", "this_year")
         energy_candidates = conn.execute("""
             SELECT DISTINCT sm.entity_id FROM states_meta sm
-            WHERE (sm.entity_id LIKE '%consumption_kwh%'
-                   OR sm.entity_id LIKE '%energy_kwh%'
-                   OR sm.entity_id LIKE '%grid%kwh%')
-            AND sm.entity_id LIKE 'sensor.%'
+            JOIN states s ON s.metadata_id = sm.metadata_id
+            WHERE sm.entity_id LIKE 'sensor.%kwh%'
+            AND s.state NOT IN ('unavailable', 'unknown', 'none', '')
+            GROUP BY sm.entity_id
+            HAVING COUNT(*) > 10
         """).fetchall()
+        energy_candidates = [
+            eid for (eid,) in energy_candidates
+            if not any(x in eid.lower() for x in _ENERGY_EXCLUDE)
+        ]
 
-        energy_eid = None
-        for (eid,) in energy_candidates:
-            if "shore_power" in eid or "grid" in eid or "consumption" in eid:
-                energy_eid = eid
-                break
-        if not energy_eid and energy_candidates:
-            energy_eid = energy_candidates[0][0]
+        if _cfg_energy:
+            energy_eid = _cfg_energy
+        else:
+            energy_eid = None
+            # Prefer grid/total/shore meters; avoid per-device plugs
+            _ENERGY_PREFER = ("grid", "shore", "total", "main_meter", "net_energy", "house")
+            for eid in energy_candidates:
+                if any(x in eid.lower() for x in _ENERGY_PREFER):
+                    energy_eid = eid
+                    break
+            if not energy_eid and energy_candidates:
+                energy_eid = energy_candidates[0]
 
-        # Find outdoor temperature sensor
+        # Find outdoor temperature sensor — prefer sensors with recent numeric values in plausible range
+        _TEMP_EXCLUDE = ("battery", "device", "cpu", "body", "skin", "withings", "car",
+                         "driver", "passenger", "phone", "charging", "xg_")
         temp_candidates = conn.execute("""
-            SELECT DISTINCT sm.entity_id FROM states_meta sm
-            WHERE sm.entity_id LIKE 'sensor.%'
-            AND (sm.entity_id LIKE '%outdoor%temp%'
-                 OR sm.entity_id LIKE '%outside%temp%'
-                 OR sm.entity_id LIKE '%exterior%temp%'
-                 OR sm.entity_id LIKE '%weather%temp%')
+            SELECT sm.entity_id, s.state FROM states_meta sm
+            JOIN states s ON s.metadata_id = sm.metadata_id
+            WHERE sm.entity_id LIKE 'sensor.%temp%'
+            AND sm.entity_id LIKE 'sensor.%'
+            AND s.state NOT IN ('unavailable', 'unknown', 'none', '')
+            ORDER BY s.last_changed_ts DESC
+            LIMIT 200
         """).fetchall()
 
-        temp_eid = None
-        for (eid,) in temp_candidates:
-            temp_eid = eid
-            break
+        if _cfg_temp:
+            temp_eid = _cfg_temp
+        else:
+            temp_eid = None
+            _TEMP_PREFER = ("outside", "outdoor", "exterior", "bilge", "ambient", "air_temp",
+                            "weather", "nodeid", "outside_temp")
+            seen = set()
+            scored = []
+            for eid, state in temp_candidates:
+                if eid in seen or any(x in eid.lower() for x in _TEMP_EXCLUDE):
+                    continue
+                seen.add(eid)
+                try:
+                    v = float(state)
+                    if -40 <= v <= 60:  # plausible outdoor temp range
+                        prefer = any(x in eid.lower() for x in _TEMP_PREFER)
+                        scored.append((0 if prefer else 1, eid))
+                except ValueError:
+                    pass
+            scored.sort()
+            if scored:
+                temp_eid = scored[0][1]
 
         if not energy_eid:
             conn.close()
@@ -208,7 +243,7 @@ def run_energy_forecast(days_history: int = 90) -> dict[str, Any]:
 
     try:
         from sklearn.gaussian_process import GaussianProcessRegressor
-        from sklearn.gaussian_process.kernels import RBF, WhiteKernel, ConstantKernel
+        from sklearn.gaussian_process.kernels import RBF, ConstantKernel, WhiteKernel
         from sklearn.preprocessing import StandardScaler
 
         scaler = StandardScaler()

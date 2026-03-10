@@ -57,6 +57,10 @@ try:
         os.environ.setdefault("HABITUS_ANOMALY_SENSITIVITY", str(_startup_us["anomaly_sensitivity"]))
     if _startup_us.get("power_proxy"):
         os.environ.setdefault("HABITUS_POWER_PROXY", str(_startup_us["power_proxy"]))
+    if _startup_us.get("energy_entity"):
+        os.environ.setdefault("HABITUS_ENERGY_ENTITY", str(_startup_us["energy_entity"]))
+    if _startup_us.get("temp_entity"):
+        os.environ.setdefault("HABITUS_TEMP_ENTITY", str(_startup_us["temp_entity"]))
 except Exception:
     pass
 
@@ -1326,6 +1330,30 @@ async function addYamlToHA(yaml, btn) {
     <div id="power-proxy-status" style="font-size:.78rem;color:var(--text3)"></div>
   </div>
 
+  <!-- Energy vs Weather Sensors -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>📊 Energy vs Weather Sensors</h2></div>
+    <p style="color:var(--text3);font-size:.8rem;margin:0 0 10px">Optional. Needed for the Energy vs Weather chart. Leave blank to auto-detect.</p>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:.8rem;color:var(--text3);min-width:110px">kWh energy meter</label>
+        <select id="energy-entity-sel" style="flex:1;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:.82rem">
+          <option value="">— auto-detect —</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:.8rem;color:var(--text3);min-width:110px">Outdoor temp</label>
+        <select id="temp-entity-sel" style="flex:1;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:.82rem">
+          <option value="">— auto-detect —</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-accent" onclick="saveEnergyWeatherEntities()">Save</button>
+    </div>
+    <div id="ew-entities-status" style="font-size:.78rem;color:var(--text3);margin-top:6px"></div>
+  </div>
+
   <!-- Analysis History Depth (was Geek tab) -->
   <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>📅 Analysis History Depth</h2></div>
@@ -1648,6 +1676,50 @@ async function addYamlToHA(yaml, btn) {
       } catch(e) { st.textContent = String(e); }
     };
 
+    async function loadEnergyWeatherEntities(){
+      try {
+        const [statesResp, settingsResp] = await Promise.all([
+          api('api/entities?domain=sensor&unit=kWh').catch(()=>({entities:[]})),
+          api('api/settings')
+        ]);
+        const settings = settingsResp.settings || {};
+        // kWh sensors
+        const kwhSel = document.getElementById('energy-entity-sel');
+        const tempSel = document.getElementById('temp-entity-sel');
+        if (kwhSel) {
+          api('api/power_sensors').then(d => {
+            // Build kWh list from all sensors data fetched separately
+          });
+          // Use /api/entities with filter
+          const kwh = await api('api/energy_kwh_sensors').catch(()=>({sensors:[]}));
+          (kwh.sensors||[]).forEach(s => {
+            const o = document.createElement('option');
+            o.value = s.entity_id; o.textContent = `${s.name||s.entity_id} (${s.state})`;
+            if (s.entity_id === settings.energy_entity) o.selected = true;
+            kwhSel.appendChild(o);
+          });
+        }
+        if (tempSel) {
+          const t = await api('api/temp_sensors').catch(()=>({sensors:[]}));
+          (t.sensors||[]).forEach(s => {
+            const o = document.createElement('option');
+            o.value = s.entity_id; o.textContent = `${s.name||s.entity_id} (${s.state}°C)`;
+            if (s.entity_id === settings.temp_entity) o.selected = true;
+            tempSel.appendChild(o);
+          });
+        }
+      } catch(e) {}
+    }
+    window.saveEnergyWeatherEntities = async function(){
+      const st = document.getElementById('ew-entities-status');
+      const energy = document.getElementById('energy-entity-sel')?.value || '';
+      const temp = document.getElementById('temp-entity-sel')?.value || '';
+      st.textContent = 'Saving…';
+      const r = await apiPost('api/settings', {energy_entity: energy, temp_entity: temp});
+      st.textContent = r.ok ? 'Saved' : (r.error || 'Error');
+      st.style.color = r.ok ? 'var(--green)' : 'var(--red)';
+    };
+
     async function loadTestingMode(){
       try {
         const d = await api('api/settings');
@@ -1731,6 +1803,7 @@ async function addYamlToHA(yaml, btn) {
     };
 
     loadPowerSensors().then(() => loadPowerProxy());
+    loadEnergyWeatherEntities();
     loadNotificationSetting();
     loadSensitivity();
     loadTestingMode();
@@ -3930,6 +4003,12 @@ def api_settings():
             proxy_val = str(data["power_proxy"]).strip()
             settings["power_proxy"] = proxy_val
             os.environ["HABITUS_POWER_PROXY"] = proxy_val
+        if "energy_entity" in data:
+            settings["energy_entity"] = str(data["energy_entity"]).strip()
+            os.environ["HABITUS_ENERGY_ENTITY"] = settings["energy_entity"]
+        if "temp_entity" in data:
+            settings["temp_entity"] = str(data["temp_entity"]).strip()
+            os.environ["HABITUS_TEMP_ENTITY"] = settings["temp_entity"]
         if "testing_mode" in data:
             tm = bool(data["testing_mode"])
             settings["testing_mode"] = tm
@@ -4114,6 +4193,76 @@ def api_smart_suggestions():
         except Exception as e:
             logging.getLogger("habitus").warning("suggestion_feedback apply failed: %s", e)
     return jsonify(data)
+
+
+@app.route("/api/energy_kwh_sensors")
+@app.route("/ingress/api/energy_kwh_sensors")
+def api_energy_kwh_sensors():
+    """List kWh sensors with recent valid readings."""
+    try:
+        token = os.environ.get("SUPERVISOR_TOKEN", "")
+        url = "http://supervisor/core/api/states"
+        import urllib.request as _ur
+        req = _ur.Request(url, headers={"Authorization": f"Bearer {token}"})
+        with _ur.urlopen(req, timeout=8) as r:
+            states = json.loads(r.read())
+        exclude = ("production", "solar", "pv", "epever", "today", "this_month", "this_year",
+                   "remaining", "next_hour", "current_hour")
+        sensors = []
+        for s in states:
+            eid = s.get("entity_id", "")
+            unit = s.get("attributes", {}).get("unit_of_measurement", "")
+            state = s.get("state", "")
+            if unit not in ("kWh", "Wh") or state in ("unavailable", "unknown", "none", ""):
+                continue
+            if any(x in eid.lower() for x in exclude):
+                continue
+            try:
+                float(state)
+            except ValueError:
+                continue
+            name = s.get("attributes", {}).get("friendly_name", eid)
+            sensors.append({"entity_id": eid, "name": name, "state": f"{state} {unit}"})
+        sensors.sort(key=lambda x: x["entity_id"])
+        return jsonify({"sensors": sensors})
+    except Exception as e:
+        return jsonify({"sensors": [], "error": str(e)})
+
+
+@app.route("/api/temp_sensors")
+@app.route("/ingress/api/temp_sensors")
+def api_temp_sensors():
+    """List temperature sensors with plausible outdoor-range readings."""
+    try:
+        token = os.environ.get("SUPERVISOR_TOKEN", "")
+        url = "http://supervisor/core/api/states"
+        import urllib.request as _ur
+        req = _ur.Request(url, headers={"Authorization": f"Bearer {token}"})
+        with _ur.urlopen(req, timeout=8) as r:
+            states = json.loads(r.read())
+        exclude = ("battery", "cpu", "body", "skin", "withings", "driver", "passenger",
+                   "phone", "charging", "xg_", "craig", "annika", "device_temp")
+        sensors = []
+        for s in states:
+            eid = s.get("entity_id", "")
+            unit = s.get("attributes", {}).get("unit_of_measurement", "")
+            state = s.get("state", "")
+            if unit not in ("°C", "°F") or state in ("unavailable", "unknown", "none", ""):
+                continue
+            if any(x in eid.lower() for x in exclude):
+                continue
+            try:
+                v = float(state)
+                if not (-40 <= v <= 60):
+                    continue
+            except ValueError:
+                continue
+            name = s.get("attributes", {}).get("friendly_name", eid)
+            sensors.append({"entity_id": eid, "name": name, "state": state})
+        sensors.sort(key=lambda x: x["entity_id"])
+        return jsonify({"sensors": sensors})
+    except Exception as e:
+        return jsonify({"sensors": [], "error": str(e)})
 
 
 @app.route("/api/energy_weather_history")
