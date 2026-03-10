@@ -31,6 +31,17 @@ HA_AUTOMATIONS_PATH = os.path.join(DATA_DIR, "ha_automations.json")
 
 app = Flask(__name__)
 
+
+@app.after_request
+def _no_cache(response):
+    """Prevent browsers caching the UI — stale HTML/JS causes subtle UI bugs."""
+    if response.content_type and "text/html" in response.content_type:
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
 # ── Restore user settings into env at web-process startup ────────────────────
 # run.sh sets HABITUS_POWER_ENTITY from the HA add-on config options, which
 # doesn't include settings saved via the UI (state.json user_settings).
