@@ -5,6 +5,180 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.25] - 2026-03-10
+
+### Fixed
+- Power proxy sensors field now shows a proper dropdown picker (same style as phase rows) — was a plain text input
+- Duplicate sensor appearing in phase dropdown — "sort selected to top" logic caused sensors to appear both at top and in their group; removed, now sorted by group only
+
+## [3.10.24] - 2026-03-10
+
+### Fixed
+- "Save & Retrain" button clipped when 3 phase rows added — collapsible sections cache `max-height` at init and don't update when rows are dynamically injected; `updateAddBtn()` now remeasures all open sections on every row add/remove
+
+## [3.10.23] - 2026-03-08
+
+### Added
+- **Power proxy sensors** — optional fallback power sources for historical training when primary sensors have no history yet
+  - Ideal for boats: `shore_power + battery_discharge_w` — shore reads 0 on battery, battery output reads 0 on shore; their sum covers all operating modes
+  - Configured via Setup → ⚡ Power Proxy Sensors (up to 6 sensors)
+  - Automatically activated when primary sensors are <5% non-zero
+  - Persisted in `user_settings.power_proxy`, restored across restarts
+  - `HABITUS_POWER_PROXY` env var
+
+## [3.10.22] - 2026-03-08
+
+### Fixed
+- Anomaly score stuck at 100 when power sensors have no historical data
+  - Root cause: new/renamed sensors (e.g. `sensor.inverter_l1_wattage`) only have data from recent weeks; 3-year training window fills `total_power_w` with zeros; model learns "normal = 0W"; any real reading → score=100
+  - Fix: detect when a power feature is >95% zeros (insufficient history) and zero it out entirely so it has no discriminative power — model trains on behavioral features only (lights, motion, presence — which DO have years of history)
+  - Power features automatically re-activate as sensors accumulate history past the 5% threshold
+- Warning banner shown in Energy tab when behavioral-only mode is active
+
+## [3.10.21] - 2026-03-08
+
+### Added
+- **Testing mode toggle** in Setup → 🧪 Testing Mode (off by default)
+  - ON: clears all derived caches + auto-retrains on every add-on restart (use while debugging)
+  - OFF: version-stamped smart invalidation — caches only cleared when version changes, no auto-retrain
+  - Flag file: `/data/.testing_mode`; version stamp: `/data/.cache_version`
+
+### Fixed
+- `HABITUS_VERSION: unbound variable` crash at startup — version export moved before cache invalidation block in `run.sh`
+
+## [3.10.20] - 2026-03-08 ⚠ broken — do not use
+
+### Notes
+- Crashed at startup: `HABITUS_VERSION` used before export in `run.sh`
+
+## [3.10.19] - 2026-03-08
+
+### Fixed
+- 3-phase sensor selection not persisting across restarts
+  - Root cause: `run.sh` exports `HABITUS_POWER_ENTITY` from HA add-on config options (empty) — not from UI-saved `user_settings`; web process starts with blank env var → auto-detects shore power sensor
+  - Fix 1: web process reads `state.json user_settings` at startup and restores `power_entity`, `days_history`, `anomaly_sensitivity` into env
+  - Fix 2: `api_power_sensors()` reads from `state.json` as fallback when env is empty
+
+## [3.10.18] - 2026-03-08
+
+### Changed
+- Add-on now auto-retrains after startup cache clear — writes `/data/.retrain_on_start` flag on startup, training loop picks it up
+
+## [3.10.17] - 2026-03-08
+
+### Changed
+- Derived caches automatically cleared on every add-on start — replaced in 3.10.21 by smarter version-stamped invalidation
+
+## [3.10.16] - 2026-03-08
+
+### Added
+- `POST /api/clear_derived_cache` endpoint — deletes stale derived files (device_library, suggestions, patterns, etc.) without touching the trained model
+
+## [3.10.15] - 2026-03-08
+
+### Fixed
+- Device Energy Breakdown showing Bitcoin exchange rates, Dark Sky humidity, and other non-power sensors as "devices"
+  - Root cause: `is_device_sensor()` had a `len(slug) < 30` catch-all — any short entity ID qualified
+  - Fix: removed length heuristic; sensor must now have explicit device keyword (kettle, fridge, pump, etc.) OR entity ID must end with `_power`, `_watt`, `_watts`, `_consumption_w`
+  - Added `_NON_POWER` exclusion regex covering: financial (EUR/USD/BTC/price/bid/ask), weather (humidity/temp/dark_sky/rain/wind), diagnostic (cpu/memory/disk/rssi), occupancy, voltage, current
+  - Added 1W minimum floor: sensors whose 95th-percentile < 1W are rejected from profiling
+
+## [3.10.14] - 2026-03-08
+
+### Changed
+- Anomaly scoring less aggressive — replaced linear formula with square-root curve
+  - Old: `(-raw + 0.5) * 100` — moderate deviations spiked immediately to 100
+  - New: `normalized = max(0, (-raw+0.1)/0.6)`, `curved = normalized ** (1.5/sensitivity)` — only genuinely extreme readings reach 80+
+- Score fallback uses nearest same hour-of-day + day-of-week historical row instead of all-zeros vector (was always producing score=100)
+- Maximum contamination reduced from 5% → 3% for established models
+- Contamination ramp: `0.005 / 0.01 / 0.015 / 0.02 / 0.03`
+
+### Added
+- `HABITUS_ANOMALY_SENSITIVITY` env var (range 0.3–3.0, default 1.0) — exposed as Sensitivity selector in Setup
+  - Low (0.6): only flag serious anomalies
+  - Medium (1.0): balanced (default)
+  - High (1.5): catch subtle deviations
+
+## [3.10.13] - 2026-03-08
+
+### Fixed
+- NILM/device library incorrectly classifying Epever PV Array and other solar/inverter sensors as appliances
+  - Added to `_AGGREGATE_HINTS`: `pv_`, `_pv$`, `pv_array`, `photovoltaic`, `epever`, `victron`, `mppt`, `generation`, `produced`, `yield`, `battery_power`, `battery_charge`, `battery_discharge`, `_production`
+
+## [3.10.12] - 2026-03-08
+
+### Added
+- **Smart plug device template library** (`habitus/device_library.py`)
+  - `is_device_sensor()` — classifies sensors as per-device power monitors
+  - `build_device_profile()` — extracts on/off wattage, cycle duration, cycles/day from time series
+  - `match_wattage_to_device()` — fuzzy match NILM event wattage to known devices (±20% tolerance)
+  - `energy_breakdown()` — per-device energy breakdown for Energy tab
+  - Persistent in `/data/device_library.json`
+- Device Energy Breakdown panel in Energy tab
+- `GET /api/device_library` endpoint
+
+## [3.10.11] - 2026-03-08
+
+### Changed
+- Power sensor dropdown: grouped `<optgroup>` sections (Inverter/Total Load, Shore Power/Grid, Solar, Battery, Wind Turbine, Other)
+- Filters out accumulator sensors (`_ACCUM_SKIP` regex), implausible values (>50kW)
+
+## [3.10.10] - 2026-03-08
+
+### Added
+- **Per-phase NILM** — edge detection and correlation across all configured phases
+  - Edges correlated within 120s window; classified as single / two_phase_400v / two_phase_mixed / three_phase
+  - Phase badges in UI; per-phase weekly profiles (`weekly_l1`, `weekly_l2`, `weekly_l3`)
+
+## [3.10.9] - 2026-03-08
+
+### Added
+- Multi-phase power source UI — pick 1–3 phase sensors; summed for total consumption
+- Phase rows shown in Setup with per-phase sensor selects
+
+## [3.10.7] - 2026-03-08
+
+### Fixed
+- Collapsed sections cleared on version change (stale collapse state)
+- `power_entity` persisted to state correctly
+- Scroll-to-top on tab switch
+- 0W warning shown in Patterns when power sensor reads zero
+
+## [3.10.6] - 2026-03-08
+
+### Fixed
+- "Error loading sensors" — core utilities (sensor list, formatters) now hoisted before Settings IIFE so they're available at load time
+- Raw state JSON hidden behind collapsible section
+
+## [3.10.5] - 2026-03-08
+
+### Fixed
+- Training "discovery never ends" bug — stale `progress.json` with `running=true` blocked all subsequent training runs
+  - `run.sh` now detects stale lock (>10 min old) and clears it before each attempt
+  - Python `run()`: 0-row fetch now writes `fetch_failed` to progress and exits — no more silent `complete` on empty data
+- CI collection errors: `ModuleNotFoundError: No module named 'habitus.habitus'` — fixed `pyproject.toml` pythonpath
+
+## [3.10.4] - 2026-03-07
+
+### Fixed
+- Navigation tabs overflowing on mobile — replaced horizontal tab row with fixed bottom tab bar (emoji icon + short label)
+
+## [3.10.3] - 2026-03-07
+
+### Fixed
+- Chevron triangles duplicating on every data refresh — `initCollapsible()` moved to one-shot init with guard; replaced Unicode chevrons with CSS border-trick
+
+## [3.10.2] - 2026-03-07
+
+### Fixed
+- Collapsible sections — dedicated chevron toggle, scroll-safe touch handling, ResizeObserver height fix
+
+## [3.10.1] - 2026-03-07
+
+### Added
+- All 12 new features shipped: conflict detector, automation health, routine builder, guest mode, seasonal adapter, cost estimator, battery watchdog, integration health, NL automation creator, dashboard generator, changelog, onboarding wizard
+- 6-tab UI layout (Home, Ideas, Automations, Energy, Health, Setup)
+
 ## [Unreleased]
 
 ### Added
