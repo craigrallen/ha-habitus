@@ -2273,7 +2273,9 @@ async function load() {
   const sIcons = {winter:'❄️',spring:'🌱',summer:'☀️',autumn:'🍂'};
   const trained = sm[curSeason];
   document.getElementById('season-active').textContent = (sIcons[curSeason]||'') + ' ' + curSeason.charAt(0).toUpperCase()+curSeason.slice(1);
-  document.getElementById('season-sub').innerHTML = trained?'<span class="badge b-ok">Seasonal model</span>':'<span class="badge b-muted">Using main model</span>';
+  document.getElementById('season-sub').innerHTML = trained
+    ? '<span class="badge b-ok">Seasonal model active</span>'
+    : '<span class="badge b-muted" title="Spring-specific model trains after 180d of data">Main model (seasonal pending)</span>';
 
   // Patterns summary
   const r = patterns.daily_routine||{};

@@ -2170,6 +2170,9 @@ async def run(days_history: int, mode: str = "full") -> None:
                     "warming_up": training_days < MIN_SCORING_DAYS,
                     "warmup_days_remaining": max(0, MIN_SCORING_DAYS - training_days),
                     "contamination_tier": contamination_tier_name(_train_days),
+                    "data_from": full_from,
+                    "data_to": now_iso,
+                    "last_run": now_iso,
                 }
             )
             mark_last_completed_progress(
@@ -2443,6 +2446,9 @@ async def run(days_history: int, mode: str = "full") -> None:
                 "anomaly_score": _partial_score,
                 "training_days": _train_days,
                 "contamination_tier": contamination_tier_name(_train_days),
+                "data_from": full_from,
+                "data_to": now_iso,
+                "last_run": now_iso,
             }
         )
         mark_last_completed_progress(
