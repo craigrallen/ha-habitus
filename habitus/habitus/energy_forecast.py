@@ -7,6 +7,7 @@ to predict tomorrow's energy usage with uncertainty bands.
 """
 
 import datetime
+import json
 import logging
 import os
 import sqlite3
@@ -124,14 +125,36 @@ def _get_daily_energy_and_weather(days: int = 90) -> list[dict]:
         """, (energy_eid, cutoff_ts)).fetchall()
 
         # Get temperature readings
+        # weather.* entities store temp in attributes, not state
         temp_rows = []
         if temp_eid:
-            temp_rows = conn.execute("""
-                SELECT s.state, s.last_changed_ts FROM states s
-                JOIN states_meta sm ON s.metadata_id = sm.metadata_id
-                WHERE sm.entity_id = ? AND s.last_changed_ts > ?
-                ORDER BY s.last_changed_ts
-            """, (temp_eid, cutoff_ts)).fetchall()
+            if temp_eid.startswith("weather."):
+                # For weather entities, extract temperature from JSON attributes
+                try:
+                    _weather_rows = conn.execute("""
+                        SELECT sa.shared_attrs, s.last_changed_ts FROM states s
+                        JOIN states_meta sm ON s.metadata_id = sm.metadata_id
+                        JOIN state_attributes sa ON s.attributes_id = sa.attributes_id
+                        WHERE sm.entity_id = ? AND s.last_changed_ts > ?
+                        ORDER BY s.last_changed_ts
+                    """, (temp_eid, cutoff_ts)).fetchall()
+                    for attrs_json, ts in _weather_rows:
+                        try:
+                            attrs = json.loads(attrs_json) if attrs_json else {}
+                            t = attrs.get("temperature")
+                            if t is not None:
+                                temp_rows.append((str(t), ts))
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                except Exception as e:
+                    log.debug("weather entity attr query failed: %s", e)
+            else:
+                temp_rows = conn.execute("""
+                    SELECT s.state, s.last_changed_ts FROM states s
+                    JOIN states_meta sm ON s.metadata_id = sm.metadata_id
+                    WHERE sm.entity_id = ? AND s.last_changed_ts > ?
+                    ORDER BY s.last_changed_ts
+                """, (temp_eid, cutoff_ts)).fetchall()
 
         conn.close()
     except Exception as e:

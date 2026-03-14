@@ -4232,7 +4232,7 @@ def api_energy_kwh_sensors():
 @app.route("/api/temp_sensors")
 @app.route("/ingress/api/temp_sensors")
 def api_temp_sensors():
-    """List temperature sensors with plausible outdoor-range readings."""
+    """List temperature sensors and weather entities with plausible outdoor-range readings."""
     try:
         token = os.environ.get("SUPERVISOR_TOKEN", "")
         url = "http://supervisor/core/api/states"
@@ -4245,7 +4245,21 @@ def api_temp_sensors():
         sensors = []
         for s in states:
             eid = s.get("entity_id", "")
-            unit = s.get("attributes", {}).get("unit_of_measurement", "")
+            attrs = s.get("attributes", {})
+            # weather.* entities: extract temperature from attributes
+            if eid.startswith("weather."):
+                t = attrs.get("temperature")
+                if t is not None:
+                    try:
+                        v = float(t)
+                        if -40 <= v <= 60:
+                            name = attrs.get("friendly_name", eid)
+                            sensors.append({"entity_id": eid, "name": f"🌤 {name} (weather)", "state": str(v)})
+                    except (ValueError, TypeError):
+                        pass
+                continue
+            # Regular sensor.* temperature entities
+            unit = attrs.get("unit_of_measurement", "")
             state = s.get("state", "")
             if unit not in ("°C", "°F") or state in ("unavailable", "unknown", "none", ""):
                 continue
@@ -4257,9 +4271,9 @@ def api_temp_sensors():
                     continue
             except ValueError:
                 continue
-            name = s.get("attributes", {}).get("friendly_name", eid)
+            name = attrs.get("friendly_name", eid)
             sensors.append({"entity_id": eid, "name": name, "state": state})
-        sensors.sort(key=lambda x: x["entity_id"])
+        sensors.sort(key=lambda x: (0 if x["entity_id"].startswith("weather.") else 1, x["entity_id"]))
         return jsonify({"sensors": sensors})
     except Exception as e:
         return jsonify({"sensors": [], "error": str(e)})
