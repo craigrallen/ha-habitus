@@ -344,8 +344,84 @@ def get_db() -> TimeSeriesDB:
     return _db
 
 
+def backfill_from_ha(entity_ids: list[str], days: int = 10) -> int:
+    """Backfill local DB from HA history API for recent days.
+    
+    This populates the local DB with existing HA data so training
+    doesn't have to wait for the WebSocket collector to accumulate data.
+    
+    Args:
+        entity_ids: List of entity IDs to backfill
+        days: Number of days to backfill (default: 10, HA states table limit)
+    
+    Returns:
+        Number of records inserted
+    """
+    ha_url = os.environ.get("HA_URL", "http://supervisor/core")
+    ha_token = os.environ.get("SUPERVISOR_TOKEN")
+    
+    if not ha_token:
+        log.warning("No SUPERVISOR_TOKEN — backfill disabled")
+        return 0
+    
+    import requests
+    
+    headers = {"Authorization": f"Bearer {ha_token}"}
+    now = datetime.datetime.now(datetime.UTC)
+    start = now - datetime.timedelta(days=days)
+    start_iso = start.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    
+    total_inserted = 0
+    
+    for entity_id in entity_ids:
+        try:
+            url = f"{ha_url}/api/history/period/{start_iso}"
+            resp = requests.get(
+                url,
+                headers=headers,
+                params={"filter_entity_id": entity_id, "minimal_response": ""},
+                timeout=30
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            
+            if not data or not data[0]:
+                log.debug(f"Backfill {entity_id}: no data from HA")
+                continue
+            
+            records = []
+            for entry in data[0]:
+                try:
+                    state_val = entry.get("state")
+                    if state_val in ("unknown", "unavailable", None):
+                        continue
+                    value = float(state_val)
+                    
+                    # Parse timestamp
+                    ts_str = entry.get("last_changed") or entry.get("last_updated")
+                    if ts_str:
+                        ts_dt = datetime.datetime.fromisoformat(ts_str)
+                        ts = ts_dt.timestamp()
+                    else:
+                        continue
+                    
+                    unit = entry.get("attributes", {}).get("unit_of_measurement", "")
+                    records.append((entity_id, ts, value, unit))
+                except (ValueError, TypeError):
+                    continue
+            
+            if records:
+                _db.insert_batch(records)
+                total_inserted += len(records)
+                log.info(f"Backfilled {entity_id}: {len(records)} records ({days}d)")
+        except Exception as e:
+            log.warning(f"Backfill failed for {entity_id}: {e}")
+    
+    return total_inserted
+
+
 def start_collector(entity_ids: list[str]) -> None:
-    """Start WebSocket collector in background thread."""
+    """Start WebSocket collector in background thread + backfill from HA history."""
     import threading
     
     global _collector
@@ -357,6 +433,14 @@ def start_collector(entity_ids: list[str]) -> None:
         log.warning("No SUPERVISOR_TOKEN — collector disabled")
         return
     
+    # Step 1: Backfill from HA history API (synchronous, runs before WS)
+    try:
+        inserted = backfill_from_ha(entity_ids, days=10)
+        log.info(f"Backfill complete: {inserted} records from HA history")
+    except Exception as e:
+        log.warning(f"Backfill failed: {e}")
+    
+    # Step 2: Start WebSocket collector for real-time updates
     _collector = HAWebSocketCollector(ha_url, ha_token, _db)
     
     # Run in background thread with its own event loop

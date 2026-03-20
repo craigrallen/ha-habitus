@@ -4923,14 +4923,38 @@ def start_web(port=8099):
     # Start high-resolution data collector on startup
     try:
         from . import collector as _collector  # noqa: PLC0415
-        # Get configured sensors from environment or auto-detect
-        power_entity = os.environ.get("HABITUS_POWER_ENTITY", "").strip()
-        power_entities = [e.strip() for e in power_entity.split(",") if e.strip()] if power_entity else []
         
-        if power_entities:
-            # Start collector for power sensors (will expand to all sensors later)
-            _collector.start_collector(power_entities)
-            log.info(f"Started timeseries collector for {len(power_entities)} power sensors")
+        # Read user-configured power entities from run_state.json (NOT env var)
+        power_entity = ""
+        proxy_entities_str = ""
+        state_path = os.path.join(os.environ.get("DATA_DIR", "/data"), "run_state.json")
+        try:
+            with open(state_path) as f:
+                import json as _json
+                _st = _json.load(f)
+                _us = _st.get("user_settings", {})
+                if _us.get("power_entity"):
+                    power_entity = _us["power_entity"]
+                if _us.get("power_proxy"):
+                    proxy_entities_str = _us["power_proxy"]
+        except Exception:
+            pass
+        
+        # Fallback to env var if state file has nothing
+        if not power_entity:
+            power_entity = os.environ.get("HABITUS_POWER_ENTITY", "").strip()
+        
+        # Combine power + proxy entities for collection
+        all_entities = [e.strip() for e in power_entity.split(",") if e.strip()]
+        if proxy_entities_str:
+            all_entities += [e.strip() for e in proxy_entities_str.split(",") if e.strip()]
+        
+        # Deduplicate
+        all_entities = list(dict.fromkeys(all_entities))
+        
+        if all_entities:
+            _collector.start_collector(all_entities)
+            log.info(f"Started timeseries collector for {len(all_entities)} sensors: {all_entities}")
         else:
             log.debug("No power entities configured — collector not started")
     except Exception as e:
