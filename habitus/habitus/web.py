@@ -2924,17 +2924,24 @@ async function load() {
   ]).then(([n, st, phaseReadings]) => {
     // Per-phase summary panel — fetch LIVE sensor values, not NILM data
     const phaseSec = document.getElementById('phase-summary-section');
-    if (st.power_phases && Object.keys(st.power_phases).length > 1) {
-      const phaseKeys = Object.keys(st.power_phases).sort();
-      const phaseW = phaseReadings.phases || {};
-      const total = phaseReadings.total || 0;
+    const phaseW = phaseReadings.phases || {};
+    const total = phaseReadings.total || 0;
+    const phaseKeys = Object.keys(phaseW).filter(k => k !== 'Total');
+    
+    // Show if we have multiple phases OR if we have at least one reading
+    if (phaseKeys.length > 1 || (phaseKeys.length === 0 && total > 0)) {
       phaseSec.style.display = '';
-      document.getElementById('phase-summary-body').innerHTML =
-        phaseKeys.map(ph => {
+      let html = '';
+      if (phaseKeys.length > 1) {
+        // Multi-phase display
+        html = phaseKeys.map(ph => {
           const w = phaseW[ph] !== undefined ? Math.round(phaseW[ph]) : 0;
           return `<div class="card" style="padding:8px 14px;text-align:center"><div style="font-size:.72rem;color:var(--text3)">${ph}</div><div style="font-size:1.1rem;font-weight:700">${w}W</div></div>`;
-        }).join('') +
-        `<div class="card" style="padding:8px 14px;text-align:center"><div style="font-size:.72rem;color:var(--text3)">Total</div><div style="font-size:1.1rem;font-weight:700">${Math.round(total)}W</div></div>`;
+        }).join('');
+      }
+      // Always show total
+      html += `<div class="card" style="padding:8px 14px;text-align:center"><div style="font-size:.72rem;color:var(--text3)">Total</div><div style="font-size:1.1rem;font-weight:700">${Math.round(total)}W</div></div>`;
+      document.getElementById('phase-summary-body').innerHTML = html;
     } else {
       phaseSec.style.display = 'none';
     }
@@ -4320,9 +4327,14 @@ def api_ha_automation_delete():
 def api_phase_current_readings():
     """Fetch current live readings from phase power sensors."""
     try:
-        state = _read(STATE_PATH) or {}
-        power_phases = state.get("power_phases", {})
-        if not power_phases:
+        # Read power entity from settings or state
+        settings = _read(STATE_PATH) or {}
+        user_settings = settings.get("user_settings", {})
+        power_entity = user_settings.get("power_entity") or os.environ.get("HABITUS_POWER_ENTITY", "")
+
+        # Parse CSV into list
+        power_entities = [e.strip() for e in power_entity.split(",") if e.strip()] if power_entity else []
+        if not power_entities:
             return jsonify({"phases": {}, "total": 0})
 
         token = os.environ.get("SUPERVISOR_TOKEN", "")
@@ -4336,12 +4348,14 @@ def api_phase_current_readings():
 
         phases = {}
         total = 0.0
-        for phase_name, entity_id in power_phases.items():
+        for i, entity_id in enumerate(power_entities):
             try:
                 val = float(state_map.get(entity_id, 0))
+                phase_name = f"L{i+1}" if len(power_entities) > 1 else "Total"
                 phases[phase_name] = val
                 total += val
             except (ValueError, TypeError):
+                phase_name = f"L{i+1}" if len(power_entities) > 1 else "Total"
                 phases[phase_name] = 0
 
         return jsonify({"phases": phases, "total": total})
