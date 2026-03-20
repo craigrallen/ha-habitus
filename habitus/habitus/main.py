@@ -1210,31 +1210,29 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                     
                     _phase_count = len(_power_entities)
                     
-                    # Restrict hours DataFrame to local DB time range for dense power coverage
-                    # This prevents power features from being diluted by behavioral-only hours
-                    local_start = local_total_power.index.min()
-                    local_end = local_total_power.index.max()
+                    # CRITICAL: Only train on hours with actual power data to avoid zero-dilution
+                    # Build a new hours DataFrame from the local power data index directly
+                    hours_with_power = pd.DataFrame({"hour": local_total_power.index})
+                    hours_with_power["hour_of_day"] = hours_with_power["hour"].dt.hour
+                    hours_with_power["day_of_week"] = hours_with_power["hour"].dt.dayofweek
+                    hours_with_power["is_weekend"] = (hours_with_power["day_of_week"] >= 5).astype(int)
+                    hours_with_power["month"] = hours_with_power["hour"].dt.month
                     
-                    # Filter hours to local DB range
-                    hours_in_range = (hours["hour"] >= local_start) & (hours["hour"] <= local_end)
-                    hours = hours[hours_in_range].copy()
+                    # Replace hours DataFrame with power-only subset
+                    hours = hours_with_power.copy()
                     
-                    log.info(
-                        f"Local DB power range: {local_start} → {local_end} ({len(local_total_power)} hours)"
-                    )
-                    log.info(
-                        f"Restricted training to: {hours['hour'].min()} → {hours['hour'].max()} ({len(hours)} hours)"
-                    )
-                    
-                    # Merge power data
+                    # Add power data directly
                     hours = hours.merge(local_total_power, left_on="hour", right_index=True, how="left")
                     hours["total_power_w"] = hours["total_power_w"].fillna(0)
                     
-                    # Check coverage
-                    _nonzero = (hours["total_power_w"] > 0).sum()
                     log.info(
-                        f"Local DB power: {_nonzero}/{len(hours)} hours with data ({_nonzero/len(hours)*100:.1f}%), "
-                        f"mean={local_total_power.mean():.0f}W, max={local_total_power.max():.0f}W"
+                        f"Local DB training window: {hours['hour'].min()} → {hours['hour'].max()} "
+                        f"({len(hours)} hours with power data)"
+                    )
+                    log.info(
+                        f"Power stats: mean={local_total_power.mean():.0f}W, "
+                        f"max={local_total_power.max():.0f}W, "
+                        f"min={local_total_power.min():.0f}W"
                     )
                     
                     _power_from_local_db = True
