@@ -1245,11 +1245,12 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                     
                     _power_from_local_db = True
                     
-                    # Backfill historical gaps with proxy calculation
+                    # Backfill historical gaps with proxy calculation (shore + battery + solar)
+                    # This provides estimated power consumption before inverter sensors existed
                     if _proxy_entities and len(_proxy_entities) >= 2:
                         try:
-                            # Fetch proxy sensors from HA statistics (long-term history)
-                            # Expect: shore_power, battery_output, solar_production
+                            # Fetch proxy sensors from HA statistics (full training window, not just local DB range)
+                            # Expect: shore_power L1/L2/L3, battery_output, solar_production
                             proxy_stats = fetch_stats(
                                 _proxy_entities,
                                 data_from,
@@ -1258,7 +1259,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                                 filters={"operation": "mean"}
                             )
                             
-                            if not proxy_stats.empty:
+                            if not proxy_stats.empty and len(proxy_stats) > 100:
                                 # Calculate estimated power from proxy sensors
                                 proxy_stats["hour"] = pd.to_datetime(proxy_stats["ts"], utc=True).dt.floor("h")
                                 proxy_stats["v"] = pd.to_numeric(proxy_stats["v"], errors="coerce").clip(lower=0, upper=_max_w)
@@ -1270,7 +1271,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                                 existing_hours = set(local_total_power.index)
                                 proxy_hours = set(proxy_power.index) - existing_hours
                                 
-                                if proxy_hours:
+                                if len(proxy_hours) > 100:
                                     # Build DataFrame for proxy-only hours
                                     proxy_df = pd.DataFrame({"hour": sorted(proxy_hours)})
                                     proxy_df["hour_of_day"] = proxy_df["hour"].dt.hour
@@ -1283,16 +1284,20 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                                     # Append proxy hours to training dataset
                                     hours = pd.concat([hours, proxy_df], ignore_index=True).sort_values("hour").reset_index(drop=True)
                                     
+                                    proxy_mean = proxy_df["total_power_w"].mean()
+                                    proxy_span_days = (proxy_df["hour"].max() - proxy_df["hour"].min()).days
+                                    
                                     log.info(
-                                        f"Backfilled {len(proxy_hours)} hours with proxy power calculation "
-                                        f"({len(_proxy_entities)} sensors: {','.join(_proxy_entities)})"
+                                        f"Backfilled {len(proxy_hours)} hours with proxy power estimate "
+                                        f"(mean={proxy_mean:.0f}W, span={proxy_span_days}d)"
                                     )
                                     log.info(
                                         f"Total training window: {hours['hour'].min()} → {hours['hour'].max()} "
-                                        f"({len(hours)} hours)"
+                                        f"({len(hours)} hours: {len(local_total_power)} measured + {len(proxy_hours)} estimated)"
                                     )
                         except Exception as proxy_err:
-                            log.warning(f"Proxy backfill failed: {proxy_err}")
+                            import traceback
+                            log.warning(f"Proxy backfill failed: {proxy_err}\n{traceback.format_exc()}")
                     
         except Exception as e:
             import traceback
