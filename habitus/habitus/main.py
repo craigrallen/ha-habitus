@@ -1168,6 +1168,33 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     _phase_series: list[pd.Series] = []  # per-phase columns collected for later join
     _phase_count = 1
     if _power_entities:
+        # HYBRID FETCH: merge statistics + states for complete power sensor coverage
+        try:
+            from .data_sources import fetch_hybrid  # noqa: PLC0415
+            db_path = _resolve_db_path()
+            if db_path:
+                fetch_from_dt = datetime.datetime.fromtimestamp(cutoff_ts, tz=datetime.UTC)
+                power_df, power_quality = fetch_hybrid(
+                    _power_entities,
+                    fetch_from_dt,
+                    now,
+                    db_path,
+                    max_w=_max_w
+                )
+                if not power_df.empty:
+                    # Merge hybrid power data into main df
+                    power_df["hour"] = power_df["ts"].dt.floor("h")
+                    log.info(
+                        f"Hybrid power fetch: {len(power_df)} rows for {len(_power_entities)} sensors "
+                        f"(quality: {power_quality})"
+                    )
+                    # Replace power entity rows in df with hybrid data
+                    df = df[~df["entity_id"].isin(_power_entities)]
+                    power_df_for_merge = power_df[["entity_id", "hour", "mean", "sum"]].rename(columns={"hour": "ts"})
+                    df = pd.concat([df, power_df_for_merge], ignore_index=True)
+        except Exception as e:
+            log.warning(f"Hybrid power fetch failed, falling back to statistics only: {e}")
+        
         # Sum across all specified phases / sensors
         power = df[df["entity_id"].isin(_power_entities)].copy()
         power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(lower=0, upper=_max_w)
