@@ -4059,8 +4059,8 @@ def api_power_sensors():
 @app.route("/api/settings", methods=["GET", "POST"])
 @app.route("/ingress/api/settings", methods=["GET", "POST"])
 def api_settings():
-    """Get or update user-overridable settings (persisted to state.json)."""
-    state_path = os.path.join(os.environ.get("DATA_DIR", "/data"), "state.json")
+    """Get or update user-overridable settings (persisted to run_state.json)."""
+    state_path = os.path.join(os.environ.get("DATA_DIR", "/data"), "run_state.json")
     try:
         with open(state_path) as f:
             state = json.load(f)
