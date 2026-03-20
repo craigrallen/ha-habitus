@@ -1244,6 +1244,56 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                     )
                     
                     _power_from_local_db = True
+                    
+                    # Backfill historical gaps with proxy calculation
+                    if _proxy_entities and len(_proxy_entities) >= 2:
+                        try:
+                            # Fetch proxy sensors from HA statistics (long-term history)
+                            # Expect: shore_power, battery_output, solar_production
+                            proxy_stats = fetch_stats(
+                                _proxy_entities,
+                                data_from,
+                                data_to,
+                                db_path,
+                                filters={"operation": "mean"}
+                            )
+                            
+                            if not proxy_stats.empty:
+                                # Calculate estimated power from proxy sensors
+                                proxy_stats["hour"] = pd.to_datetime(proxy_stats["ts"], utc=True).dt.floor("h")
+                                proxy_stats["v"] = pd.to_numeric(proxy_stats["v"], errors="coerce").clip(lower=0, upper=_max_w)
+                                
+                                # Sum all proxy sensors per hour (shore + battery + solar = total consumption estimate)
+                                proxy_power = proxy_stats.groupby("hour")["v"].sum().rename("proxy_power_w")
+                                
+                                # Find hours where primary (inverter) has no data
+                                existing_hours = set(local_total_power.index)
+                                proxy_hours = set(proxy_power.index) - existing_hours
+                                
+                                if proxy_hours:
+                                    # Build DataFrame for proxy-only hours
+                                    proxy_df = pd.DataFrame({"hour": sorted(proxy_hours)})
+                                    proxy_df["hour_of_day"] = proxy_df["hour"].dt.hour
+                                    proxy_df["day_of_week"] = proxy_df["hour"].dt.dayofweek
+                                    proxy_df["is_weekend"] = (proxy_df["day_of_week"] >= 5).astype(int)
+                                    proxy_df["month"] = proxy_df["hour"].dt.month
+                                    proxy_df = proxy_df.merge(proxy_power, left_on="hour", right_index=True, how="left")
+                                    proxy_df.rename(columns={"proxy_power_w": "total_power_w"}, inplace=True)
+                                    
+                                    # Append proxy hours to training dataset
+                                    hours = pd.concat([hours, proxy_df], ignore_index=True).sort_values("hour").reset_index(drop=True)
+                                    
+                                    log.info(
+                                        f"Backfilled {len(proxy_hours)} hours with proxy power calculation "
+                                        f"({len(_proxy_entities)} sensors: {','.join(_proxy_entities)})"
+                                    )
+                                    log.info(
+                                        f"Total training window: {hours['hour'].min()} → {hours['hour'].max()} "
+                                        f"({len(hours)} hours)"
+                                    )
+                        except Exception as proxy_err:
+                            log.warning(f"Proxy backfill failed: {proxy_err}")
+                    
         except Exception as e:
             import traceback
             log.warning(f"Local DB power fetch failed: {e}\n{traceback.format_exc()}")
