@@ -2053,8 +2053,23 @@ async def run(days_history: int, mode: str = "full") -> None:
     # Raw DataFrame captured for device library (set in training branches, None if score-only)
     _raw_df_for_library: pd.DataFrame | None = None
 
-    if state.get("data_to") and os.path.exists(MODEL_PATH):
-        # Incremental
+    # Check if incremental update is viable (data_to is recent + model exists)
+    _data_to = state.get("data_to")
+    _can_incremental = False
+    if _data_to and os.path.exists(MODEL_PATH):
+        try:
+            _dt_to = datetime.datetime.fromisoformat(_data_to.replace("+00:00", "")).replace(tzinfo=datetime.UTC)
+            _age_days = (now - _dt_to).days
+            # If data_to is stale (>7 days old), treat as fresh start
+            if _age_days <= 7:
+                _can_incremental = True
+            else:
+                log.info("data_to is %d days old — treating as fresh start (full fetch)", _age_days)
+        except Exception:
+            pass
+
+    if _can_incremental:
+        # Incremental update
         fetch_from = state["data_to"]
         log.info(f"Incremental: {fetch_from} → {now_iso}")
         df_new = await fetch_stats(stat_ids, fetch_from, now_iso)
