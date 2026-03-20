@@ -1249,6 +1249,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                     # This provides estimated power consumption before inverter sensors existed
                     if _proxy_entities and len(_proxy_entities) >= 2:
                         try:
+                            log.info(f"Attempting proxy backfill with {len(_proxy_entities)} sensors: {','.join(_proxy_entities[:3])}...")
                             # Fetch proxy sensors from HA statistics (full training window, not just local DB range)
                             # Expect: shore_power L1/L2/L3, battery_output, solar_production
                             proxy_stats = fetch_stats(
@@ -1258,6 +1259,8 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                                 db_path,
                                 filters={"operation": "mean"}
                             )
+                            
+                            log.info(f"Proxy stats fetched: {len(proxy_stats)} rows")
                             
                             if not proxy_stats.empty and len(proxy_stats) > 100:
                                 # Calculate estimated power from proxy sensors
