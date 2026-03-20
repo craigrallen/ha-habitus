@@ -1198,8 +1198,22 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                     _phase_count = len(_power_entities)
                     
                     # Merge into hours DataFrame
+                    # DEBUG: log time ranges
+                    log.info(
+                        f"Local DB time range: {local_total_power.index.min()} → {local_total_power.index.max()} "
+                        f"({len(local_total_power)} hours)"
+                    )
+                    log.info(
+                        f"Hours DataFrame range: {hours['hour'].min()} → {hours['hour'].max()} "
+                        f"({len(hours)} rows)"
+                    )
+                    
                     hours = hours.merge(local_total_power, left_on="hour", right_index=True, how="left")
                     hours["total_power_w"] = hours["total_power_w"].fillna(0)
+                    
+                    # Check how many rows got power data
+                    _nonzero = (hours["total_power_w"] > 0).sum()
+                    log.info(f"After merge: {_nonzero}/{len(hours)} rows have power data ({_nonzero/len(hours)*100:.1f}%)")
                     
                     _power_from_local_db = True
                     log.info(
