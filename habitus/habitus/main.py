@@ -1273,7 +1273,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                                 filters={"operation": "mean"}
                             )
                             
-                            log.info(f"Proxy stats fetched: {len(proxy_stats)} rows")
+                            log.info(f"Proxy stats fetched: {len(proxy_stats)} rows, columns: {list(proxy_stats.columns) if not proxy_stats.empty else 'empty'}")
+                            if proxy_stats.empty:
+                                log.warning("Proxy stats empty — check if sensors have HA statistics data")
                             
                             if not proxy_stats.empty and len(proxy_stats) > 100:
                                 # Calculate estimated power from proxy sensors
