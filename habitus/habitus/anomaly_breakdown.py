@@ -644,6 +644,12 @@ def score_entities(current_states: dict | None = None) -> list:
         # Constant sensor guard (Bernoulli std near 0 ≡ always-off binary sensor)
         if b.get("std", 1.0) < 0.01:
             continue
+        
+        # Skip entities with very sparse baselines during early training
+        # (0% batteries, sensors that rarely report, etc. — not real anomalies)
+        n_samples = b.get("n", 0)
+        if n_samples < 3 and days_of_data < 30:
+            continue
 
         current = current_states.get(eid)
         if current is None:

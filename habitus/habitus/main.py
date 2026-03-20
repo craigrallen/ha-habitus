@@ -267,26 +267,26 @@ def log_perf_guardrail(
 def contamination_for_days(days: int) -> float:
     """Return the IsolationForest contamination parameter for the given training age.
 
-    Ramps from very conservative (0.005) during the early warmup phase to the
-    full 0.05 once the model has 90+ days of history.  Low contamination during
-    warmup avoids the excessive false-positive rate that occurs when the model
-    has seen very little historical behaviour.
+    Ramps from ultra-conservative (0.002) during the initial warmup phase to a
+    moderate 0.03 once the model has 90+ days of history. Very low contamination
+    during warmup avoids the excessive false-positive rate that occurs when the
+    model has seen very little historical behaviour and lacks robust baselines.
 
     Args:
         days: Training age in days (0 = no history yet).
 
     Returns:
-        Contamination fraction in the range 0.005–0.05.
+        Contamination fraction in the range 0.002–0.03.
     """
     if days < 7:
-        return 0.005
+        return 0.002  # ultra-conservative: ~0.2% anomaly rate
     if days < 14:
-        return 0.01
+        return 0.005  # very conservative: ~0.5%
     if days < 30:
-        return 0.015
+        return 0.01   # conservative: ~1%
     if days < 90:
-        return 0.02
-    return 0.03  # established — ~3% expected anomaly rate (was 5%, too aggressive)
+        return 0.015  # moderate: ~1.5%
+    return 0.02       # established: ~2% expected anomaly rate
 
 
 def contamination_tier_name(days: int) -> str:
@@ -1144,17 +1144,25 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 
     _max_w = _env_float("HABITUS_MAX_POWER_KW", 25.0) * 1000.0
     
-    # Read power entity from user_settings (run_state.json) first, fallback to env var
+    # Read power entity from user_settings (run_state.json) first, fallback to proxy, then env var
     _power_entity = ""
+    _power_proxy = ""
     try:
         _state = load_state() or {}
         _us = _state.get("user_settings", {})
         if _us.get("power_entity"):
             _power_entity = _us["power_entity"]
             log.debug("Using power_entity from user_settings: %s", _power_entity)
+        if _us.get("power_proxy"):
+            _power_proxy = _us["power_proxy"]
     except Exception:
         pass
-    if not _power_entity:
+    
+    # If primary power sensors have insufficient history, prefer proxy sensors (which may have years)
+    if not _power_entity and _power_proxy:
+        _power_entity = _power_proxy
+        log.info("No primary power_entity configured — using proxy sensors as primary: %s", _power_entity)
+    elif not _power_entity:
         _power_entity = os.environ.get("HABITUS_POWER_ENTITY", "").strip()
     
     _energy_grid = os.environ.get("HABITUS_ENERGY_GRID", "").strip()
