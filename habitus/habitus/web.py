@@ -4551,6 +4551,59 @@ def api_anomaly_feedback():
     )
     return jsonify({"ok": True, "entry": entry, "stats": get_feedback_stats()["stats"]})
 
+@app.route("/api/timeseries/stats")
+@app.route("/ingress/api/timeseries/stats")
+def api_timeseries_stats():
+    """Get local timeseries DB statistics."""
+    try:
+        from . import collector as _collector  # noqa: PLC0415
+        db = _collector.get_db()
+        stats = db.get_stats()
+        return jsonify(stats)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/timeseries/query", methods=["POST"])
+@app.route("/ingress/api/timeseries/query", methods=["POST"])
+def api_timeseries_query():
+    """Query local timeseries DB.
+    
+    POST body:
+    {
+        "entity_ids": ["sensor.inverter_l1_wattage", ...],
+        "start": "2026-03-19T00:00:00Z",
+        "end": "2026-03-20T00:00:00Z",
+        "resolution": "1h"  // raw, 1m, 1h, 1d
+    }
+    """
+    try:
+        from . import collector as _collector  # noqa: PLC0415
+        import datetime
+        
+        data = request.get_json() or {}
+        entity_ids = data.get("entity_ids", [])
+        start_str = data.get("start")
+        end_str = data.get("end")
+        resolution = data.get("resolution", "1h")
+        
+        if not entity_ids or not start_str or not end_str:
+            return jsonify({"error": "Missing entity_ids, start, or end"}), 400
+        
+        start_dt = datetime.datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+        end_dt = datetime.datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+        
+        db = _collector.get_db()
+        df = db.fetch_range(entity_ids, start_dt.timestamp(), end_dt.timestamp(), resolution)
+        
+        return jsonify({
+            "data": df.to_dict("records"),
+            "rows": len(df)
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/feedback_stats")
 @app.route("/ingress/api/feedback_stats")
 def api_feedback_stats():
@@ -4865,4 +4918,19 @@ def api_onboarding_complete():
 
 
 def start_web(port=8099):
+    # Start high-resolution data collector on startup
+    try:
+        from . import collector as _collector  # noqa: PLC0415
+        # Get configured sensors from environment or auto-detect
+        import os
+        power_entity = os.environ.get("HABITUS_POWER_ENTITY", "").strip()
+        power_entities = [e.strip() for e in power_entity.split(",") if e.strip()] if power_entity else []
+        
+        if power_entities:
+            # Start collector for power sensors (will expand to all sensors later)
+            _collector.start_collector(power_entities)
+            log.info(f"Started timeseries collector for {len(power_entities)} power sensors")
+    except Exception as e:
+        log.warning(f"Could not start collector: {e}")
+    
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
