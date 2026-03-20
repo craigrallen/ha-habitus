@@ -1143,7 +1143,20 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         return default
 
     _max_w = _env_float("HABITUS_MAX_POWER_KW", 25.0) * 1000.0
-    _power_entity = os.environ.get("HABITUS_POWER_ENTITY", "").strip()
+    
+    # Read power entity from user_settings (run_state.json) first, fallback to env var
+    _power_entity = ""
+    try:
+        _state = load_state() or {}
+        _us = _state.get("user_settings", {})
+        if _us.get("power_entity"):
+            _power_entity = _us["power_entity"]
+            log.debug("Using power_entity from user_settings: %s", _power_entity)
+    except Exception:
+        pass
+    if not _power_entity:
+        _power_entity = os.environ.get("HABITUS_POWER_ENTITY", "").strip()
+    
     _energy_grid = os.environ.get("HABITUS_ENERGY_GRID", "").strip()
     _energy_rates = [e.strip() for e in os.environ.get("HABITUS_ENERGY_RATES", "").split(",") if e.strip()]
 
