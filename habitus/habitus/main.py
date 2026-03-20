@@ -1250,12 +1250,19 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                     if _proxy_entities and len(_proxy_entities) >= 2:
                         try:
                             log.info(f"Attempting proxy backfill with {len(_proxy_entities)} sensors: {','.join(_proxy_entities[:3])}...")
-                            # Fetch proxy sensors from HA statistics (full training window, not just local DB range)
-                            # Expect: shore_power L1/L2/L3, battery_output, solar_production
+                            # Compute proxy time range from configured training window
+                            _state_proxy = load_state() or {}
+                            _us_proxy = _state_proxy.get("user_settings", {})
+                            _proxy_days = int(_us_proxy.get("days_history", os.environ.get("HABITUS_DAYS", "90")))
+                            _proxy_to = pd.Timestamp.now(tz="UTC")
+                            _proxy_from = _proxy_to - pd.Timedelta(days=_proxy_days)
+                            log.info(f"Proxy fetch range: {_proxy_from} → {_proxy_to} ({_proxy_days}d)")
+                            
+                            # Fetch proxy sensors from HA statistics (full training window)
                             proxy_stats = fetch_stats(
                                 _proxy_entities,
-                                data_from,
-                                data_to,
+                                _proxy_from.isoformat(),
+                                _proxy_to.isoformat(),
                                 db_path,
                                 filters={"operation": "mean"}
                             )
