@@ -1210,30 +1210,34 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                     
                     _phase_count = len(_power_entities)
                     
-                    # Merge into hours DataFrame
-                    # DEBUG: log time ranges
+                    # Restrict hours DataFrame to local DB time range for dense power coverage
+                    # This prevents power features from being diluted by behavioral-only hours
+                    local_start = local_total_power.index.min()
+                    local_end = local_total_power.index.max()
+                    
+                    # Filter hours to local DB range
+                    hours_in_range = (hours["hour"] >= local_start) & (hours["hour"] <= local_end)
+                    hours = hours[hours_in_range].copy()
+                    
                     log.info(
-                        f"Local DB time range: {local_total_power.index.min()} → {local_total_power.index.max()} "
-                        f"({len(local_total_power)} hours)"
+                        f"Local DB power range: {local_start} → {local_end} ({len(local_total_power)} hours)"
                     )
                     log.info(
-                        f"Hours DataFrame range: {hours['hour'].min()} → {hours['hour'].max()} "
-                        f"({len(hours)} rows)"
+                        f"Restricted training to: {hours['hour'].min()} → {hours['hour'].max()} ({len(hours)} hours)"
                     )
                     
+                    # Merge power data
                     hours = hours.merge(local_total_power, left_on="hour", right_index=True, how="left")
                     hours["total_power_w"] = hours["total_power_w"].fillna(0)
                     
-                    # Check how many rows got power data
+                    # Check coverage
                     _nonzero = (hours["total_power_w"] > 0).sum()
-                    log.info(f"After merge: {_nonzero}/{len(hours)} rows have power data ({_nonzero/len(hours)*100:.1f}%)")
+                    log.info(
+                        f"Local DB power: {_nonzero}/{len(hours)} hours with data ({_nonzero/len(hours)*100:.1f}%), "
+                        f"mean={local_total_power.mean():.0f}W, max={local_total_power.max():.0f}W"
+                    )
                     
                     _power_from_local_db = True
-                    log.info(
-                        f"Local DB power: {len(local_total_power)} hourly samples, "
-                        f"mean={local_total_power.mean():.0f}W, max={local_total_power.max():.0f}W, "
-                        f"coverage: {db_stats['coverage_days']:.1f} days"
-                    )
         except Exception as e:
             import traceback
             log.warning(f"Local DB power fetch failed: {e}\n{traceback.format_exc()}")
