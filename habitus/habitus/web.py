@@ -1086,7 +1086,11 @@ async function addYamlToHA(yaml, btn) {
 
   <!-- Your HA Automations -->
   <div class="sec" style="margin-top:12px">
-    <div class="sec-header"><h2>🤖 Your Automations</h2><span class="sec-sub">Existing automations from Home Assistant</span></div>
+    <div class="sec-header">
+      <h2>🤖 Your Automations</h2>
+      <span class="sec-sub">Existing automations from Home Assistant</span>
+      <button onclick="refreshHAAutomations()" class="btn" style="font-size:.75rem;padding:4px 10px;margin-left:auto">🔄 Refresh</button>
+    </div>
     <div id="ha-automations-list"><div class="skeleton skeleton-block"></div></div>
   </div>
 
@@ -1720,6 +1724,34 @@ async function addYamlToHA(yaml, btn) {
       st.style.color = r.ok ? 'var(--green)' : 'var(--red)';
     };
 
+    window.refreshHAAutomations = async function(){
+      const el = document.getElementById('ha-automations-list');
+      el.innerHTML = '<div class="skeleton skeleton-block"></div>';
+      try {
+        const d = await api('api/ha_automations/live');
+        // Store in global for rendering
+        window.haAutomations = d;
+        await load(); // Re-render with new data
+      } catch(e) {
+        el.innerHTML = '<div style="color:var(--red)">Error loading automations</div>';
+      }
+    };
+    
+    window.deleteHAAutomation = async function(entityId){
+      if (!confirm(`Delete automation ${entityId} from Home Assistant?\n\nThis cannot be undone.`)) return;
+      try {
+        const r = await apiPost('api/ha_automations/delete', {entity_id: entityId});
+        if (r.ok) {
+          alert('Automation deleted. Refreshing list...');
+          await refreshHAAutomations();
+        } else {
+          alert('Delete failed: ' + (r.error || 'Unknown error'));
+        }
+      } catch(e) {
+        alert('Error: ' + String(e));
+      }
+    };
+
     async function loadTestingMode(){
       try {
         const d = await api('api/settings');
@@ -2261,7 +2293,7 @@ async function load() {
     api('api/automation_gap').catch(()=>({})),
     api('api/scenes').catch(()=>({scenes:[]})),
     api('api/smart_suggestions').catch(()=>({suggestions:[]})),
-    api('api/ha_automations').catch(()=>({automations:[]})),
+    api('api/ha_automations/live').catch(()=>api('api/ha_automations')).catch(()=>({automations:[]})),
     api('api/scene_analysis').catch(()=>({suggestions:[]})),
   ]);
 
@@ -2665,18 +2697,46 @@ async function load() {
   haAutomationMap = buildAutomationMap(haAutos);
   renderSuggestions();
   if (haAutos.length) {
-    const enabled = haAutos.filter(a => a.current_state === 'on');
-    const disabled = haAutos.filter(a => a.current_state !== 'on');
-    let haHtml = `<div style="margin-bottom:10px;font-size:.82rem;color:var(--text2)">${haAutos.length} automations (${enabled.length} enabled, ${disabled.length} disabled)</div>`;
-    haHtml += enabled.slice(0, 20).map(a => {
-      const triggered = a.last_triggered ? new Date(a.last_triggered).toLocaleDateString() : 'never';
-      return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
-        <span class="badge b-ok" style="font-size:.68rem">on</span>
-        <div style="flex:1;font-weight:500;font-size:.82rem">${a.alias}</div>
-        <div style="font-size:.72rem;color:var(--text3)">Last: ${triggered}</div>
-        <button class="btn btn-danger" style="padding:2px 8px;font-size:.72rem" onclick="removeFromHA('${(a.entity_id||'').replace(/'/g, "\\'")}')">Remove</button>
-      </div>`;
-    }).join('');
+    const enabled = haAutos.filter(a => a.current_state === 'on' || a.enabled);
+    const disabled = haAutos.filter(a => a.current_state !== 'on' && !a.enabled);
+    const habitusAutos = haAutos.filter(a => a.is_habitus);
+    let haHtml = `<div style="margin-bottom:10px;font-size:.82rem;color:var(--text2)">${haAutos.length} automations (${enabled.length} enabled, ${disabled.length} disabled)`;
+    if (habitusAutos.length) haHtml += ` · <strong>${habitusAutos.length} from Habitus</strong>`;
+    haHtml += `</div>`;
+    
+    // Show Habitus automations first with highlighted delete button
+    if (habitusAutos.length) {
+      haHtml += `<div style="margin-bottom:12px;padding:8px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.3);border-radius:6px">`;
+      haHtml += `<div style="font-size:.78rem;font-weight:600;margin-bottom:6px;color:var(--accent)">🤖 Habitus Automations</div>`;
+      haHtml += habitusAutos.map(a => {
+        const st = a.enabled ? 'on' : 'off';
+        const badge = a.enabled ? '<span class="badge b-ok" style="font-size:.68rem">on</span>' : '<span class="badge b-muted" style="font-size:.68rem">off</span>';
+        const triggered = a.last_triggered ? new Date(a.last_triggered).toLocaleDateString() : 'never';
+        return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+          ${badge}
+          <div style="flex:1;font-size:.82rem">${a.alias}</div>
+          <div style="font-size:.72rem;color:var(--text3)">Last: ${triggered}</div>
+          <button class="btn btn-danger" style="padding:2px 8px;font-size:.72rem" onclick="deleteHAAutomation('${(a.entity_id||'').replace(/'/g, "\\'")}')">Delete</button>
+        </div>`;
+      }).join('');
+      haHtml += `</div>`;
+    }
+    
+    // Other automations
+    const others = haAutos.filter(a => !a.is_habitus);
+    if (others.length) {
+      haHtml += `<div style="font-size:.78rem;font-weight:600;margin-bottom:6px">Other Automations</div>`;
+      haHtml += others.slice(0, 20).map(a => {
+        const st = a.enabled || a.current_state === 'on';
+        const badge = st ? '<span class="badge b-ok" style="font-size:.68rem">on</span>' : '<span class="badge b-muted" style="font-size:.68rem">off</span>';
+        const triggered = a.last_triggered ? new Date(a.last_triggered).toLocaleDateString() : 'never';
+        return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)">
+          ${badge}
+          <div style="flex:1;font-size:.82rem">${a.alias}</div>
+          <div style="font-size:.72rem;color:var(--text3)">Last: ${triggered}</div>
+        </div>`;
+      }).join('');
+    }
     if (disabled.length) {
       haHtml += `<details style="margin-top:10px"><summary style="cursor:pointer;color:var(--text3);font-size:.82rem">Disabled automations (${disabled.length})</summary><div style="margin-top:6px">`;
       haHtml += disabled.map(a => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;opacity:.8">
@@ -4173,6 +4233,75 @@ def api_scene_analysis():
 def api_ha_automations():
     """Return cached HA automations."""
     return jsonify(_read(HA_AUTOMATIONS_PATH) or {"automations": [], "count": 0})
+
+
+@app.route("/api/ha_automations/live")
+@app.route("/ingress/api/ha_automations/live")
+def api_ha_automations_live():
+    """Fetch current automations from HA and cross-reference with Habitus suggestions."""
+    try:
+        token = os.environ.get("SUPERVISOR_TOKEN", "")
+        import urllib.request as _ur
+        # Get all automation entities
+        req = _ur.Request("http://supervisor/core/api/states", headers={"Authorization": f"Bearer {token}"})
+        with _ur.urlopen(req, timeout=10) as r:
+            states = json.loads(r.read())
+
+        automations = [s for s in states if s.get("entity_id", "").startswith("automation.")]
+
+        # Load Habitus suggestions
+        suggestions = _read(SUGGESTIONS_PATH) or []
+        if isinstance(suggestions, dict):
+            suggestions = suggestions.get("suggestions", [])
+
+        # Cross-reference: mark automations that match Habitus aliases
+        _habitus_aliases = {s.get("title", "").lower() for s in suggestions if s.get("title")}
+        _habitus_aliases.update({"habitus — solar surplus", "habitus — battery low", "habitus —"})
+
+        result = []
+        for auto in automations:
+            eid = auto.get("entity_id", "")
+            attrs = auto.get("attributes", {})
+            alias = attrs.get("friendly_name", "")
+            is_habitus = any(h in alias.lower() for h in _habitus_aliases)
+            result.append({
+                "entity_id": eid,
+                "alias": alias,
+                "enabled": auto.get("state") != "off",
+                "is_habitus": is_habitus,
+                "last_triggered": attrs.get("last_triggered"),
+            })
+
+        return jsonify({"automations": result, "count": len(result)})
+    except Exception as e:
+        return jsonify({"automations": [], "count": 0, "error": str(e)})
+
+
+@app.route("/api/ha_automations/delete", methods=["POST"])
+@app.route("/ingress/api/ha_automations/delete", methods=["POST"])
+def api_ha_automation_delete():
+    """Delete an automation from Home Assistant."""
+    data = request.get_json() or {}
+    entity_id = data.get("entity_id", "").strip()
+    if not entity_id.startswith("automation."):
+        return jsonify({"ok": False, "error": "Invalid entity_id"})
+
+    try:
+        token = os.environ.get("SUPERVISOR_TOKEN", "")
+        import urllib.request as _ur
+        # Call HA service to remove automation
+        payload = json.dumps({"entity_id": entity_id}).encode("utf-8")
+        req = _ur.Request(
+            "http://supervisor/core/api/services/automation/delete",
+            data=payload,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            method="POST"
+        )
+        with _ur.urlopen(req, timeout=10) as r:
+            resp = json.loads(r.read())
+        return jsonify({"ok": True, "entity_id": entity_id, "response": resp})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
 
 
 @app.route("/api/smart_suggestions")
