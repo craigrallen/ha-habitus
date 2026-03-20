@@ -4924,7 +4924,6 @@ def start_web(port=8099):
     try:
         from . import collector as _collector  # noqa: PLC0415
         # Get configured sensors from environment or auto-detect
-        import os
         power_entity = os.environ.get("HABITUS_POWER_ENTITY", "").strip()
         power_entities = [e.strip() for e in power_entity.split(",") if e.strip()] if power_entity else []
         
@@ -4932,7 +4931,11 @@ def start_web(port=8099):
             # Start collector for power sensors (will expand to all sensors later)
             _collector.start_collector(power_entities)
             log.info(f"Started timeseries collector for {len(power_entities)} power sensors")
+        else:
+            log.debug("No power entities configured — collector not started")
     except Exception as e:
+        import traceback
         log.warning(f"Could not start collector: {e}")
+        log.debug(traceback.format_exc())
     
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
