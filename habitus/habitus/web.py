@@ -5,6 +5,8 @@ import logging
 import os
 import re
 
+log = logging.getLogger("habitus")
+
 import yaml as _yaml  # type: ignore[import-untyped]
 from flask import Flask, jsonify, render_template_string, request
 
