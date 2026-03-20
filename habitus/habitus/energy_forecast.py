@@ -116,45 +116,83 @@ def _get_daily_energy_and_weather(days: int = 90) -> list[dict]:
             log.warning("energy_forecast: no energy entity found")
             return []
 
-        # Get energy readings
-        energy_rows = conn.execute("""
-            SELECT s.state, s.last_changed_ts FROM states s
-            JOIN states_meta sm ON s.metadata_id = sm.metadata_id
-            WHERE sm.entity_id = ? AND s.last_changed_ts > ?
-            ORDER BY s.last_changed_ts
-        """, (energy_eid, cutoff_ts)).fetchall()
+        # Get energy readings from statistics table (long-term hourly data)
+        # For energy sensors, use 'sum' which gives cumulative kWh
+        try:
+            energy_rows = conn.execute("""
+                SELECT st.sum, st.start_ts FROM statistics st
+                JOIN statistics_meta sm ON st.metadata_id = sm.metadata_id
+                WHERE sm.statistic_id = ? AND st.start_ts > ?
+                ORDER BY st.start_ts
+            """, (energy_eid, cutoff_ts)).fetchall()
+        except Exception as e:
+            # Fallback to states table if statistics not available
+            log.debug("statistics query failed, using states: %s", e)
+            energy_rows = conn.execute("""
+                SELECT s.state, s.last_changed_ts FROM states s
+                JOIN states_meta sm ON s.metadata_id = sm.metadata_id
+                WHERE sm.entity_id = ? AND s.last_changed_ts > ?
+                ORDER BY s.last_changed_ts
+            """, (energy_eid, cutoff_ts)).fetchall()
 
         # Get temperature readings
-        # weather.* entities store temp in attributes, not state
+        # Try statistics first (long-term), fallback to states
         temp_rows = []
         if temp_eid:
             if temp_eid.startswith("weather."):
-                # For weather entities, extract temperature from JSON attributes
+                # Weather entities: try statistics first, then states+attributes
                 try:
-                    _weather_rows = conn.execute("""
-                        SELECT sa.shared_attrs, s.last_changed_ts FROM states s
+                    _stats = conn.execute("""
+                        SELECT st.mean, st.start_ts FROM statistics st
+                        JOIN statistics_meta sm ON st.metadata_id = sm.metadata_id
+                        WHERE sm.statistic_id = ? AND st.start_ts > ?
+                        ORDER BY st.start_ts
+                    """, (temp_eid, cutoff_ts)).fetchall()
+                    if _stats:
+                        temp_rows = [(str(v), ts) for v, ts in _stats if v is not None]
+                except Exception:
+                    pass
+                # Fallback to states+attributes if no statistics
+                if not temp_rows:
+                    try:
+                        _weather_rows = conn.execute("""
+                            SELECT sa.shared_attrs, s.last_changed_ts FROM states s
+                            JOIN states_meta sm ON s.metadata_id = sm.metadata_id
+                            JOIN state_attributes sa ON s.attributes_id = sa.attributes_id
+                            WHERE sm.entity_id = ? AND s.last_changed_ts > ?
+                            ORDER BY s.last_changed_ts
+                        """, (temp_eid, cutoff_ts)).fetchall()
+                        for attrs_json, ts in _weather_rows:
+                            try:
+                                attrs = json.loads(attrs_json) if attrs_json else {}
+                                t = attrs.get("temperature")
+                                if t is not None:
+                                    temp_rows.append((str(t), ts))
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+                    except Exception as e:
+                        log.debug("weather entity attr query failed: %s", e)
+            else:
+                # Regular temp sensor: try statistics first
+                try:
+                    _stats = conn.execute("""
+                        SELECT st.mean, st.start_ts FROM statistics st
+                        JOIN statistics_meta sm ON st.metadata_id = sm.metadata_id
+                        WHERE sm.statistic_id = ? AND st.start_ts > ?
+                        ORDER BY st.start_ts
+                    """, (temp_eid, cutoff_ts)).fetchall()
+                    if _stats:
+                        temp_rows = [(str(v), ts) for v, ts in _stats if v is not None]
+                except Exception:
+                    pass
+                # Fallback to states if no statistics
+                if not temp_rows:
+                    temp_rows = conn.execute("""
+                        SELECT s.state, s.last_changed_ts FROM states s
                         JOIN states_meta sm ON s.metadata_id = sm.metadata_id
-                        JOIN state_attributes sa ON s.attributes_id = sa.attributes_id
                         WHERE sm.entity_id = ? AND s.last_changed_ts > ?
                         ORDER BY s.last_changed_ts
                     """, (temp_eid, cutoff_ts)).fetchall()
-                    for attrs_json, ts in _weather_rows:
-                        try:
-                            attrs = json.loads(attrs_json) if attrs_json else {}
-                            t = attrs.get("temperature")
-                            if t is not None:
-                                temp_rows.append((str(t), ts))
-                        except (json.JSONDecodeError, TypeError):
-                            pass
-                except Exception as e:
-                    log.debug("weather entity attr query failed: %s", e)
-            else:
-                temp_rows = conn.execute("""
-                    SELECT s.state, s.last_changed_ts FROM states s
-                    JOIN states_meta sm ON s.metadata_id = sm.metadata_id
-                    WHERE sm.entity_id = ? AND s.last_changed_ts > ?
-                    ORDER BY s.last_changed_ts
-                """, (temp_eid, cutoff_ts)).fetchall()
 
         conn.close()
     except Exception as e:
