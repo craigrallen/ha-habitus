@@ -3906,6 +3906,16 @@ def api_rescan():
     try:
         import glob as _glob  # noqa: PLC0415
 
+        # Preserve user settings before wiping state
+        user_settings = {}
+        if os.path.exists(STATE_PATH):
+            try:
+                with open(STATE_PATH) as f:
+                    state = json.load(f)
+                user_settings = state.get("user_settings", {})
+            except Exception:
+                pass
+
         for p in _glob.glob(os.path.join(DATA_DIR, "*.pkl")) + [
             STATE_PATH,
             BASELINE_PATH,
@@ -3914,6 +3924,14 @@ def api_rescan():
         ]:
             if os.path.exists(p):
                 os.remove(p)
+
+        # Restore user settings to state.json
+        if user_settings:
+            try:
+                with open(STATE_PATH, "w") as f:
+                    json.dump({"user_settings": user_settings}, f, default=str)
+            except Exception as e:
+                logging.getLogger("habitus").warning("Failed to restore user_settings after rescan: %s", e)
         days = int(os.environ.get("HABITUS_DAYS", "365"))
         # Use progressive training: 30d → 60d → 90d → 180d → max
         from habitus import progressive as _prog  # noqa: PLC0415

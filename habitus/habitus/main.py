@@ -78,6 +78,16 @@ def _env_int(name: str, default: int) -> int:
     return default
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    """Parse boolean from environment variable."""
+    raw = os.environ.get(name, "").strip().lower()
+    if raw in {"true", "1", "yes", "on"}:
+        return True
+    if raw in {"false", "0", "no", "off"}:
+        return False
+    return default
+
+
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 HA_WS_URL = (
     os.environ.get("HABITUS_HA_URL", "http://supervisor/core")
