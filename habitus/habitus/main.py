@@ -1152,7 +1152,18 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     _power_entities = [e.strip() for e in _power_entity.split(",") if e.strip()] if _power_entity else []
     # Power proxy sensors — used when primary sensors have insufficient history
     # e.g. shore_power + battery_output_w covers all operating modes
-    _power_proxy = os.environ.get("HABITUS_POWER_PROXY", "").strip()
+    # Read from state.json user_settings first (survives restarts), fallback to env
+    _power_proxy = ""
+    try:
+        _saved = load_state() or {}
+        _us = _saved.get("user_settings", {})
+        if _us.get("power_proxy"):
+            _power_proxy = _us["power_proxy"]
+            log.info("Loaded saved power proxy from settings: %s", _power_proxy)
+    except Exception:
+        pass
+    if not _power_proxy:
+        _power_proxy = os.environ.get("HABITUS_POWER_PROXY", "").strip()
     _proxy_entities = [e.strip() for e in _power_proxy.split(",") if e.strip()] if _power_proxy else []
     _phase_series: list[pd.Series] = []  # per-phase columns collected for later join
     _phase_count = 1
