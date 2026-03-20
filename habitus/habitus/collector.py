@@ -346,6 +346,8 @@ def get_db() -> TimeSeriesDB:
 
 def start_collector(entity_ids: list[str]) -> None:
     """Start WebSocket collector in background thread."""
+    import threading
+    
     global _collector
     
     ha_url = os.environ.get("HA_URL", "http://supervisor/core")
@@ -357,9 +359,20 @@ def start_collector(entity_ids: list[str]) -> None:
     
     _collector = HAWebSocketCollector(ha_url, ha_token, _db)
     
-    # Run in event loop (assumes web server already has asyncio running)
-    asyncio.create_task(_collector.connect_and_subscribe(entity_ids))
-    log.info(f"Started collector for {len(entity_ids)} entities")
+    # Run in background thread with its own event loop
+    def _run_collector():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(_collector.connect_and_subscribe(entity_ids))
+        except Exception as e:
+            log.error(f"Collector thread crashed: {e}")
+        finally:
+            loop.close()
+    
+    thread = threading.Thread(target=_run_collector, daemon=True, name="habitus-collector")
+    thread.start()
+    log.info(f"Started collector thread for {len(entity_ids)} entities")
 
 
 def stop_collector() -> None:
