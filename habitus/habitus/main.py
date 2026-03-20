@@ -1272,8 +1272,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                             
                             if not proxy_stats.empty and len(proxy_stats) > 100:
                                 # Calculate estimated power from proxy sensors
+                                # fetch_stats_sqlite returns 'mean' column, rename to 'v'
                                 proxy_stats["hour"] = pd.to_datetime(proxy_stats["ts"], utc=True).dt.floor("h")
-                                proxy_stats["v"] = pd.to_numeric(proxy_stats["v"], errors="coerce").clip(lower=0, upper=_max_w)
+                                proxy_stats["v"] = pd.to_numeric(proxy_stats["mean"], errors="coerce").clip(lower=0, upper=_max_w)
                                 
                                 # Sum all proxy sensors per hour (shore + battery + solar = total consumption estimate)
                                 proxy_power = proxy_stats.groupby("hour")["v"].sum().rename("proxy_power_w")
