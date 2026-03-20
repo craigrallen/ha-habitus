@@ -710,11 +710,30 @@ def generate_suggestions(
            (states('sensor.mastervolt_total_load') | float(0)) * 1.3 }}
       for:
         minutes: 15
+  condition:
+    # Only trigger when batteries are >90% SOC and have enough headroom to reach 100%
+    # even if we turn on extra loads (e.g. water heater, chargers)
+    - condition: numeric_state
+      entity_id: sensor.mastervolt_system_battery_soc
+      above: 90
+    - condition: template
+      value_template: >
+        {% set solar_w = states('sensor.total_solar_production') | float(0) %}
+        {% set load_w = states('sensor.mastervolt_total_load') | float(0) %}
+        {% set surplus_w = solar_w - load_w %}
+        {% set soc = states('sensor.mastervolt_system_battery_soc') | float(0) %}
+        {% set soc_remaining = 100 - soc %}
+        {# Battery capacity in Wh — adjust for your system (24V × 600Ah = 14400Wh) #}
+        {% set battery_capacity_wh = 14400 %}
+        {% set wh_to_full = (battery_capacity_wh * soc_remaining / 100) | round(0) %}
+        {# Ensure at least 1.5 hours of current surplus to fill remaining capacity #}
+        {% set headroom_hours = wh_to_full / surplus_w if surplus_w > 0 else 0 %}
+        {{ headroom_hours >= 1.5 }}
   action:
     - service: notify.notify
       data:
         title: "☀️ Solar Surplus"
-        message: "Solar is generating more than you're using — good time to run high-load appliances." """,
+        message: "Batteries >90% and solar exceeds load — good time to run high-load appliances (water heater, chargers, etc.)" """,
             }
         )
 
