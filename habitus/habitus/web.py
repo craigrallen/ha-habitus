@@ -1323,6 +1323,11 @@ async function addYamlToHA(yaml, btn) {
   <!-- Power Proxy Sensors -->
   <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>⚡ Power Proxy Sensors</h2></div>
+    <div style="background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3);border-radius:6px;padding:10px;margin-bottom:12px;font-size:.82rem">
+      <strong>How it works:</strong> Habitus reads main sensors first (inverter L1/L2/L3). For time periods with no data,
+      it falls back to proxy sensors. <strong>Result:</strong> recent data from main + historical data from proxy = complete timeline.
+      <br><strong style="color:var(--accent);margin-top:6px;display:block">⚠ After saving, click "Save & Retrain" in Power Source above to activate.</strong>
+    </div>
     <p style="color:var(--text3);font-size:.8rem;margin:0 0 8px">Optional fallback when primary sensors have no history. For boats: add shore power + battery discharge — their sum covers all operating modes.</p>
     <div id="power-proxy-rows" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px">
       <!-- Proxy rows injected by JS -->
@@ -1331,7 +1336,7 @@ async function addYamlToHA(yaml, btn) {
       <button class="btn" id="add-proxy-btn" onclick="addProxyRow()" style="font-size:.78rem">+ Add sensor</button>
       <button class="btn btn-accent" onclick="savePowerProxy()" style="white-space:nowrap">Save</button>
     </div>
-    <div id="power-proxy-status" style="font-size:.78rem;color:var(--text3)"></div>
+    <div id="power-proxy-status" style="font-size:.78rem;color:var(--text3)"><span id="proxy-count-msg"></span></div>
   </div>
 
   <!-- Energy vs Weather Sensors -->
@@ -1672,12 +1677,14 @@ async function addYamlToHA(yaml, btn) {
       const sels = document.querySelectorAll('.power-proxy-sel');
       const val = Array.from(sels).map(s=>s.value).filter(Boolean).join(',');
       const st = document.getElementById('power-proxy-status');
-      st.textContent = 'Saving…';
+      st.innerHTML = '<span style="color:var(--text3)">Saving…</span>';
       try {
         const r = await apiPost('api/settings', {power_proxy: val});
-        st.textContent = r.ok ? (val ? `Saved: ${val.split(',').length} sensor(s)` : 'Cleared') : (r.error || 'Error');
-        st.style.color = r.ok ? 'var(--green)' : 'var(--red)';
-      } catch(e) { st.textContent = String(e); }
+        const cnt = val ? val.split(',').length : 0;
+        st.innerHTML = r.ok
+          ? (val ? `<span style="color:var(--green)">✓ ${cnt} proxy sensor(s) configured</span> <span style="color:var(--amber)">→ Click "Save & Retrain" above to activate</span>` : '<span style="color:var(--text3)">Cleared</span>')
+          : `<span style="color:var(--red)">${r.error || 'Error'}</span>`;
+      } catch(e) { st.innerHTML = `<span style="color:var(--red)">${String(e)}</span>`; }
     };
 
     async function loadEnergyWeatherEntities(){
