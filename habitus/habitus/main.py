@@ -1258,19 +1258,12 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                             _proxy_from = _proxy_to - pd.Timedelta(days=_proxy_days)
                             log.info(f"Proxy fetch range: {_proxy_from} → {_proxy_to} ({_proxy_days}d)")
                             
-                            # Resolve HA recorder DB path for proxy fetch
-                            _proxy_db_path = _resolve_db_path()
-                            if not _proxy_db_path:
-                                log.warning("Proxy backfill skipped: HA recorder DB not found")
-                                raise ValueError("No recorder DB path")
-                            
                             # Fetch proxy sensors from HA statistics (full training window)
-                            proxy_stats = fetch_stats(
+                            # Uses fetch_stats_sqlite which resolves DB path internally
+                            proxy_stats = fetch_stats_sqlite(
                                 _proxy_entities,
                                 _proxy_from.isoformat(),
-                                _proxy_to.isoformat(),
-                                _proxy_db_path,
-                                filters={"operation": "mean"}
+                                _proxy_to.isoformat()
                             )
                             
                             log.info(f"Proxy stats fetched: {len(proxy_stats)} rows, columns: {list(proxy_stats.columns) if not proxy_stats.empty else 'empty'}")
