@@ -1168,26 +1168,33 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     _phase_series: list[pd.Series] = []  # per-phase columns collected for later join
     _phase_count = 1
     if _power_entities:
+        # Compute cutoff timestamp from the data range
+        _data_start_ts = df["ts"].min().timestamp() if not df.empty and hasattr(df["ts"].iloc[0], "timestamp") else 0
+        _now_ts = _t.time()
+        
         # PRIORITY 1: Try local timeseries DB (high-resolution, no gaps)
         local_power_df = None
         try:
             from . import collector as _collector  # noqa: PLC0415
             db = _collector.get_db()
-            stats = db.get_stats()
-            if stats["total_rows"] > 0:
+            db_stats = db.get_stats()
+            if db_stats["total_rows"] > 0:
                 # Local DB has data — use it
-                local_power_df = db.fetch_range(_power_entities, cutoff_ts, now.timestamp(), resolution="1h")
+                local_power_df = db.fetch_range(_power_entities, _data_start_ts, _now_ts, resolution="1h")
                 if not local_power_df.empty:
                     log.info(
                         f"Local DB: {len(local_power_df)} hourly rows for {len(_power_entities)} power sensors "
-                        f"(coverage: {stats['coverage_days']:.1f} days)"
+                        f"(coverage: {db_stats['coverage_days']:.1f} days)"
                     )
                     # Convert to format matching HA statistics
-                    local_power_df["hour"] = pd.to_datetime(local_power_df["timestamp"], unit="s", utc=True).dt.floor("h")
+                    local_power_df["ts"] = pd.to_datetime(local_power_df["timestamp"], unit="s", utc=True).dt.floor("h")
                     local_power_df = local_power_df.rename(columns={"value": "mean"})
+                    local_power_df["sum"] = None
                     # Replace power entity rows in df with local data
                     df = df[~df["entity_id"].isin(_power_entities)]
-                    df = pd.concat([df, local_power_df[["entity_id", "hour", "mean"]].rename(columns={"hour": "ts"})], ignore_index=True)
+                    df = pd.concat([df, local_power_df[["entity_id", "ts", "mean", "sum"]]], ignore_index=True)
+                    # Recompute hours index since we changed df
+                    df["hour"] = df["ts"].dt.floor("h")
         except Exception as e:
             log.debug(f"Local DB fetch failed (will try hybrid): {e}")
         
@@ -1197,11 +1204,12 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                 from .data_sources import fetch_hybrid  # noqa: PLC0415
                 db_path = _resolve_db_path()
                 if db_path:
-                    fetch_from_dt = datetime.datetime.fromtimestamp(cutoff_ts, tz=datetime.UTC)
+                    fetch_from_dt = datetime.datetime.fromtimestamp(_data_start_ts, tz=datetime.UTC)
+                    now_dt = datetime.datetime.now(datetime.UTC)
                     power_df, power_quality = fetch_hybrid(
                         _power_entities,
                         fetch_from_dt,
-                        now,
+                        now_dt,
                         db_path,
                         max_w=_max_w
                     )
@@ -1216,6 +1224,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                         df = df[~df["entity_id"].isin(_power_entities)]
                         power_df_for_merge = power_df[["entity_id", "hour", "mean", "sum"]].rename(columns={"hour": "ts"})
                         df = pd.concat([df, power_df_for_merge], ignore_index=True)
+                        df["hour"] = df["ts"].dt.floor("h")
             except Exception as e:
                 log.warning(f"Hybrid power fetch failed, falling back to HA statistics only: {e}")
         
