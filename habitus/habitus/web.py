@@ -4078,7 +4078,8 @@ def api_settings():
         if "days_history" in data:
             try:
                 days = int(data["days_history"])
-                if 7 <= days <= 3650:
+                # Allow 1-3650 days (was 7-3650, but local DB enables sub-week windows)
+                if 1 <= days <= 3650:
                     settings["days_history"] = days
                     os.environ["HABITUS_DAYS"] = str(days)
             except (ValueError, TypeError):
