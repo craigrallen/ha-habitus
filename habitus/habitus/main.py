@@ -2023,9 +2023,16 @@ async def run(days_history: int, mode: str = "full") -> None:
             log.info("Water meters: %s", energy["water"])
 
     # Persist resolved power/energy entities to state so UI and next run see them
+    # BUT: do not overwrite user_settings — only save auto-detected values if user hasn't configured
     _resolved_power = os.environ.get("HABITUS_POWER_ENTITY", "").strip()
     _resolved_grid = os.environ.get("HABITUS_ENERGY_GRID", "").strip()
-    if _resolved_power:
+    
+    # Check if user has explicitly configured power_entity in settings
+    _saved = load_state() or {}
+    _user_configured_power = _saved.get("user_settings", {}).get("power_entity")
+    
+    if _resolved_power and not _user_configured_power:
+        # Auto-detected power entity (no user override) — save to state
         state["power_entity"] = _resolved_power
         # Persist per-phase mapping when multiple sensors configured
         _resolved_power_entities = [e.strip() for e in _resolved_power.split(",") if e.strip()]
@@ -2037,11 +2044,26 @@ async def run(days_history: int, mode: str = "full") -> None:
         else:
             state.pop("power_phases", None)
             state["phase_count"] = 1
+    elif _user_configured_power:
+        # User has configured power_entity — preserve their choice
+        state["power_entity"] = _user_configured_power
+        _user_entities = [e.strip() for e in _user_configured_power.split(",") if e.strip()]
+        if len(_user_entities) > 1:
+            state["power_phases"] = {
+                f"L{i + 1}": eid for i, eid in enumerate(_user_entities)
+            }
+            state["phase_count"] = len(_user_entities)
+        else:
+            state.pop("power_phases", None)
+            state["phase_count"] = 1
+    
     if _resolved_grid:
         state["energy_grid_entity"] = _resolved_grid
-    if _resolved_power or _resolved_grid:
+    if _resolved_power or _resolved_grid or _user_configured_power:
         save_state(state)
-        log.info("Power entity persisted to state: power=%s grid=%s", _resolved_power or "—", _resolved_grid or "—")
+        log.info("Power entity persisted to state: power=%s grid=%s", 
+                 _user_configured_power or _resolved_power or "—", 
+                 _resolved_grid or "—")
 
     stat_ids, total_stat_ids = await get_stat_ids()
     behavioral_entity_ids = await get_behavioral_entity_ids()
