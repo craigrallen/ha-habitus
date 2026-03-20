@@ -356,6 +356,8 @@ def score_activity_anomalies(current_states: dict[str, float] | None = None) -> 
     # Derive current activity features from live states
     current = _derive_current_features(current_states)
 
+    day_name = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][now.weekday()]
+
     anomalies = []
     for feat, stats in slot.items():
         if stats["std"] < 0.01:
@@ -366,7 +368,6 @@ def score_activity_anomalies(current_states: dict[str, float] | None = None) -> 
             continue
 
         direction = "high" if val > stats["mean"] else "low"
-        day_name = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][now.weekday()]
 
         anomalies.append(
             {
