@@ -1222,7 +1222,8 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                         f"coverage: {db_stats['coverage_days']:.1f} days"
                     )
         except Exception as e:
-            log.debug(f"Local DB power fetch failed: {e}")
+            import traceback
+            log.warning(f"Local DB power fetch failed: {e}\n{traceback.format_exc()}")
         
         # Sum across all specified phases / sensors
         # Skip if we already built power features from local DB
