@@ -97,7 +97,9 @@ DAILY_DIGEST_HOUR = _env_int("HABITUS_DAILY_DIGEST_HOUR", 8)
 MIN_SCORING_DAYS = _env_int("HABITUS_MIN_SCORING_DAYS", 7)
 # Hard safety guard for very large history pulls (prevents web process OOM).
 # Set <=0 to disable (not recommended).
-FETCH_ROW_BUDGET = _env_int("HABITUS_FETCH_ROW_BUDGET", 1000000)
+FETCH_ROW_BUDGET = _env_int("HABITUS_FETCH_ROW_BUDGET", 1_000_000)
+# When row count exceeds budget, sample every Nth row to fit under budget
+ENABLE_SMART_SAMPLING = _env_bool("HABITUS_SMART_SAMPLING", True)
 FETCH_MIN_WINDOW_DAYS = _env_int("HABITUS_FETCH_MIN_WINDOW_DAYS", 7)
 FETCH_WARN_MS = _env_int("HABITUS_FETCH_WARN_MS", 15000)
 BUILD_FEATURES_WARN_MS = _env_int("HABITUS_BUILD_FEATURES_WARN_MS", 5000)
