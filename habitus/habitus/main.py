@@ -1167,83 +1167,67 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     _proxy_entities = [e.strip() for e in _power_proxy.split(",") if e.strip()] if _power_proxy else []
     _phase_series: list[pd.Series] = []  # per-phase columns collected for later join
     _phase_count = 1
+    _power_from_local_db = False
     if _power_entities:
-        # Compute cutoff timestamp from the data range
-        _data_start_ts = df["ts"].min().timestamp() if not df.empty and hasattr(df["ts"].iloc[0], "timestamp") else 0
-        _now_ts = _t.time()
-        
-        # PRIORITY 1: Try local timeseries DB (high-resolution, no gaps)
-        local_power_df = None
+        # Try to build power features directly from local timeseries DB
+        # This bypasses the >95% zeros check because we build the feature
+        # independently and merge by hour — no dilution from 3 years of empty rows
         try:
             from . import collector as _collector  # noqa: PLC0415
             db = _collector.get_db()
             db_stats = db.get_stats()
-            if db_stats["total_rows"] > 0:
-                # Local DB has data — use it
-                local_power_df = db.fetch_range(_power_entities, _data_start_ts, _now_ts, resolution="1h")
-                if not local_power_df.empty:
+            if db_stats["total_rows"] > 100:
+                # Fetch all hourly data from local DB
+                _now_ts = _t.time()
+                _oldest_ts = db_stats.get("oldest_ts", _now_ts - 86400)
+                local_df = db.fetch_range(_power_entities, _oldest_ts, _now_ts, resolution="1h")
+                
+                if not local_df.empty and len(local_df) > 10:
+                    # Build total_power_w directly from local DB
+                    local_df["hour"] = pd.to_datetime(local_df["timestamp"], unit="s", utc=True).dt.floor("h")
+                    local_df["v"] = pd.to_numeric(local_df["value"], errors="coerce").clip(lower=0, upper=_max_w)
+                    local_total_power = local_df.groupby("hour")["v"].sum().rename("total_power_w")
+                    
+                    # Build per-phase series from local DB
+                    for _ph_i, _ph_eid in enumerate(_power_entities):
+                        _ph_data = local_df[local_df["entity_id"] == _ph_eid]
+                        if not _ph_data.empty:
+                            _ph_series = _ph_data.groupby("hour")["v"].mean().rename(f"phase_L{_ph_i + 1}_w")
+                            _phase_series.append(_ph_series)
+                    
+                    _phase_count = len(_power_entities)
+                    
+                    # Merge into hours DataFrame
+                    hours = hours.merge(local_total_power, left_on="hour", right_index=True, how="left")
+                    hours["total_power_w"] = hours["total_power_w"].fillna(0)
+                    
+                    _power_from_local_db = True
                     log.info(
-                        f"Local DB: {len(local_power_df)} hourly rows for {len(_power_entities)} power sensors "
-                        f"(coverage: {db_stats['coverage_days']:.1f} days)"
+                        f"Local DB power: {len(local_total_power)} hourly samples, "
+                        f"mean={local_total_power.mean():.0f}W, max={local_total_power.max():.0f}W, "
+                        f"coverage: {db_stats['coverage_days']:.1f} days"
                     )
-                    # Convert to format matching HA statistics
-                    local_power_df["ts"] = pd.to_datetime(local_power_df["timestamp"], unit="s", utc=True).dt.floor("h")
-                    local_power_df = local_power_df.rename(columns={"value": "mean"})
-                    local_power_df["sum"] = None
-                    # Replace power entity rows in df with local data
-                    df = df[~df["entity_id"].isin(_power_entities)]
-                    df = pd.concat([df, local_power_df[["entity_id", "ts", "mean", "sum"]]], ignore_index=True)
-                    # Recompute hours index since we changed df
-                    df["hour"] = df["ts"].dt.floor("h")
         except Exception as e:
-            log.debug(f"Local DB fetch failed (will try hybrid): {e}")
-        
-        # PRIORITY 2: Hybrid fetch (HA statistics + states) if local DB empty/failed
-        if local_power_df is None or local_power_df.empty:
-            try:
-                from .data_sources import fetch_hybrid  # noqa: PLC0415
-                db_path = _resolve_db_path()
-                if db_path:
-                    fetch_from_dt = datetime.datetime.fromtimestamp(_data_start_ts, tz=datetime.UTC)
-                    now_dt = datetime.datetime.now(datetime.UTC)
-                    power_df, power_quality = fetch_hybrid(
-                        _power_entities,
-                        fetch_from_dt,
-                        now_dt,
-                        db_path,
-                        max_w=_max_w
-                    )
-                    if not power_df.empty:
-                        # Merge hybrid power data into main df
-                        power_df["hour"] = power_df["ts"].dt.floor("h")
-                        log.info(
-                            f"Hybrid HA fetch: {len(power_df)} rows for {len(_power_entities)} sensors "
-                            f"(quality: {power_quality})"
-                        )
-                        # Replace power entity rows in df with hybrid data
-                        df = df[~df["entity_id"].isin(_power_entities)]
-                        power_df_for_merge = power_df[["entity_id", "hour", "mean", "sum"]].rename(columns={"hour": "ts"})
-                        df = pd.concat([df, power_df_for_merge], ignore_index=True)
-                        df["hour"] = df["ts"].dt.floor("h")
-            except Exception as e:
-                log.warning(f"Hybrid power fetch failed, falling back to HA statistics only: {e}")
+            log.debug(f"Local DB power fetch failed: {e}")
         
         # Sum across all specified phases / sensors
-        power = df[df["entity_id"].isin(_power_entities)].copy()
-        power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(lower=0, upper=_max_w)
-        total_power = power.groupby("hour")["v"].sum().rename("total_power_w")
-        if len(_power_entities) > 1:
-            log.info("Multi-phase power: summing %d sensors → total_power_w", len(_power_entities))
-            # Build individual per-phase columns alongside the summed total
-            for _ph_i, _ph_eid in enumerate(_power_entities):
-                _ph_df = df[df["entity_id"] == _ph_eid].copy()
-                _ph_df["v"] = pd.to_numeric(_ph_df["mean"], errors="coerce").clip(
-                    lower=0, upper=_max_w
-                )
-                _ph_col = f"power_l{_ph_i + 1}_w"
-                _ph_series = _ph_df.groupby("hour")["v"].max().rename(_ph_col)
-                _phase_series.append(_ph_series)
-            _phase_count = len(_power_entities)
+        # Skip if we already built power features from local DB
+        if not _power_from_local_db:
+            power = df[df["entity_id"].isin(_power_entities)].copy()
+            power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(lower=0, upper=_max_w)
+            total_power = power.groupby("hour")["v"].sum().rename("total_power_w")
+            if len(_power_entities) > 1:
+                log.info("Multi-phase power: summing %d sensors → total_power_w", len(_power_entities))
+                # Build individual per-phase columns alongside the summed total
+                for _ph_i, _ph_eid in enumerate(_power_entities):
+                    _ph_df = df[df["entity_id"] == _ph_eid].copy()
+                    _ph_df["v"] = pd.to_numeric(_ph_df["mean"], errors="coerce").clip(
+                        lower=0, upper=_max_w
+                    )
+                    _ph_col = f"power_l{_ph_i + 1}_w"
+                    _ph_series = _ph_df.groupby("hour")["v"].max().rename(_ph_col)
+                    _phase_series.append(_ph_series)
+                _phase_count = len(_power_entities)
     elif _energy_grid:
         # Grid kWh entity from HA Energy Dashboard — convert hourly delta to W
         grid = df[df["entity_id"] == _energy_grid].copy()
@@ -1272,7 +1256,11 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     avg_temp = temp.groupby("hour")["v"].mean().rename("avg_temp_c")
     activity = df.groupby("hour").size().rename("sensor_changes")
     features = hours.set_index("hour")
-    for s in [total_power, avg_temp, activity, grid_kwh_w]:
+    # Join power features only if not already added from local DB
+    _join_series = [avg_temp, activity, grid_kwh_w]
+    if not _power_from_local_db:
+        _join_series.insert(0, total_power)
+    for s in _join_series:
         features = features.join(s, how="left")
     # Per-phase power columns (only when multi-phase sensors configured)
     for _ph_s in _phase_series:
