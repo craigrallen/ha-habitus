@@ -2496,8 +2496,15 @@ async def run(days_history: int, mode: str = "full") -> None:
 
         log.info("Scoring automation effectiveness...")
         try:
-            auto_scores = await automation_score.score_all(HA_URL, HA_TOKEN)
+            # Timeout after 20 seconds to prevent add-on restart
+            auto_scores = await asyncio.wait_for(
+                automation_score.score_all(HA_URL, HA_TOKEN),
+                timeout=20.0
+            )
             automation_score.save(auto_scores)
+        except TimeoutError:
+            log.warning("Automation scoring timed out after 20s — skipping to allow training to complete")
+            auto_scores = []
         except Exception as e:
             log.warning("Automation scoring failed: %s", e)
             auto_scores = []
