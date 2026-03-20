@@ -2913,17 +2913,21 @@ async function load() {
   Promise.all([
     api('api/nilm').catch(()=>({breakdown:[]})),
     api('api/state').catch(()=>({})),
-  ]).then(([n, st]) => {
-    // Per-phase summary panel
+    api('api/phase_current_readings').catch(()=>({})),
+  ]).then(([n, st, phaseReadings]) => {
+    // Per-phase summary panel — fetch LIVE sensor values, not NILM data
     const phaseSec = document.getElementById('phase-summary-section');
     if (st.power_phases && Object.keys(st.power_phases).length > 1) {
-      const phaseW = (n.phase_current_w) || {};
       const phaseKeys = Object.keys(st.power_phases).sort();
-      const total = n.current_total_w || 0;
+      const phaseW = phaseReadings.phases || {};
+      const total = phaseReadings.total || 0;
       phaseSec.style.display = '';
       document.getElementById('phase-summary-body').innerHTML =
-        phaseKeys.map(ph => `<div class="card" style="padding:8px 14px;text-align:center"><div style="font-size:.72rem;color:var(--text3)">${ph}</div><div style="font-size:1.1rem;font-weight:700">${phaseW[ph]||0}W</div></div>`).join('') +
-        `<div class="card" style="padding:8px 14px;text-align:center"><div style="font-size:.72rem;color:var(--text3)">Total</div><div style="font-size:1.1rem;font-weight:700">${total}W</div></div>`;
+        phaseKeys.map(ph => {
+          const w = phaseW[ph] !== undefined ? Math.round(phaseW[ph]) : 0;
+          return `<div class="card" style="padding:8px 14px;text-align:center"><div style="font-size:.72rem;color:var(--text3)">${ph}</div><div style="font-size:1.1rem;font-weight:700">${w}W</div></div>`;
+        }).join('') +
+        `<div class="card" style="padding:8px 14px;text-align:center"><div style="font-size:.72rem;color:var(--text3)">Total</div><div style="font-size:1.1rem;font-weight:700">${Math.round(total)}W</div></div>`;
     } else {
       phaseSec.style.display = 'none';
     }
@@ -4302,6 +4306,40 @@ def api_ha_automation_delete():
         return jsonify({"ok": True, "entity_id": entity_id, "response": resp})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/phase_current_readings")
+@app.route("/ingress/api/phase_current_readings")
+def api_phase_current_readings():
+    """Fetch current live readings from phase power sensors."""
+    try:
+        state = _read(STATE_PATH) or {}
+        power_phases = state.get("power_phases", {})
+        if not power_phases:
+            return jsonify({"phases": {}, "total": 0})
+
+        token = os.environ.get("SUPERVISOR_TOKEN", "")
+        import urllib.request as _ur
+        req = _ur.Request("http://supervisor/core/api/states", headers={"Authorization": f"Bearer {token}"})
+        with _ur.urlopen(req, timeout=8) as r:
+            states = json.loads(r.read())
+
+        # Build entity_id -> current state map
+        state_map = {s.get("entity_id"): s.get("state") for s in states}
+
+        phases = {}
+        total = 0.0
+        for phase_name, entity_id in power_phases.items():
+            try:
+                val = float(state_map.get(entity_id, 0))
+                phases[phase_name] = val
+                total += val
+            except (ValueError, TypeError):
+                phases[phase_name] = 0
+
+        return jsonify({"phases": phases, "total": total})
+    except Exception as e:
+        return jsonify({"phases": {}, "total": 0, "error": str(e)})
 
 
 @app.route("/api/smart_suggestions")
