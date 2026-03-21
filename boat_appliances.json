@@ -37,13 +37,13 @@
       "notes": "Ventilation system, runs 24/7"
     },
     {
-      "name": "4 Ring Induction Hob",
+      "name": "Siemens EX675FEC1E Induction Hob",
       "category": "Kitchen",
-      "typical_watt": 3000,
-      "watt_range": [500, 7200],
+      "typical_watt": 3500,
+      "watt_range": [200, 7400],
       "runtime_pattern": "variable",
       "phase_hint": "L2/L3",
-      "notes": "High power, 1-4 rings, variable power per ring"
+      "notes": "7.4kW max, 4 zones (1.4/1.8/1.4/1.8kW), PowerBoost up to 3.1kW per zone, 17 power levels, instant response"
     },
     {
       "name": "Microwave 900W",
