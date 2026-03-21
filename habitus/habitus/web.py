@@ -2361,9 +2361,14 @@ async function loadAnomalies() {
     api('api/anomaly_patterns').catch(()=>({patterns:[],recurring_entities:[]})),
   ]);
   
-  const score = state.anomaly_score ?? 0;
+  let score = state.anomaly_score ?? 0;
   const ents = (anomalies.entities || []).filter(a => !dismissedAnomalies.has(anomalyKey(a)));
   const lastCheck = state.last_run ? new Date(state.last_run).toLocaleString() : 'Never';
+  
+  // If all anomalies were dismissed, reset score to 0
+  if (ents.length === 0 && (anomalies.entities || []).length > 0) {
+    score = 0;
+  }
   
   // Status card
   const statusIcon = score >= 70 ? '🚨' : score >= 40 ? '⚠️' : '✅';
