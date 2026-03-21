@@ -1,13 +1,13 @@
 {
   "boat_appliances": [
     {
-      "name": "Heat Pump",
+      "name": "Fujitsu ASYB12LDC Heat Pump",
       "category": "HVAC",
-      "typical_watt": 1500,
-      "watt_range": [800, 2500],
+      "typical_watt": 1100,
+      "watt_range": [300, 1600],
       "runtime_pattern": "long_cycle",
       "phase_hint": "L1",
-      "notes": "Main heating/cooling system"
+      "notes": "Cooling: 3.5kW @ 910W input, Heating: 4.8kW @ 1220W input, max 10A (2300W), inverter-driven variable speed compressor"
     },
     {
       "name": "Washer/Dryer",
