@@ -109,22 +109,22 @@
       "notes": "Standby ~5W, active 80-200W"
     },
     {
-      "name": "Fan Heater 1",
+      "name": "Electric Heater 1 (Split Phase)",
       "category": "HVAC",
-      "typical_watt": 2000,
-      "watt_range": [1000, 2000],
+      "typical_watt": 1000,
+      "watt_range": [500, 1000],
       "runtime_pattern": "cycling",
       "phase_hint": "L1/L2",
-      "notes": "1000W or 2000W settings"
+      "notes": "1kW split-phase electric heater"
     },
     {
-      "name": "Fan Heater 2",
+      "name": "Electric Heater 2 (Split Phase)",
       "category": "HVAC",
-      "typical_watt": 2000,
-      "watt_range": [1000, 2000],
+      "typical_watt": 1000,
+      "watt_range": [500, 1000],
       "runtime_pattern": "cycling",
       "phase_hint": "L1/L2",
-      "notes": "1000W or 2000W settings"
+      "notes": "1kW split-phase electric heater"
     },
     {
       "name": "Dehumidifier 1",
