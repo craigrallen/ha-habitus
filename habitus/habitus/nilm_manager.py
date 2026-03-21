@@ -23,19 +23,39 @@ def get_appliance_library() -> dict:
     
     # Fall back to boat_appliances.json from repo
     boat_lib_path = os.path.join(os.path.dirname(__file__), "..", "..", "boat_appliances.json")
+    ref_lib_path = os.path.join(os.path.dirname(__file__), "..", "..", "reference_appliances.json")
+    
+    appliances = []
+    
+    # Load boat-specific appliances (highest priority)
     if os.path.exists(boat_lib_path):
         try:
             with open(boat_lib_path) as f:
                 data = json.load(f)
-                # Convert boat_appliances format to library format
-                return {
-                    "appliances": data.get("boat_appliances", []),
-                    "metadata": data.get("metadata", {})
-                }
+                boat_apps = data.get("boat_appliances", [])
+                for app in boat_apps:
+                    app["source"] = "boat_specific"
+                appliances.extend(boat_apps)
         except Exception as e:
             log.warning(f"Failed to load boat appliances library: {e}")
     
-    return {"appliances": []}
+    # Load reference library (PLAID + UK-DALE)
+    if os.path.exists(ref_lib_path):
+        try:
+            with open(ref_lib_path) as f:
+                data = json.load(f)
+                appliances.extend(data.get("appliances", []))
+        except Exception as e:
+            log.warning(f"Failed to load reference appliances library: {e}")
+    
+    return {
+        "appliances": appliances,
+        "metadata": {
+            "total_appliances": len(appliances),
+            "boat_specific": sum(1 for a in appliances if a.get("source") == "boat_specific"),
+            "reference": sum(1 for a in appliances if a.get("source") in ["PLAID", "UK-DALE"]),
+        }
+    }
 
 
 def save_appliance_library(library: dict) -> None:
@@ -178,21 +198,30 @@ def suggest_appliance_matches(wattage: float, runtime_min: float = None) -> list
             # Calculate match score (0-100)
             typical_watt = app.get("typical_watt", wattage)
             watt_diff = abs(wattage - typical_watt)
-            watt_score = max(0, 100 - (watt_diff / typical_watt * 100))
+            if typical_watt > 0:
+                watt_score = max(0, 100 - (watt_diff / typical_watt * 100))
+            else:
+                watt_score = 0
+            
+            # Boost score for boat-specific devices
+            source_bonus = 0
+            if app.get("source") == "boat_specific":
+                source_bonus = 20
             
             matches.append({
                 "name": app.get("name"),
                 "category": app.get("category"),
                 "typical_watt": typical_watt,
                 "watt_range": watt_range,
-                "match_score": round(watt_score, 1),
+                "match_score": round(min(100, watt_score + source_bonus), 1),
                 "phase_hint": app.get("phase_hint"),
                 "notes": app.get("notes", ""),
+                "source": app.get("source", ""),
             })
     
-    # Sort by match score
+    # Sort by match score (boat-specific devices boosted)
     matches.sort(key=lambda x: x["match_score"], reverse=True)
-    return matches[:5]  # Top 5 matches
+    return matches[:10]  # Top 10 matches
 
 
 def get_appliance_details(slot_name: str, nilm_data: dict) -> dict:
