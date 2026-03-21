@@ -2368,20 +2368,40 @@ async function loadAnomalies() {
   // Recalculate score based on active (non-dismissed) anomalies
   let score = 0;
   if (ents.length > 0) {
-    // Use top 3 anomalies by z-score to calculate score (same logic as backend)
-    const top3 = ents.slice(0, 3).sort((a, b) => (b.z_score || 0) - (a.z_score || 0));
-    score = Math.min(100, Math.round(top3.reduce((sum, a) => sum + (a.z_score || 0) * 20, 0) / Math.max(top3.length, 1)));
+    // Use worst anomaly z-score with proper scaling
+    // 0-1.5σ → 0-30 (normal variance)
+    // 1.5-3σ → 30-60 (elevated)
+    // 3-5σ → 60-80 (anomaly)
+    // 5-10σ → 80-95 (critical)
+    // >10σ → 95-100 (extreme)
+    const maxZ = Math.max(...ents.map(a => a.z_score || 0));
+    if (maxZ < 1.5) {
+      score = Math.round(maxZ / 1.5 * 30);
+    } else if (maxZ < 3) {
+      score = 30 + Math.round((maxZ - 1.5) / 1.5 * 30);
+    } else if (maxZ < 5) {
+      score = 60 + Math.round((maxZ - 3) / 2 * 20);
+    } else if (maxZ < 10) {
+      score = 80 + Math.round((maxZ - 5) / 5 * 15);
+    } else {
+      score = 95 + Math.min(5, Math.round((maxZ - 10) / 20 * 5));
+    }
   }
   
-  // Status card
-  const statusIcon = score >= 70 ? '🚨' : score >= 40 ? '⚠️' : '✅';
-  const statusText = score >= 70 ? 'Anomaly Detected' : score >= 40 ? 'Elevated Activity' : 'All Normal';
-  const statusDetail = score >= 70 
+  // Status card with nuanced tiers
+  const statusIcon = score >= 95 ? '🔥' : score >= 80 ? '🚨' : score >= 60 ? '⚠️' : score >= 30 ? '📊' : '✅';
+  const statusText = score >= 95 ? 'Extreme Anomaly' : score >= 80 ? 'Critical' : score >= 60 ? 'Anomaly Detected' : score >= 30 ? 'Elevated' : 'All Normal';
+  const statusDetail = score >= 95
+    ? `Extreme deviation detected — immediate action required`
+    : score >= 80
+    ? `${ents.length} ${ents.length === 1 ? 'entity shows' : 'entities show'} critical deviation`
+    : score >= 60 
     ? `${ents.length} entities showing unusual behavior`
-    : score >= 40
-    ? `Some activity outside normal patterns`
+    ? `${ents.length} ${ents.length === 1 ? 'entity shows' : 'entities show'} unusual behavior`
+    : score >= 30
+    ? `${ents.length} ${ents.length === 1 ? 'entity shows' : 'entities show'} elevated activity`
     : 'All sensors within expected ranges';
-  const statusColor = score >= 70 ? 'var(--red)' : score >= 40 ? 'var(--amber)' : 'var(--green)';
+  const statusColor = score >= 95 ? '#ff0000' : score >= 80 ? 'var(--red)' : score >= 60 ? '#ff8c00' : score >= 30 ? 'var(--amber)' : 'var(--green)';
   
   document.getElementById('anom-status-icon').textContent = statusIcon;
   document.getElementById('anom-status-text').textContent = statusText;
@@ -2650,7 +2670,9 @@ async function load() {
           <div class="anom-sub">${e.current_value}${e.unit} vs ${e.baseline_mean}${e.unit} expected</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
-          <div class="anom-score" style="color:${e.z_score>=3?'var(--red)':e.z_score>=1.5?'var(--amber)':'var(--green)'}">${e.z_score}σ</div>
+          <div class="anom-score" style="color:${e.z_score>=10?'#ff0000':e.z_score>=5?'var(--red)':e.z_score>=3?'#ff8c00':e.z_score>=1.5?'var(--amber)':'var(--green)'}">
+            ${e.z_score>=10?'🔥 ':e.z_score>=5?'🚨 ':e.z_score>=3?'⚠️ ':''}${e.z_score.toFixed(1)}σ
+          </div>
           <button class="btn" style="padding:3px 8px;font-size:.72rem" onclick="dismissAnomaly('${(e.id || e.entity_id || e.name || '').replace(/'/g, "\\'")}', '${(e.entity_id || e.name || '').replace(/'/g, "\\'")}', ${e.z_score || 0})">Dismiss</button>
         </div>
       </div>`).join('')
