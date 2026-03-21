@@ -4797,6 +4797,34 @@ def api_nilm_override():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
 
+
+@app.route("/api/nilm/library")
+@app.route("/ingress/api/nilm/library")
+def api_nilm_library():
+    """Get appliance library (known device signatures)."""
+    try:
+        from .nilm_manager import get_appliance_library
+        return jsonify(get_appliance_library())
+    except Exception as e:
+        return jsonify({"appliances": [], "error": str(e)})
+
+
+@app.route("/api/nilm/suggest_match")
+@app.route("/ingress/api/nilm/suggest_match")
+def api_nilm_suggest_match():
+    """Suggest appliance matches from library based on wattage."""
+    try:
+        from .nilm_manager import suggest_appliance_matches
+        wattage = float(request.args.get("wattage", 0))
+        runtime_min = request.args.get("runtime_min")
+        if runtime_min:
+            runtime_min = float(runtime_min)
+        
+        matches = suggest_appliance_matches(wattage, runtime_min)
+        return jsonify({"matches": matches})
+    except Exception as e:
+        return jsonify({"matches": [], "error": str(e)})
+
 @app.route("/api/nilm/run", methods=["POST"])
 @app.route("/ingress/api/nilm/run", methods=["POST"])
 def api_nilm_run():

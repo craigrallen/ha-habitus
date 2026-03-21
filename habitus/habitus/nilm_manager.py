@@ -13,15 +13,29 @@ OVERRIDES_PATH = os.path.join(DATA_DIR, "nilm_overrides.json")
 
 def get_appliance_library() -> dict:
     """Load user's appliance library (known device signatures)."""
-    if not os.path.exists(LIBRARY_PATH):
-        return {"appliances": []}
+    # Try user library first
+    if os.path.exists(LIBRARY_PATH):
+        try:
+            with open(LIBRARY_PATH) as f:
+                return json.load(f)
+        except Exception as e:
+            log.warning(f"Failed to load appliance library: {e}")
     
-    try:
-        with open(LIBRARY_PATH) as f:
-            return json.load(f)
-    except Exception as e:
-        log.warning(f"Failed to load appliance library: {e}")
-        return {"appliances": []}
+    # Fall back to boat_appliances.json from repo
+    boat_lib_path = os.path.join(os.path.dirname(__file__), "..", "..", "boat_appliances.json")
+    if os.path.exists(boat_lib_path):
+        try:
+            with open(boat_lib_path) as f:
+                data = json.load(f)
+                # Convert boat_appliances format to library format
+                return {
+                    "appliances": data.get("boat_appliances", []),
+                    "metadata": data.get("metadata", {})
+                }
+        except Exception as e:
+            log.warning(f"Failed to load boat appliances library: {e}")
+    
+    return {"appliances": []}
 
 
 def save_appliance_library(library: dict) -> None:
@@ -142,6 +156,43 @@ def apply_overrides(nilm_data: dict) -> dict:
     
     nilm_data["discovered_appliances"] = appliances
     return nilm_data
+
+
+def suggest_appliance_matches(wattage: float, runtime_min: float = None) -> list:
+    """Suggest appliance matches from library based on wattage and runtime.
+    
+    Args:
+        wattage: Average wattage of discovered appliance.
+        runtime_min: Average runtime in minutes (optional).
+    
+    Returns:
+        List of matching appliances from library, sorted by likelihood.
+    """
+    library = get_appliance_library()
+    appliances = library.get("appliances", [])
+    
+    matches = []
+    for app in appliances:
+        watt_range = app.get("watt_range", [0, 9999])
+        if watt_range[0] <= wattage <= watt_range[1]:
+            # Calculate match score (0-100)
+            typical_watt = app.get("typical_watt", wattage)
+            watt_diff = abs(wattage - typical_watt)
+            watt_score = max(0, 100 - (watt_diff / typical_watt * 100))
+            
+            matches.append({
+                "name": app.get("name"),
+                "category": app.get("category"),
+                "typical_watt": typical_watt,
+                "watt_range": watt_range,
+                "match_score": round(watt_score, 1),
+                "phase_hint": app.get("phase_hint"),
+                "notes": app.get("notes", ""),
+            })
+    
+    # Sort by match score
+    matches.sort(key=lambda x: x["match_score"], reverse=True)
+    return matches[:5]  # Top 5 matches
 
 
 def get_appliance_details(slot_name: str, nilm_data: dict) -> dict:

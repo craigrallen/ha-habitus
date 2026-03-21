@@ -1,0 +1,280 @@
+{
+  "boat_appliances": [
+    {
+      "name": "Heat Pump",
+      "category": "HVAC",
+      "typical_watt": 1500,
+      "watt_range": [800, 2500],
+      "runtime_pattern": "long_cycle",
+      "phase_hint": "L1",
+      "notes": "Main heating/cooling system"
+    },
+    {
+      "name": "Washer/Dryer",
+      "category": "Laundry",
+      "typical_watt": 2000,
+      "watt_range": [200, 2500],
+      "runtime_pattern": "multi_stage",
+      "phase_hint": "L2/L3",
+      "notes": "Rarely used, high wattage when active"
+    },
+    {
+      "name": "Bob Dishwasher",
+      "category": "Kitchen",
+      "typical_watt": 1800,
+      "watt_range": [1200, 2200],
+      "runtime_pattern": "multi_stage",
+      "phase_hint": "L1/L2",
+      "notes": "Named appliance, heating element + pump"
+    },
+    {
+      "name": "Villavent VX400",
+      "category": "HVAC",
+      "typical_watt": 120,
+      "watt_range": [50, 200],
+      "runtime_pattern": "continuous",
+      "phase_hint": "L1",
+      "notes": "Ventilation system, runs 24/7"
+    },
+    {
+      "name": "4 Ring Induction Hob",
+      "category": "Kitchen",
+      "typical_watt": 3000,
+      "watt_range": [500, 7200],
+      "runtime_pattern": "variable",
+      "phase_hint": "L2/L3",
+      "notes": "High power, 1-4 rings, variable power per ring"
+    },
+    {
+      "name": "Microwave 900W",
+      "category": "Kitchen",
+      "typical_watt": 1400,
+      "watt_range": [1200, 1600],
+      "runtime_pattern": "short_burst",
+      "phase_hint": "L1",
+      "notes": "900W cooking power, ~1400W actual draw"
+    },
+    {
+      "name": "Dualit 4-Slot Toaster",
+      "category": "Kitchen",
+      "typical_watt": 1600,
+      "watt_range": [800, 2000],
+      "runtime_pattern": "short_burst",
+      "phase_hint": "L1/L2",
+      "notes": "1-4 slots, 2-5 min cycles"
+    },
+    {
+      "name": "Instant Pot w/ Airfryer Lid",
+      "category": "Kitchen",
+      "typical_watt": 1200,
+      "watt_range": [400, 1500],
+      "runtime_pattern": "long_cycle",
+      "phase_hint": "L1",
+      "notes": "Pressure cook or airfry mode"
+    },
+    {
+      "name": "Coffee Maker",
+      "category": "Kitchen",
+      "typical_watt": 1000,
+      "watt_range": [800, 1400],
+      "runtime_pattern": "short_burst",
+      "phase_hint": "L1",
+      "notes": "Brew cycle + hotplate"
+    },
+    {
+      "name": "Oven",
+      "category": "Kitchen",
+      "typical_watt": 2500,
+      "watt_range": [1500, 3500],
+      "runtime_pattern": "long_cycle",
+      "phase_hint": "L2/L3",
+      "notes": "High power, cycling thermostat"
+    },
+    {
+      "name": "Underfloor Heating",
+      "category": "HVAC",
+      "typical_watt": 2000,
+      "watt_range": [500, 3000],
+      "runtime_pattern": "cycling",
+      "phase_hint": "L1/L2/L3",
+      "notes": "Zone-based, thermostat controlled"
+    },
+    {
+      "name": "TV",
+      "category": "Entertainment",
+      "typical_watt": 120,
+      "watt_range": [80, 200],
+      "runtime_pattern": "variable",
+      "phase_hint": "L1",
+      "notes": "Standby ~5W, active 80-200W"
+    },
+    {
+      "name": "Fan Heater 1",
+      "category": "HVAC",
+      "typical_watt": 2000,
+      "watt_range": [1000, 2000],
+      "runtime_pattern": "cycling",
+      "phase_hint": "L1/L2",
+      "notes": "1000W or 2000W settings"
+    },
+    {
+      "name": "Fan Heater 2",
+      "category": "HVAC",
+      "typical_watt": 2000,
+      "watt_range": [1000, 2000],
+      "runtime_pattern": "cycling",
+      "phase_hint": "L1/L2",
+      "notes": "1000W or 2000W settings"
+    },
+    {
+      "name": "Dehumidifier 1",
+      "category": "HVAC",
+      "typical_watt": 300,
+      "watt_range": [200, 500],
+      "runtime_pattern": "cycling",
+      "phase_hint": "L1",
+      "notes": "Compressor + fan"
+    },
+    {
+      "name": "Dehumidifier 2",
+      "category": "HVAC",
+      "typical_watt": 300,
+      "watt_range": [200, 500],
+      "runtime_pattern": "cycling",
+      "phase_hint": "L1",
+      "notes": "Compressor + fan"
+    },
+    {
+      "name": "PC",
+      "category": "Office",
+      "typical_watt": 200,
+      "watt_range": [100, 400],
+      "runtime_pattern": "variable",
+      "phase_hint": "L1",
+      "notes": "Idle ~100W, gaming/workload up to 400W"
+    },
+    {
+      "name": "Mac Mini",
+      "category": "Office",
+      "typical_watt": 40,
+      "watt_range": [20, 80],
+      "runtime_pattern": "continuous",
+      "phase_hint": "L1",
+      "notes": "24/7 server, OpenClaw host"
+    },
+    {
+      "name": "Monitor 1",
+      "category": "Office",
+      "typical_watt": 40,
+      "watt_range": [25, 60],
+      "runtime_pattern": "variable",
+      "phase_hint": "L1",
+      "notes": "LED display"
+    },
+    {
+      "name": "Monitor 2",
+      "category": "Office",
+      "typical_watt": 40,
+      "watt_range": [25, 60],
+      "runtime_pattern": "variable",
+      "phase_hint": "L1",
+      "notes": "LED display"
+    },
+    {
+      "name": "UniFi Network",
+      "category": "Network",
+      "typical_watt": 50,
+      "watt_range": [30, 80],
+      "runtime_pattern": "continuous",
+      "phase_hint": "L1",
+      "notes": "Switch + APs + controller, 24/7"
+    },
+    {
+      "name": "HP Printer",
+      "category": "Office",
+      "typical_watt": 50,
+      "watt_range": [5, 400],
+      "runtime_pattern": "standby_burst",
+      "phase_hint": "L1",
+      "notes": "Standby ~5W, printing ~400W"
+    },
+    {
+      "name": "Hair Dryer",
+      "category": "Personal",
+      "typical_watt": 1800,
+      "watt_range": [1000, 2000],
+      "runtime_pattern": "short_burst",
+      "phase_hint": "L1/L2",
+      "notes": "2-5 min bursts"
+    },
+    {
+      "name": "Panini Press",
+      "category": "Kitchen",
+      "typical_watt": 1500,
+      "watt_range": [1200, 1800],
+      "runtime_pattern": "short_cycle",
+      "phase_hint": "L1",
+      "notes": "5-10 min cycles"
+    },
+    {
+      "name": "Food Processor",
+      "category": "Kitchen",
+      "typical_watt": 600,
+      "watt_range": [300, 1000],
+      "runtime_pattern": "short_burst",
+      "phase_hint": "L1",
+      "notes": "Variable speed motor"
+    },
+    {
+      "name": "KitchenAid Mixer",
+      "category": "Kitchen",
+      "typical_watt": 300,
+      "watt_range": [150, 500],
+      "runtime_pattern": "short_cycle",
+      "phase_hint": "L1",
+      "notes": "Variable speed, 5-15 min cycles"
+    },
+    {
+      "name": "Water Heater",
+      "category": "Water",
+      "typical_watt": 2000,
+      "watt_range": [1500, 3000],
+      "runtime_pattern": "cycling",
+      "phase_hint": "L2/L3",
+      "notes": "Thermostat controlled"
+    },
+    {
+      "name": "Kabola Compact 7 Boiler",
+      "category": "Water",
+      "typical_watt": 200,
+      "watt_range": [50, 300],
+      "runtime_pattern": "cycling",
+      "phase_hint": "L1",
+      "notes": "Diesel boiler pump + controls"
+    },
+    {
+      "name": "Water Pump",
+      "category": "Water",
+      "typical_watt": 150,
+      "watt_range": [80, 250],
+      "runtime_pattern": "short_burst",
+      "phase_hint": "L1",
+      "notes": "Pressure pump, on-demand"
+    },
+    {
+      "name": "Watermaker",
+      "category": "Water",
+      "typical_watt": 800,
+      "watt_range": [600, 1200],
+      "runtime_pattern": "long_cycle",
+      "phase_hint": "L1/L2",
+      "notes": "Reverse osmosis system, 1-2hr runs"
+    }
+  ],
+  "metadata": {
+    "boat_name": "Craig's Boat",
+    "total_appliances": 30,
+    "electrical_system": "24V DC, 3-phase AC shore power",
+    "notes": "List compiled 2026-03-21 from Craig's inventory. Phase hints based on typical high-power distribution."
+  }
+}
