@@ -2361,13 +2361,16 @@ async function loadAnomalies() {
     api('api/anomaly_patterns').catch(()=>({patterns:[],recurring_entities:[]})),
   ]);
   
-  let score = state.anomaly_score ?? 0;
-  const ents = (anomalies.entities || []).filter(a => !dismissedAnomalies.has(anomalyKey(a)));
+  const allEnts = anomalies.entities || [];
+  const ents = allEnts.filter(a => !dismissedAnomalies.has(anomalyKey(a)));
   const lastCheck = state.last_run ? new Date(state.last_run).toLocaleString() : 'Never';
   
-  // If all anomalies were dismissed, reset score to 0
-  if (ents.length === 0 && (anomalies.entities || []).length > 0) {
-    score = 0;
+  // Recalculate score based on active (non-dismissed) anomalies
+  let score = 0;
+  if (ents.length > 0) {
+    // Use top 3 anomalies by z-score to calculate score (same logic as backend)
+    const top3 = ents.slice(0, 3).sort((a, b) => (b.z_score || 0) - (a.z_score || 0));
+    score = Math.min(100, Math.round(top3.reduce((sum, a) => sum + (a.z_score || 0) * 20, 0) / Math.max(top3.length, 1)));
   }
   
   // Status card
