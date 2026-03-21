@@ -2147,25 +2147,33 @@ async def run(days_history: int, mode: str = "full") -> None:
                 energy["kwh_price"],
                 os.environ.get("HABITUS_CURRENCY", "kr"),
             )
-            # Prefer a real-time watt sensor over kWh delta — look for _w companion
-            # e.g. sensor.foo_electric_consumption_kwh → sensor.foo_electric_consumption_w
-            kwh_id = energy["grid_kwh"]
-            watt_candidate = kwh_id.replace("_kwh", "_w").replace("_energy", "_power")
-            try:
-                headers = {"Authorization": f"Bearer {HA_TOKEN}"}
-                r = requests.get(
-                    f"{HA_URL}/api/states/{watt_candidate}", headers=headers, timeout=5
-                )
-                if r.status_code == 200:
-                    uom = r.json().get("attributes", {}).get("unit_of_measurement", "")
-                    if uom == "W":
-                        os.environ["HABITUS_POWER_ENTITY"] = watt_candidate
-                        log.info(
-                            "Auto-detected watt sensor companion: %s (preferred over kWh delta)",
-                            watt_candidate,
-                        )
-            except Exception as e:
-                log.debug("Watt companion probe failed: %s", e)
+            # Auto-detect real-time watt sensor ONLY if user hasn't configured power_entity
+            # Prevents overwriting user's saved settings on every restart
+            _state_check = load_state() or {}
+            _user_has_power_entity = bool(_state_check.get("user_settings", {}).get("power_entity"))
+            
+            if not _user_has_power_entity:
+                # Prefer a real-time watt sensor over kWh delta — look for _w companion
+                # e.g. sensor.foo_electric_consumption_kwh → sensor.foo_electric_consumption_w
+                kwh_id = energy["grid_kwh"]
+                watt_candidate = kwh_id.replace("_kwh", "_w").replace("_energy", "_power")
+                try:
+                    headers = {"Authorization": f"Bearer {HA_TOKEN}"}
+                    r = requests.get(
+                        f"{HA_URL}/api/states/{watt_candidate}", headers=headers, timeout=5
+                    )
+                    if r.status_code == 200:
+                        uom = r.json().get("attributes", {}).get("unit_of_measurement", "")
+                        if uom == "W":
+                            os.environ["HABITUS_POWER_ENTITY"] = watt_candidate
+                            log.info(
+                                "Auto-detected watt sensor companion: %s (preferred over kWh delta)",
+                                watt_candidate,
+                            )
+                except Exception as e:
+                    log.debug("Watt companion probe failed: %s", e)
+            else:
+                log.debug("Skipping power entity auto-detection — user has configured power_entity")
         if energy.get("device_rates"):
             os.environ["HABITUS_ENERGY_RATES"] = ",".join(energy["device_rates"])
         if energy.get("gas"):
