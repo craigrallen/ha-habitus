@@ -293,8 +293,9 @@
     "boat_name": "Craig's Boat",
     "total_appliances": 32,
     "electrical_system": "24V DC 600Ah, 230V AC 3-phase shore power",
-    "inverter": "Mastervolt Mass Combi Ultra 24/3500 (3.5kW continuous, 7kW peak)",
-    "charger": "100A @ 24V (integrated in Combi)",
-    "notes": "List compiled 2026-03-21 from Craig's inventory. Phase hints based on typical high-power distribution."
+    "inverter": "3× Mastervolt Mass Combi Ultra 24/3500 (3-phase cluster: 10.5kW continuous, 21kW peak)",
+    "charger": "3× 100A @ 24V (300A total, integrated in Combis)",
+    "shore_power": "3-phase 230V AC, 16A per phase (11kW total)",
+    "notes": "List compiled 2026-03-21 from Craig's inventory. 3-phase cluster allows balanced high-power loads across L1/L2/L3."
   }
 }
