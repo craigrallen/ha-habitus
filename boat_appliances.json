@@ -109,22 +109,40 @@
       "notes": "Standby ~5W, active 80-200W"
     },
     {
-      "name": "Electric Heater 1 (Split Phase)",
+      "name": "Electric Panel Heater 1 (Split Phase)",
       "category": "HVAC",
       "typical_watt": 1000,
       "watt_range": [500, 1000],
       "runtime_pattern": "cycling",
       "phase_hint": "L1/L2",
-      "notes": "1kW split-phase electric heater"
+      "notes": "1kW split-phase electric panel heater"
     },
     {
-      "name": "Electric Heater 2 (Split Phase)",
+      "name": "Electric Panel Heater 2 (Split Phase)",
       "category": "HVAC",
       "typical_watt": 1000,
       "watt_range": [500, 1000],
       "runtime_pattern": "cycling",
       "phase_hint": "L1/L2",
-      "notes": "1kW split-phase electric heater"
+      "notes": "1kW split-phase electric panel heater"
+    },
+    {
+      "name": "Fan Heater 1",
+      "category": "HVAC",
+      "typical_watt": 2000,
+      "watt_range": [1000, 2000],
+      "runtime_pattern": "cycling",
+      "phase_hint": "L1/L2",
+      "notes": "Portable fan heater, 1000W or 2000W settings"
+    },
+    {
+      "name": "Fan Heater 2",
+      "category": "HVAC",
+      "typical_watt": 2000,
+      "watt_range": [1000, 2000],
+      "runtime_pattern": "cycling",
+      "phase_hint": "L1/L2",
+      "notes": "Portable fan heater, 1000W or 2000W settings"
     },
     {
       "name": "Dehumidifier 1",
@@ -273,7 +291,7 @@
   ],
   "metadata": {
     "boat_name": "Craig's Boat",
-    "total_appliances": 30,
+    "total_appliances": 32,
     "electrical_system": "24V DC, 3-phase AC shore power",
     "notes": "List compiled 2026-03-21 from Craig's inventory. Phase hints based on typical high-power distribution."
   }
