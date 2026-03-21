@@ -2721,11 +2721,16 @@ async function load() {
         const st = a.enabled ? 'on' : 'off';
         const badge = a.enabled ? '<span class="badge b-ok" style="font-size:.68rem">on</span>' : '<span class="badge b-muted" style="font-size:.68rem">off</span>';
         const triggered = a.last_triggered ? new Date(a.last_triggered).toLocaleDateString() : 'never';
+        const safetyBadge = a.safety_critical ? '<span class="badge b-warn" style="font-size:.68rem;background:#ef4444">⚠️ EMERGENCY</span>' : '';
+        const deleteBtn = a.safety_critical 
+          ? `<span style="font-size:.72rem;color:var(--text3)" title="${a.note||'Safety-critical automation'}">Protected</span>`
+          : `<button class="btn btn-danger" style="padding:2px 8px;font-size:.72rem" onclick="deleteHAAutomation('${(a.entity_id||'').replace(/'/g, "\\'")}')">Delete</button>`;
         return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0">
           ${badge}
+          ${safetyBadge}
           <div style="flex:1;font-size:.82rem">${a.alias}</div>
           <div style="font-size:.72rem;color:var(--text3)">Last: ${triggered}</div>
-          <button class="btn btn-danger" style="padding:2px 8px;font-size:.72rem" onclick="deleteHAAutomation('${(a.entity_id||'').replace(/'/g, "\\'")}')">Delete</button>
+          ${deleteBtn}
         </div>`;
       }).join('');
       haHtml += `</div>`;
@@ -4296,6 +4301,13 @@ def api_ha_automations_live():
         # Cross-reference: mark automations that match Habitus aliases
         _habitus_aliases = {s.get("title", "").lower() for s in suggestions if s.get("title")}
         _habitus_aliases.update({"habitus — solar surplus", "habitus — battery low", "habitus —"})
+        
+        # Load automation scores to detect safety-critical automations
+        try:
+            from .automation_score import is_safety_critical, load as load_scores
+            scored_autos = {a["entity_id"]: a for a in load_scores()}
+        except Exception:
+            scored_autos = {}
 
         result = []
         for auto in automations:
@@ -4303,13 +4315,24 @@ def api_ha_automations_live():
             attrs = auto.get("attributes", {})
             alias = attrs.get("friendly_name", "")
             is_habitus = any(h in alias.lower() for h in _habitus_aliases)
-            result.append({
+            
+            # Check if safety-critical
+            is_safety = is_safety_critical(alias, eid)
+            score_data = scored_autos.get(eid, {})
+            
+            entry = {
                 "entity_id": eid,
                 "alias": alias,
                 "enabled": auto.get("state") != "off",
                 "is_habitus": is_habitus,
                 "last_triggered": attrs.get("last_triggered"),
-            })
+            }
+            
+            if is_safety:
+                entry["safety_critical"] = True
+                entry["note"] = score_data.get("note", "Emergency automation")
+            
+            result.append(entry)
 
         return jsonify({"automations": result, "count": len(result)})
     except Exception as e:
