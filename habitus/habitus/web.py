@@ -4752,7 +4752,50 @@ def api_energy_weather_history():
 @app.route("/api/nilm")
 @app.route("/ingress/api/nilm")
 def api_nilm():
-    return jsonify(_read(os.path.join(DATA_DIR, "nilm_disaggregation.json")) or {"breakdown": [], "discovered_appliances": []})
+    """Return NILM disaggregation results with manual overrides applied."""
+    raw_data = _read(os.path.join(DATA_DIR, "nilm_disaggregation.json")) or {"breakdown": [], "discovered_appliances": []}
+    try:
+        from .nilm_manager import apply_overrides
+        return jsonify(apply_overrides(raw_data))
+    except Exception:
+        return jsonify(raw_data)
+
+
+@app.route("/api/nilm/appliance/<slot_name>")
+@app.route("/ingress/api/nilm/appliance/<slot_name>")
+def api_nilm_appliance_details(slot_name):
+    """Get detailed pattern analysis for an appliance slot."""
+    try:
+        from .nilm_manager import get_appliance_details
+        nilm_data = _read(os.path.join(DATA_DIR, "nilm_disaggregation.json")) or {}
+        return jsonify(get_appliance_details(slot_name, nilm_data))
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
+@app.route("/api/nilm/override", methods=["POST"])
+@app.route("/ingress/api/nilm/override", methods=["POST"])
+def api_nilm_override():
+    """Add a manual override for a NILM appliance slot."""
+    try:
+        from .nilm_manager import add_override
+        data = request.get_json() or {}
+        slot_name = data.get("slot_name", "").strip()
+        action = data.get("action", "").strip()
+        
+        if not slot_name or not action:
+            return jsonify({"ok": False, "error": "Missing slot_name or action"})
+        
+        kwargs = {}
+        if action == "relabel":
+            kwargs["new_label"] = data.get("new_label", "").strip()
+        elif action == "merge":
+            kwargs["merge_with"] = data.get("merge_with", "").strip()
+        
+        result = add_override(slot_name, action, **kwargs)
+        return jsonify({"ok": True, "overrides": result})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
 
 @app.route("/api/nilm/run", methods=["POST"])
 @app.route("/ingress/api/nilm/run", methods=["POST"])
