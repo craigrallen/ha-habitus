@@ -822,11 +822,20 @@ def generate_suggestions(
         )
 
     if has_inverter and has_solar:
+        # Use configured inverter capacity or fallback to 1.5× peak observed
+        inverter_capacity_w = int(os.environ.get("HABITUS_INVERTER_CAPACITY_W", 0))
+        if inverter_capacity_w > 0:
+            # Use 85% of rated capacity as warning threshold
+            threshold_w = int(inverter_capacity_w * 0.85)
+        else:
+            # Fallback: 1.5× peak observed (conservative default)
+            threshold_w = int(peak_w * 1.5)
+        
         suggestions.append(
             {
                 "id": "inverter_overload",
                 "title": "Inverter Overload Predictor",
-                "description": "Alert when total load is approaching inverter capacity limits, giving time to shed loads before an overload trip.",
+                "description": f"Alert when total load exceeds {threshold_w}W (85% of inverter capacity), giving time to shed loads before an overload trip.",
                 "confidence": 82,
                 "category": "boat",
                 "applicable": True,
@@ -835,14 +844,14 @@ def generate_suggestions(
   trigger:
     - platform: numeric_state
       entity_id: sensor.mastervolt_total_load
-      above: {int(peak_w*1.5)}
+      above: {threshold_w}
       for:
         minutes: 3
   action:
     - service: {NOTIFY}
       data:
         title: "⚡ High Load Warning"
-        message: "Load is {{{{ states('sensor.mastervolt_total_load') }}}}W — approaching inverter limits. Consider shedding loads." """,
+        message: "Load is {{{{ states('sensor.mastervolt_total_load') }}}}W — approaching inverter limits ({threshold_w}W threshold). Consider shedding loads." """,
             }
         )
 

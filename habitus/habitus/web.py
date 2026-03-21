@@ -4344,6 +4344,14 @@ def api_settings():
         if "temp_entity" in data:
             settings["temp_entity"] = str(data["temp_entity"]).strip()
             os.environ["HABITUS_TEMP_ENTITY"] = settings["temp_entity"]
+        if "inverter_capacity_w" in data:
+            try:
+                capacity = int(data["inverter_capacity_w"])
+                if 100 <= capacity <= 50000:
+                    settings["inverter_capacity_w"] = capacity
+                    os.environ["HABITUS_INVERTER_CAPACITY_W"] = str(capacity)
+            except (ValueError, TypeError):
+                pass
         if "testing_mode" in data:
             tm = bool(data["testing_mode"])
             settings["testing_mode"] = tm
