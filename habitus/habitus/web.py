@@ -2358,9 +2358,11 @@ function loadEnergyWeather(){
 }
 
 async function loadAnomalies() {
-  const [state, anomalies] = await Promise.all([
+  const [state, anomalies, history, patterns] = await Promise.all([
     api('api/state').catch(()=>({})),
     api('api/anomalies').catch(()=>({})),
+    api('api/anomaly_history').catch(()=>({history:[]})),
+    api('api/anomaly_patterns').catch(()=>({patterns:[],recurring_entities:[]})),
   ]);
   
   const score = state.anomaly_score ?? 0;
@@ -2423,11 +2425,75 @@ async function loadAnomalies() {
   
   document.getElementById('active-anomalies-list').innerHTML = activeHtml;
   
-  // History (placeholder for now — would need backend API to store anomaly events)
-  document.getElementById('anom-history-list').innerHTML = '<div style="padding:16px;text-align:center;color:var(--text3)">📜 Anomaly history tracking coming soon</div>';
+  // History
+  const historyEvents = history.history || [];
+  const historyHtml = historyEvents.length
+    ? historyEvents.slice(0, 20).map(h => {
+        const ts = new Date(h.timestamp);
+        const timeStr = ts.toLocaleString();
+        const scoreColor = h.anomaly_score >= 70 ? 'var(--red)' : h.anomaly_score >= 40 ? 'var(--amber)' : 'var(--green)';
+        return `
+          <div style="padding:10px;border-radius:6px;background:var(--card2);margin-bottom:6px">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
+              <div style="flex:1">
+                <div style="font-size:.85rem;color:var(--text3)">${timeStr}</div>
+                <div style="font-size:.78rem;color:var(--text3);margin-top:2px">${h.entity_count} ${h.entity_count === 1 ? 'entity' : 'entities'} flagged</div>
+              </div>
+              <div style="font-size:1.2rem;font-weight:700;color:${scoreColor}">${h.anomaly_score}</div>
+            </div>
+            ${h.entities.slice(0, 3).map(e => `
+              <div style="font-size:.75rem;color:var(--text3);padding-left:8px;border-left:2px solid var(--border)">
+                • ${e.name} (${e.z_score.toFixed(1)}σ)
+              </div>
+            `).join('')}
+            ${h.entities.length > 3 ? `<div style="font-size:.72rem;color:var(--text3);padding-left:8px">... and ${h.entities.length - 3} more</div>` : ''}
+          </div>
+        `;
+      }).join('')
+    : '<div style="padding:16px;text-align:center;color:var(--text3)">📜 No anomaly events in the last 7 days</div>';
   
-  // Patterns (placeholder)
-  document.getElementById('anom-patterns').innerHTML = '<div style="padding:16px;text-align:center;color:var(--text3)">📊 Pattern analysis coming soon</div>';
+  document.getElementById('anom-history-list').innerHTML = historyHtml;
+  
+  // Patterns
+  const recurringEnts = patterns.recurring_entities || [];
+  const patternList = (patterns.patterns || []).filter(p => p);
+  
+  let patternsHtml = '';
+  
+  if (patternList.length || recurringEnts.length) {
+    if (patterns.total_events) {
+      patternsHtml += `<div style="padding:12px;background:var(--card2);border-radius:6px;margin-bottom:12px">
+        <div style="font-size:.85rem;color:var(--text3);margin-bottom:4px">Last 7 Days Summary</div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap">
+          <div><strong>${patterns.total_events}</strong> <span style="color:var(--text3)">events</span></div>
+          <div><strong>${patterns.avg_score.toFixed(0)}</strong> <span style="color:var(--text3)">avg score</span></div>
+        </div>
+      </div>`;
+    }
+    
+    if (patternList.length) {
+      patternsHtml += '<div style="margin-bottom:12px"><div style="font-weight:600;margin-bottom:6px">🕐 Time Patterns</div>';
+      patternList.forEach(p => {
+        patternsHtml += `<div style="padding:8px;background:var(--card2);border-radius:4px;font-size:.85rem;margin-bottom:4px">${p.description}</div>`;
+      });
+      patternsHtml += '</div>';
+    }
+    
+    if (recurringEnts.length) {
+      patternsHtml += '<div><div style="font-weight:600;margin-bottom:6px">🔁 Recurring Anomalies</div>';
+      recurringEnts.forEach(r => {
+        patternsHtml += `<div style="padding:6px;background:var(--card2);border-radius:4px;font-size:.82rem;margin-bottom:4px;display:flex;justify-content:space-between">
+          <span>${r.entity_id}</span>
+          <span style="color:var(--text3)">${r.occurrences}× in 7d</span>
+        </div>`;
+      });
+      patternsHtml += '</div>';
+    }
+  } else {
+    patternsHtml = '<div style="padding:16px;text-align:center;color:var(--text3)">📊 Not enough data for pattern analysis yet</div>';
+  }
+  
+  document.getElementById('anom-patterns').innerHTML = patternsHtml;
 }
 
 function viewEntityDetail(entityId) {
@@ -3973,6 +4039,28 @@ def api_suggestions():
 @app.route("/ingress/api/anomalies")
 def api_anomalies():
     return jsonify(_read(ANOMALIES_PATH) or {})
+
+
+@app.route("/api/anomaly_history")
+@app.route("/ingress/api/anomaly_history")
+def api_anomaly_history():
+    """Return anomaly history (last 7 days of events)."""
+    try:
+        from .anomaly_history import get_history
+        return jsonify({"history": get_history()})
+    except Exception as e:
+        return jsonify({"history": [], "error": str(e)})
+
+
+@app.route("/api/anomaly_patterns")
+@app.route("/ingress/api/anomaly_patterns")
+def api_anomaly_patterns():
+    """Return anomaly pattern analysis (recurring entities, time patterns)."""
+    try:
+        from .anomaly_history import get_patterns
+        return jsonify(get_patterns())
+    except Exception as e:
+        return jsonify({"patterns": [], "error": str(e)})
 
 
 @app.route("/api/anomaly_breakdown")

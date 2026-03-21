@@ -2861,6 +2861,13 @@ async def run(days_history: int, mode: str = "full") -> None:
         log.info("Confidence-weighted entity score: %.3f", weighted_entity_score)
     activity_summary = activity_engine.get_activity_summary()
     top_anomaly = entity_anomalies[0]["description"] if entity_anomalies else None
+    
+    # Record anomalies to history for trend analysis
+    try:
+        from . import anomaly_history
+        anomaly_history.record_anomalies(anomaly_score, entity_anomalies)
+    except Exception as e:
+        log.warning(f"Anomaly history recording failed: {e}")
 
     state.update(
         {
