@@ -2021,6 +2021,62 @@ function saveDismissedAnomalies(setObj){
 function anomalyKey(a){
   return (a && (a.entity_id || a.name || a.description || '')).toString();
 }
+async function setEntityPriority(entityId, entityName) {
+  const priorities = ['critical', 'high', 'medium', 'low', 'muted'];
+  const labels = {
+    critical: '🔥 Critical (score × 3.0)',
+    high: '🚨 High (score × 2.0)',
+    medium: '⚙️ Medium (auto-detect)',
+    low: '📊 Low (score × 0.5)',
+    muted: '🔇 Muted (score × 0.1)'
+  };
+  const current = 'medium'; // TODO: fetch current priority
+  const options = priorities.map(p => `<option value="${p}" ${p===current?'selected':''}>${labels[p]}</option>`).join('');
+  const html = `
+    <div style="padding:16px">
+      <div style="font-size:1rem;font-weight:600;margin-bottom:12px">${entityName}</div>
+      <div style="font-size:.85rem;color:var(--text3);margin-bottom:12px">Set priority to control how much this entity affects the anomaly score:</div>
+      <select id="priority-select" style="width:100%;padding:8px;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:.9rem;margin-bottom:12px">
+        ${options}
+      </select>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn" onclick="closeModal()" style="border-color:var(--border);color:var(--text3)">Cancel</button>
+        <button class="btn btn-accent" onclick="savePriority('${entityId}')">Save</button>
+      </div>
+    </div>
+  `;
+  showModal(html);
+}
+async function savePriority(entityId) {
+  const priority = document.getElementById('priority-select').value;
+  try {
+    const r = await apiPost('api/entity_priorities', {entity_id: entityId, priority});
+    if (r.ok) {
+      toast(`Priority set to ${priority} — retrain to apply`);
+      closeModal();
+    } else {
+      toast(r.error || 'Failed to save', 'err');
+    }
+  } catch(e) {
+    toast(String(e), 'err');
+  }
+}
+function showModal(html) {
+  let modal = document.getElementById('priority-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'priority-modal';
+    modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999';
+    modal.innerHTML = `<div style="background:var(--card);border-radius:12px;max-width:500px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.3)"></div>`;
+    document.body.appendChild(modal);
+  }
+  modal.querySelector('div').innerHTML = html;
+  modal.style.display = 'flex';
+}
+function closeModal() {
+  const modal = document.getElementById('priority-modal');
+  if (modal) modal.style.display = 'none';
+}
 function dismissAnomaly(anomalyId, entityId, score){
   const key = (entityId || anomalyId || '').toString();
   const dismissed = loadDismissedAnomalies();
@@ -2665,14 +2721,18 @@ async function load() {
   document.getElementById('top-anomalies').innerHTML = ents.length
     ? ents.map(e => `
       <div class="anom-item">
-        <div>
+        <div style="flex:1">
           <div class="anom-name">${e.name}</div>
-          <div class="anom-sub">${e.current_value}${e.unit} vs ${e.baseline_mean}${e.unit} expected</div>
+          <div class="anom-sub">
+            ${e.current_value}${e.unit} vs ${e.baseline_mean}${e.unit} expected
+            ${e.priority_label ? `<span style="margin-left:8px;padding:2px 6px;border-radius:4px;font-size:.7rem;font-weight:600;background:${e.priority_label==='Critical'?'var(--red)':e.priority_label==='High'?'#ff8c00':e.priority_label==='Low'?'var(--text3)':'var(--amber)'};color:${e.priority_label==='Low'?'var(--bg)':'white'}">${e.priority_label}</span>` : ''}
+          </div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           <div class="anom-score" style="color:${e.z_score>=10?'#ff0000':e.z_score>=5?'var(--red)':e.z_score>=3?'#ff8c00':e.z_score>=1.5?'var(--amber)':'var(--green)'}">
             ${e.z_score>=10?'🔥 ':e.z_score>=5?'🚨 ':e.z_score>=3?'⚠️ ':''}${e.z_score.toFixed(1)}σ
           </div>
+          <button class="btn" style="padding:3px 8px;font-size:.72rem" onclick="setEntityPriority('${(e.entity_id || e.name || '').replace(/'/g, "\\'")}', '${e.name.replace(/'/g, "\\'")}')" title="Set priority">⚙️</button>
           <button class="btn" style="padding:3px 8px;font-size:.72rem" onclick="dismissAnomaly('${(e.id || e.entity_id || e.name || '').replace(/'/g, "\\'")}', '${(e.entity_id || e.name || '').replace(/'/g, "\\'")}', ${e.z_score || 0})">Dismiss</button>
         </div>
       </div>`).join('')
@@ -4087,6 +4147,33 @@ def api_anomaly_patterns():
         return jsonify(get_patterns())
     except Exception as e:
         return jsonify({"patterns": [], "error": str(e)})
+
+
+@app.route("/api/entity_priorities", methods=["GET", "POST"])
+@app.route("/ingress/api/entity_priorities", methods=["GET", "POST"])
+def api_entity_priorities():
+    """Get or set entity priority overrides."""
+    try:
+        from .entity_criticality import load_user_priorities, set_entity_priority
+        
+        if request.method == "POST":
+            data = request.get_json() or {}
+            entity_id = data.get("entity_id", "").strip()
+            priority = data.get("priority", "").strip()
+            
+            if not entity_id or not priority:
+                return jsonify({"ok": False, "error": "Missing entity_id or priority"}), 400
+            
+            set_entity_priority(entity_id, priority)
+            return jsonify({"ok": True, "entity_id": entity_id, "priority": priority})
+        
+        # GET: return all priorities
+        priorities = load_user_priorities()
+        return jsonify({"priorities": priorities})
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route("/api/anomaly_breakdown")

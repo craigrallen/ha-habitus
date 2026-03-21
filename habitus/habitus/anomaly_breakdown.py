@@ -891,7 +891,23 @@ def score_entities(current_states: dict | None = None) -> list:
     with open(ENTITY_BASELINES_PATH, "w") as f:
         json.dump(baselines, f, indent=2, default=str)
 
-    anomalies.sort(key=lambda x: x["z_score"], reverse=True)
+    # Apply false alarm filter
+    try:
+        from . import false_alarm_filter
+        anomalies = false_alarm_filter.filter_anomalies(anomalies)
+    except Exception as e:
+        log.warning(f"False alarm filter failed: {e}")
+    
+    # Apply criticality weighting
+    try:
+        from . import entity_criticality
+        anomalies = entity_criticality.apply_criticality_weighting(anomalies)
+        # Re-sort by weighted z-score (critical entities bubble to top)
+        anomalies.sort(key=lambda x: x.get("weighted_z_score", x["z_score"]), reverse=True)
+    except Exception as e:
+        log.warning(f"Criticality weighting failed: {e}")
+        anomalies.sort(key=lambda x: x["z_score"], reverse=True)
+    
     top = anomalies[:20]
 
     weighted_score = compute_weighted_score(top)
