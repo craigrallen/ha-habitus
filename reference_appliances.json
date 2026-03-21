@@ -5,153 +5,179 @@
       "category": "Lighting",
       "typical_watt": 15,
       "watt_range": [
-        10,
-        25
+        8,
+        30
       ],
-      "runtime_pattern": "variable",
-      "source": "PLAID"
+      "runtime_pattern": "continuous",
+      "source": "PLAID",
+      "notes": "CFL bulbs, instant-on, stable power draw"
     },
     {
       "name": "Fan (PLAID)",
       "category": "HVAC",
       "typical_watt": 60,
       "watt_range": [
-        30,
-        120
+        20,
+        150
       ],
       "runtime_pattern": "variable",
-      "source": "PLAID"
+      "source": "PLAID",
+      "notes": "Ceiling/desk/tower fans, 3-speed typical"
     },
     {
       "name": "Fridge (PLAID)",
       "category": "Kitchen",
       "typical_watt": 150,
       "watt_range": [
-        80,
-        250
+        50,
+        300
       ],
-      "runtime_pattern": "variable",
-      "source": "PLAID"
+      "runtime_pattern": "cycling",
+      "source": "PLAID",
+      "notes": "Compressor cycles, defrost spikes"
     },
     {
       "name": "Hairdryer (PLAID)",
       "category": "Personal",
       "typical_watt": 1500,
       "watt_range": [
-        1000,
-        2000
+        800,
+        2200
       ],
-      "runtime_pattern": "variable",
-      "source": "PLAID"
+      "runtime_pattern": "short_burst",
+      "source": "PLAID",
+      "notes": "2-3 heat settings, 2-5 min use"
     },
     {
       "name": "Heater (PLAID)",
       "category": "HVAC",
       "typical_watt": 1500,
       "watt_range": [
-        800,
-        2000
+        500,
+        2500
       ],
-      "runtime_pattern": "variable",
-      "source": "PLAID"
+      "runtime_pattern": "cycling",
+      "source": "PLAID",
+      "notes": "Electric space heaters, thermostat-controlled"
     },
     {
       "name": "Incandescent Lamp (PLAID)",
       "category": "Lighting",
       "typical_watt": 60,
       "watt_range": [
-        40,
-        100
+        25,
+        150
       ],
-      "runtime_pattern": "variable",
-      "source": "PLAID"
+      "runtime_pattern": "continuous",
+      "source": "PLAID",
+      "notes": "Traditional bulbs, warm-up < 1s"
     },
     {
       "name": "Laptop (PLAID)",
       "category": "Office",
       "typical_watt": 50,
       "watt_range": [
-        20,
-        90
+        15,
+        120
       ],
       "runtime_pattern": "variable",
-      "source": "PLAID"
+      "source": "PLAID",
+      "notes": "Idle 20-40W, active 50-90W, gaming 90-120W"
     },
     {
       "name": "Microwave (PLAID)",
       "category": "Kitchen",
       "typical_watt": 1200,
       "watt_range": [
-        800,
-        1500
+        600,
+        1600
       ],
-      "runtime_pattern": "variable",
-      "source": "PLAID"
+      "runtime_pattern": "short_burst",
+      "source": "PLAID",
+      "notes": "Cooking power + magnetron overhead"
     },
     {
       "name": "Monitor (PLAID)",
       "category": "Office",
       "typical_watt": 40,
       "watt_range": [
-        20,
-        80
+        15,
+        100
       ],
       "runtime_pattern": "variable",
-      "source": "PLAID"
+      "source": "PLAID",
+      "notes": "LCD 20-60W, LED 15-40W, large 4K up to 100W"
     },
     {
       "name": "Vacuum (PLAID)",
       "category": "Cleaning",
-      "typical_watt": 1000,
+      "typical_watt": 1200,
       "watt_range": [
-        600,
-        1500
+        500,
+        2000
       ],
-      "runtime_pattern": "variable",
-      "source": "PLAID"
+      "runtime_pattern": "short_burst",
+      "source": "PLAID",
+      "notes": "Upright/canister, 10-30 min use"
     },
     {
       "name": "Washing Machine (PLAID)",
       "category": "Laundry",
       "typical_watt": 500,
       "watt_range": [
-        200,
-        2000
+        100,
+        2500
       ],
-      "runtime_pattern": "variable",
-      "source": "PLAID"
+      "runtime_pattern": "multi_stage",
+      "source": "PLAID",
+      "notes": "Fill/wash/spin cycles, heating element spikes"
     },
     {
       "name": "Kettle",
       "category": "Kitchen",
       "typical_watt": 2200,
       "watt_range": [
-        2000,
+        1800,
         3000
       ],
       "runtime_pattern": "short_burst",
+      "notes": "2-4 min boil time, instant-on",
       "source": "UK-DALE"
     },
     {
-      "name": "Toaster",
+      "name": "Toaster (2-slice)",
       "category": "Kitchen",
-      "typical_watt": 1200,
+      "typical_watt": 1000,
       "watt_range": [
-        800,
-        1500
+        600,
+        1200
       ],
       "runtime_pattern": "short_burst",
+      "notes": "2-5 min cycle",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Toaster (4-slice)",
+      "category": "Kitchen",
+      "typical_watt": 1800,
+      "watt_range": [
+        1200,
+        2000
+      ],
+      "runtime_pattern": "short_burst",
+      "notes": "2-5 min cycle",
       "source": "UK-DALE"
     },
     {
       "name": "Bread Maker",
       "category": "Kitchen",
-      "typical_watt": 600,
+      "typical_watt": 550,
       "watt_range": [
-        400,
+        300,
         800
       ],
       "runtime_pattern": "long_cycle",
+      "notes": "2-4 hour cycle, heating + kneading",
       "source": "UK-DALE"
     },
     {
@@ -159,91 +185,111 @@
       "category": "Kitchen",
       "typical_watt": 500,
       "watt_range": [
-        300,
+        200,
+        1000
+      ],
+      "runtime_pattern": "short_burst",
+      "notes": "Variable speed motor",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Blender",
+      "category": "Kitchen",
+      "typical_watt": 400,
+      "watt_range": [
+        200,
         800
       ],
       "runtime_pattern": "short_burst",
+      "notes": "1-5 min use",
       "source": "UK-DALE"
     },
     {
-      "name": "Fridge-Freezer",
+      "name": "Coffee Machine (Drip)",
       "category": "Kitchen",
-      "typical_watt": 100,
+      "typical_watt": 1000,
       "watt_range": [
-        50,
-        200
+        600,
+        1400
       ],
-      "runtime_pattern": "cycling",
+      "runtime_pattern": "short_cycle",
+      "notes": "Brew + hotplate",
       "source": "UK-DALE"
     },
     {
-      "name": "Freezer (Chest)",
+      "name": "Coffee Machine (Espresso)",
       "category": "Kitchen",
-      "typical_watt": 80,
+      "typical_watt": 1300,
       "watt_range": [
-        40,
-        150
+        1000,
+        1500
       ],
-      "runtime_pattern": "cycling",
+      "runtime_pattern": "short_burst",
+      "notes": "Pump + heating element",
       "source": "UK-DALE"
     },
     {
-      "name": "Washer Dryer",
-      "category": "Laundry",
-      "typical_watt": 1500,
-      "watt_range": [
-        200,
-        2500
-      ],
-      "runtime_pattern": "multi_stage",
-      "source": "UK-DALE"
-    },
-    {
-      "name": "Washing Machine",
-      "category": "Laundry",
-      "typical_watt": 500,
-      "watt_range": [
-        50,
-        2500
-      ],
-      "runtime_pattern": "multi_stage",
-      "source": "UK-DALE"
-    },
-    {
-      "name": "Tumble Dryer",
-      "category": "Laundry",
-      "typical_watt": 2500,
-      "watt_range": [
-        2000,
-        3000
-      ],
-      "runtime_pattern": "long_cycle",
-      "source": "UK-DALE"
-    },
-    {
-      "name": "Dishwasher",
-      "category": "Kitchen",
-      "typical_watt": 1800,
-      "watt_range": [
-        1200,
-        2500
-      ],
-      "runtime_pattern": "multi_stage",
-      "source": "UK-DALE"
-    },
-    {
-      "name": "Electric Oven",
+      "name": "Electric Cooker (Single Hob)",
       "category": "Kitchen",
       "typical_watt": 2000,
       "watt_range": [
         1000,
-        3500
+        2500
       ],
-      "runtime_pattern": "long_cycle",
+      "runtime_pattern": "variable",
+      "notes": "Resistive element, slow ramp-up",
       "source": "UK-DALE"
     },
     {
-      "name": "Grill",
+      "name": "Slow Cooker",
+      "category": "Kitchen",
+      "typical_watt": 200,
+      "watt_range": [
+        100,
+        300
+      ],
+      "runtime_pattern": "long_cycle",
+      "notes": "4-8 hour cooking",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Rice Cooker",
+      "category": "Kitchen",
+      "typical_watt": 600,
+      "watt_range": [
+        300,
+        1000
+      ],
+      "runtime_pattern": "multi_stage",
+      "notes": "Cook + keep-warm mode",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Deep Fryer",
+      "category": "Kitchen",
+      "typical_watt": 2000,
+      "watt_range": [
+        1500,
+        2500
+      ],
+      "runtime_pattern": "cycling",
+      "notes": "Thermostat-controlled",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Sandwich Maker",
+      "category": "Kitchen",
+      "typical_watt": 750,
+      "watt_range": [
+        600,
+        1000
+      ],
+      "runtime_pattern": "short_cycle",
+      "notes": "3-5 min cook time",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Electric Grill",
       "category": "Kitchen",
       "typical_watt": 2000,
       "watt_range": [
@@ -251,65 +297,251 @@
         2500
       ],
       "runtime_pattern": "short_cycle",
+      "notes": "Tabletop grill",
       "source": "UK-DALE"
     },
     {
-      "name": "Hob (Electric)",
+      "name": "Waffle Maker",
       "category": "Kitchen",
-      "typical_watt": 2000,
-      "watt_range": [
-        500,
-        7000
-      ],
-      "runtime_pattern": "variable",
-      "source": "UK-DALE"
-    },
-    {
-      "name": "Microwave",
-      "category": "Kitchen",
-      "typical_watt": 1200,
+      "typical_watt": 1000,
       "watt_range": [
         800,
-        1500
+        1400
       ],
-      "runtime_pattern": "short_burst",
+      "runtime_pattern": "short_cycle",
+      "notes": "5-10 min cook",
       "source": "UK-DALE"
     },
     {
-      "name": "TV",
-      "category": "Entertainment",
-      "typical_watt": 100,
+      "name": "Fridge-Freezer (Frost-Free)",
+      "category": "Kitchen",
+      "typical_watt": 120,
       "watt_range": [
-        50,
+        60,
         250
       ],
-      "runtime_pattern": "variable",
+      "runtime_pattern": "cycling",
+      "notes": "Compressor + defrost heater",
       "source": "UK-DALE"
     },
     {
-      "name": "LCD TV",
-      "category": "Entertainment",
+      "name": "Fridge-Freezer (Manual Defrost)",
+      "category": "Kitchen",
       "typical_watt": 80,
       "watt_range": [
         40,
         150
       ],
-      "runtime_pattern": "variable",
+      "runtime_pattern": "cycling",
+      "notes": "Compressor only",
       "source": "UK-DALE"
     },
     {
-      "name": "LED TV",
-      "category": "Entertainment",
+      "name": "Fridge (Under-Counter)",
+      "category": "Kitchen",
       "typical_watt": 60,
       "watt_range": [
         30,
         120
       ],
-      "runtime_pattern": "variable",
+      "runtime_pattern": "cycling",
+      "notes": "Small compressor",
       "source": "UK-DALE"
     },
     {
-      "name": "Plasma TV",
+      "name": "Chest Freezer",
+      "category": "Kitchen",
+      "typical_watt": 100,
+      "watt_range": [
+        50,
+        200
+      ],
+      "runtime_pattern": "cycling",
+      "notes": "Manual defrost, efficient",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Upright Freezer",
+      "category": "Kitchen",
+      "typical_watt": 150,
+      "watt_range": [
+        80,
+        250
+      ],
+      "runtime_pattern": "cycling",
+      "notes": "Frost-free typical",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Wine Cooler",
+      "category": "Kitchen",
+      "typical_watt": 80,
+      "watt_range": [
+        40,
+        150
+      ],
+      "runtime_pattern": "cycling",
+      "notes": "Thermoelectric or compressor",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Washer Dryer (Combined)",
+      "category": "Laundry",
+      "typical_watt": 2000,
+      "watt_range": [
+        200,
+        3000
+      ],
+      "runtime_pattern": "multi_stage",
+      "notes": "Wash mode 500W, dry mode 2500W",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Washing Machine (Cold Fill)",
+      "category": "Laundry",
+      "typical_watt": 400,
+      "watt_range": [
+        50,
+        2500
+      ],
+      "runtime_pattern": "multi_stage",
+      "notes": "Motor + heating element",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Washing Machine (Hot Fill)",
+      "category": "Laundry",
+      "typical_watt": 250,
+      "watt_range": [
+        50,
+        800
+      ],
+      "runtime_pattern": "multi_stage",
+      "notes": "Motor only, no heater",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Tumble Dryer (Vented)",
+      "category": "Laundry",
+      "typical_watt": 2500,
+      "watt_range": [
+        2000,
+        3000
+      ],
+      "runtime_pattern": "long_cycle",
+      "notes": "Heating element + motor",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Tumble Dryer (Condenser)",
+      "category": "Laundry",
+      "typical_watt": 2200,
+      "watt_range": [
+        1800,
+        2800
+      ],
+      "runtime_pattern": "long_cycle",
+      "notes": "Heat pump or resistive",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Tumble Dryer (Heat Pump)",
+      "category": "Laundry",
+      "typical_watt": 900,
+      "watt_range": [
+        600,
+        1200
+      ],
+      "runtime_pattern": "long_cycle",
+      "notes": "Energy efficient",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Iron (Steam)",
+      "category": "Laundry",
+      "typical_watt": 2200,
+      "watt_range": [
+        1200,
+        2800
+      ],
+      "runtime_pattern": "cycling",
+      "notes": "Thermostat-controlled",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Iron (Dry)",
+      "category": "Laundry",
+      "typical_watt": 1200,
+      "watt_range": [
+        800,
+        1500
+      ],
+      "runtime_pattern": "cycling",
+      "notes": "Thermostat-controlled",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "TV (LED 32\")",
+      "category": "Entertainment",
+      "typical_watt": 40,
+      "watt_range": [
+        25,
+        60
+      ],
+      "runtime_pattern": "variable",
+      "notes": "Modern LED backlight",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "TV (LED 42\")",
+      "category": "Entertainment",
+      "typical_watt": 60,
+      "watt_range": [
+        40,
+        90
+      ],
+      "runtime_pattern": "variable",
+      "notes": "Mid-size LED",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "TV (LED 55\")",
+      "category": "Entertainment",
+      "typical_watt": 100,
+      "watt_range": [
+        60,
+        150
+      ],
+      "runtime_pattern": "variable",
+      "notes": "Large LED",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "TV (OLED 55\")",
+      "category": "Entertainment",
+      "typical_watt": 120,
+      "watt_range": [
+        80,
+        180
+      ],
+      "runtime_pattern": "variable",
+      "notes": "OLED higher power",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "TV (LCD 32\")",
+      "category": "Entertainment",
+      "typical_watt": 80,
+      "watt_range": [
+        50,
+        120
+      ],
+      "runtime_pattern": "variable",
+      "notes": "Older LCD tech",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "TV (Plasma 42\")",
       "category": "Entertainment",
       "typical_watt": 250,
       "watt_range": [
@@ -317,10 +549,107 @@
         400
       ],
       "runtime_pattern": "variable",
+      "notes": "Legacy plasma tech",
       "source": "UK-DALE"
     },
     {
-      "name": "Hi-Fi",
+      "name": "Set-Top Box (Sky/Freeview)",
+      "category": "Entertainment",
+      "typical_watt": 15,
+      "watt_range": [
+        8,
+        30
+      ],
+      "runtime_pattern": "continuous",
+      "notes": "Standby ~5W",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "DVD Player",
+      "category": "Entertainment",
+      "typical_watt": 12,
+      "watt_range": [
+        5,
+        25
+      ],
+      "runtime_pattern": "variable",
+      "notes": "Standby ~2W",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Blu-ray Player",
+      "category": "Entertainment",
+      "typical_watt": 20,
+      "watt_range": [
+        10,
+        35
+      ],
+      "runtime_pattern": "variable",
+      "notes": "Higher power than DVD",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Games Console (PS5)",
+      "category": "Entertainment",
+      "typical_watt": 150,
+      "watt_range": [
+        50,
+        220
+      ],
+      "runtime_pattern": "variable",
+      "notes": "Gaming mode high, menu low",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Games Console (Xbox Series X)",
+      "category": "Entertainment",
+      "typical_watt": 140,
+      "watt_range": [
+        50,
+        210
+      ],
+      "runtime_pattern": "variable",
+      "notes": "Similar to PS5",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Games Console (Nintendo Switch)",
+      "category": "Entertainment",
+      "typical_watt": 40,
+      "watt_range": [
+        10,
+        50
+      ],
+      "runtime_pattern": "variable",
+      "notes": "Low power console",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Soundbar",
+      "category": "Entertainment",
+      "typical_watt": 30,
+      "watt_range": [
+        10,
+        80
+      ],
+      "runtime_pattern": "variable",
+      "notes": "Standby ~5W",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "AV Receiver",
+      "category": "Entertainment",
+      "typical_watt": 100,
+      "watt_range": [
+        50,
+        250
+      ],
+      "runtime_pattern": "variable",
+      "notes": "Multi-channel amplifier",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Subwoofer (Active)",
       "category": "Entertainment",
       "typical_watt": 50,
       "watt_range": [
@@ -328,43 +657,47 @@
         150
       ],
       "runtime_pattern": "variable",
+      "notes": "Auto-on/standby",
       "source": "UK-DALE"
     },
     {
-      "name": "DVD Player",
-      "category": "Entertainment",
-      "typical_watt": 15,
-      "watt_range": [
-        8,
-        30
-      ],
-      "runtime_pattern": "variable",
-      "source": "UK-DALE"
-    },
-    {
-      "name": "Games Console",
-      "category": "Entertainment",
-      "typical_watt": 150,
+      "name": "Desktop PC (Office)",
+      "category": "Office",
+      "typical_watt": 100,
       "watt_range": [
         50,
         200
       ],
       "runtime_pattern": "variable",
+      "notes": "Idle 50-80W, load 100-150W",
       "source": "UK-DALE"
     },
     {
-      "name": "Desktop PC",
+      "name": "Desktop PC (Gaming)",
       "category": "Office",
-      "typical_watt": 150,
+      "typical_watt": 300,
       "watt_range": [
-        80,
-        400
+        100,
+        600
       ],
       "runtime_pattern": "variable",
+      "notes": "Idle 100W, gaming 300-500W",
       "source": "UK-DALE"
     },
     {
-      "name": "Laptop",
+      "name": "Laptop (13\")",
+      "category": "Office",
+      "typical_watt": 30,
+      "watt_range": [
+        10,
+        65
+      ],
+      "runtime_pattern": "variable",
+      "notes": "Ultrabook, low power",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Laptop (15\")",
       "category": "Office",
       "typical_watt": 50,
       "watt_range": [
@@ -372,43 +705,107 @@
         90
       ],
       "runtime_pattern": "variable",
+      "notes": "Standard laptop",
       "source": "UK-DALE"
     },
     {
-      "name": "Monitor (LCD)",
+      "name": "Laptop (Gaming)",
+      "category": "Office",
+      "typical_watt": 150,
+      "watt_range": [
+        60,
+        250
+      ],
+      "runtime_pattern": "variable",
+      "notes": "High-power GPU",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Monitor (24\" LED)",
+      "category": "Office",
+      "typical_watt": 25,
+      "watt_range": [
+        15,
+        40
+      ],
+      "runtime_pattern": "variable",
+      "notes": "Modern LED backlight",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Monitor (27\" LED)",
       "category": "Office",
       "typical_watt": 40,
       "watt_range": [
-        20,
-        80
+        25,
+        70
       ],
       "runtime_pattern": "variable",
+      "notes": "Larger LED",
       "source": "UK-DALE"
     },
     {
-      "name": "Monitor (CRT)",
+      "name": "Monitor (32\" 4K)",
       "category": "Office",
-      "typical_watt": 80,
+      "typical_watt": 60,
       "watt_range": [
-        60,
-        120
+        35,
+        100
       ],
       "runtime_pattern": "variable",
+      "notes": "High resolution",
       "source": "UK-DALE"
     },
     {
-      "name": "Printer",
+      "name": "Inkjet Printer",
       "category": "Office",
-      "typical_watt": 50,
+      "typical_watt": 30,
       "watt_range": [
         5,
-        400
+        100
       ],
       "runtime_pattern": "standby_burst",
+      "notes": "Standby 5W, printing 30-80W",
       "source": "UK-DALE"
     },
     {
-      "name": "Router",
+      "name": "Laser Printer",
+      "category": "Office",
+      "typical_watt": 400,
+      "watt_range": [
+        5,
+        600
+      ],
+      "runtime_pattern": "standby_burst",
+      "notes": "Standby 5W, fuser 400-600W",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Scanner",
+      "category": "Office",
+      "typical_watt": 20,
+      "watt_range": [
+        5,
+        50
+      ],
+      "runtime_pattern": "standby_burst",
+      "notes": "Standby 5W, scanning 20-40W",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Shredder",
+      "category": "Office",
+      "typical_watt": 200,
+      "watt_range": [
+        100,
+        400
+      ],
+      "runtime_pattern": "short_burst",
+      "notes": "Motor + cutting blades",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Router (ADSL/VDSL)",
       "category": "Network",
       "typical_watt": 10,
       "watt_range": [
@@ -416,10 +813,11 @@
         20
       ],
       "runtime_pattern": "continuous",
+      "notes": "24/7 operation",
       "source": "UK-DALE"
     },
     {
-      "name": "Modem",
+      "name": "Router (Cable/Fibre)",
       "category": "Network",
       "typical_watt": 8,
       "watt_range": [
@@ -427,28 +825,91 @@
         15
       ],
       "runtime_pattern": "continuous",
+      "notes": "Lower power than DSL",
       "source": "UK-DALE"
     },
     {
-      "name": "Phone Charger",
-      "category": "Personal",
+      "name": "Mesh WiFi Node",
+      "category": "Network",
+      "typical_watt": 12,
+      "watt_range": [
+        6,
+        20
+      ],
+      "runtime_pattern": "continuous",
+      "notes": "Per node",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Network Switch (5-port)",
+      "category": "Network",
       "typical_watt": 5,
       "watt_range": [
-        2,
-        15
+        3,
+        10
       ],
-      "runtime_pattern": "variable",
+      "runtime_pattern": "continuous",
+      "notes": "Unmanaged switch",
       "source": "UK-DALE"
     },
     {
-      "name": "Electric Shower",
+      "name": "Network Switch (24-port PoE)",
+      "category": "Network",
+      "typical_watt": 80,
+      "watt_range": [
+        20,
+        200
+      ],
+      "runtime_pattern": "continuous",
+      "notes": "Variable with PoE load",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "NAS (2-bay)",
+      "category": "Network",
+      "typical_watt": 30,
+      "watt_range": [
+        15,
+        60
+      ],
+      "runtime_pattern": "continuous",
+      "notes": "Idle 20W, active 40-60W",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "NAS (4-bay)",
+      "category": "Network",
+      "typical_watt": 60,
+      "watt_range": [
+        30,
+        100
+      ],
+      "runtime_pattern": "continuous",
+      "notes": "More drives = more power",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Electric Shower (8.5kW)",
       "category": "Water",
       "typical_watt": 8500,
       "watt_range": [
-        7000,
-        10500
+        6000,
+        9500
       ],
       "runtime_pattern": "short_burst",
+      "notes": "Instant water heating",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Electric Shower (10.5kW)",
+      "category": "Water",
+      "typical_watt": 10500,
+      "watt_range": [
+        9000,
+        11500
+      ],
+      "runtime_pattern": "short_burst",
+      "notes": "High-power instant heating",
       "source": "UK-DALE"
     },
     {
@@ -460,10 +921,59 @@
         3500
       ],
       "runtime_pattern": "long_cycle",
+      "notes": "Hot water tank heating",
       "source": "UK-DALE"
     },
     {
-      "name": "Storage Heater",
+      "name": "Storage Heater (1.7kW)",
+      "category": "HVAC",
+      "typical_watt": 1700,
+      "watt_range": [
+        1500,
+        2000
+      ],
+      "runtime_pattern": "cycling",
+      "notes": "Economy 7 overnight charging",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Storage Heater (3.4kW)",
+      "category": "HVAC",
+      "typical_watt": 3400,
+      "watt_range": [
+        3000,
+        3800
+      ],
+      "runtime_pattern": "cycling",
+      "notes": "Larger room heating",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Oil-Filled Radiator (1kW)",
+      "category": "HVAC",
+      "typical_watt": 1000,
+      "watt_range": [
+        500,
+        1000
+      ],
+      "runtime_pattern": "cycling",
+      "notes": "Thermostat-controlled",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Oil-Filled Radiator (2kW)",
+      "category": "HVAC",
+      "typical_watt": 2000,
+      "watt_range": [
+        1000,
+        2000
+      ],
+      "runtime_pattern": "cycling",
+      "notes": "Larger capacity",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Convector Heater",
       "category": "HVAC",
       "typical_watt": 2000,
       "watt_range": [
@@ -471,72 +981,115 @@
         3000
       ],
       "runtime_pattern": "cycling",
+      "notes": "Fan-assisted optional",
       "source": "UK-DALE"
     },
     {
-      "name": "Fan Heater",
+      "name": "Halogen Heater",
       "category": "HVAC",
-      "typical_watt": 2000,
+      "typical_watt": 1200,
       "watt_range": [
-        1000,
-        2500
+        400,
+        1200
       ],
-      "runtime_pattern": "cycling",
+      "runtime_pattern": "variable",
+      "notes": "1-3 tube settings",
       "source": "UK-DALE"
     },
     {
-      "name": "Oil-Filled Radiator",
-      "category": "HVAC",
-      "typical_watt": 1500,
-      "watt_range": [
-        1000,
-        2500
-      ],
-      "runtime_pattern": "cycling",
-      "source": "UK-DALE"
-    },
-    {
-      "name": "Dehumidifier",
+      "name": "Dehumidifier (Refrigerant)",
       "category": "HVAC",
       "typical_watt": 300,
       "watt_range": [
-        200,
+        150,
         500
       ],
       "runtime_pattern": "cycling",
+      "notes": "Compressor-based",
       "source": "UK-DALE"
     },
     {
-      "name": "Vacuum Cleaner",
+      "name": "Dehumidifier (Desiccant)",
+      "category": "HVAC",
+      "typical_watt": 600,
+      "watt_range": [
+        400,
+        800
+      ],
+      "runtime_pattern": "cycling",
+      "notes": "Heating element-based",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Air Conditioner (Portable)",
+      "category": "HVAC",
+      "typical_watt": 1000,
+      "watt_range": [
+        700,
+        1500
+      ],
+      "runtime_pattern": "cycling",
+      "notes": "Single-hose typical",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Vacuum Cleaner (Upright)",
+      "category": "Cleaning",
+      "typical_watt": 1400,
+      "watt_range": [
+        800,
+        2000
+      ],
+      "runtime_pattern": "short_burst",
+      "notes": "Bag or bagless",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Vacuum Cleaner (Cylinder)",
+      "category": "Cleaning",
+      "typical_watt": 1200,
+      "watt_range": [
+        600,
+        1800
+      ],
+      "runtime_pattern": "short_burst",
+      "notes": "Smaller motor typical",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Vacuum Cleaner (Robot)",
+      "category": "Cleaning",
+      "typical_watt": 30,
+      "watt_range": [
+        15,
+        60
+      ],
+      "runtime_pattern": "long_cycle",
+      "notes": "Low power, 60-90 min run",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Steam Cleaner",
       "category": "Cleaning",
       "typical_watt": 1500,
       "watt_range": [
-        800,
-        2500
+        1000,
+        1800
       ],
-      "runtime_pattern": "short_burst",
+      "runtime_pattern": "short_cycle",
+      "notes": "Water heating",
       "source": "UK-DALE"
     },
     {
-      "name": "Iron",
-      "category": "Personal",
-      "typical_watt": 2000,
+      "name": "Carpet Cleaner",
+      "category": "Cleaning",
+      "typical_watt": 800,
       "watt_range": [
-        1000,
-        2400
+        500,
+        1200
       ],
-      "runtime_pattern": "cycling",
-      "source": "UK-DALE"
-    },
-    {
-      "name": "Hair Dryer",
-      "category": "Personal",
-      "typical_watt": 1800,
-      "watt_range": [
-        1000,
-        2200
-      ],
-      "runtime_pattern": "short_burst",
+      "runtime_pattern": "short_cycle",
+      "notes": "Motor + pump",
       "source": "UK-DALE"
     },
     {
@@ -544,14 +1097,39 @@
       "category": "Personal",
       "typical_watt": 40,
       "watt_range": [
-        20,
+        15,
         80
       ],
       "runtime_pattern": "short_cycle",
+      "notes": "Ceramic heating plates",
       "source": "UK-DALE"
     },
     {
-      "name": "Electric Toothbrush Charger",
+      "name": "Hair Curlers",
+      "category": "Personal",
+      "typical_watt": 30,
+      "watt_range": [
+        15,
+        60
+      ],
+      "runtime_pattern": "short_cycle",
+      "notes": "Heating element",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Electric Shaver (Mains)",
+      "category": "Personal",
+      "typical_watt": 15,
+      "watt_range": [
+        5,
+        30
+      ],
+      "runtime_pattern": "short_burst",
+      "notes": "Rotary or foil",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Electric Toothbrush (Charging)",
       "category": "Personal",
       "typical_watt": 2,
       "watt_range": [
@@ -559,48 +1137,424 @@
         5
       ],
       "runtime_pattern": "continuous",
+      "notes": "Inductive charging",
       "source": "UK-DALE"
     },
     {
-      "name": "Baby Monitor",
-      "category": "Personal",
-      "typical_watt": 3,
-      "watt_range": [
-        2,
-        8
-      ],
-      "runtime_pattern": "continuous",
-      "source": "UK-DALE"
-    },
-    {
-      "name": "Fish Tank",
+      "name": "Aquarium (Small)",
       "category": "Other",
-      "typical_watt": 40,
+      "typical_watt": 50,
       "watt_range": [
         20,
         100
       ],
       "runtime_pattern": "continuous",
+      "notes": "Filter + heater + light",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Aquarium (Large)",
+      "category": "Other",
+      "typical_watt": 150,
+      "watt_range": [
+        80,
+        300
+      ],
+      "runtime_pattern": "continuous",
+      "notes": "More equipment",
       "source": "UK-DALE"
     },
     {
       "name": "Pond Pump",
       "category": "Other",
-      "typical_watt": 60,
+      "typical_watt": 80,
       "watt_range": [
         30,
+        200
+      ],
+      "runtime_pattern": "continuous",
+      "notes": "Seasonal 24/7",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Sewing Machine",
+      "category": "Other",
+      "typical_watt": 100,
+      "watt_range": [
+        50,
+        200
+      ],
+      "runtime_pattern": "short_burst",
+      "notes": "Motor + light",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Power Tools (Drill)",
+      "category": "Other",
+      "typical_watt": 600,
+      "watt_range": [
+        300,
+        1000
+      ],
+      "runtime_pattern": "short_burst",
+      "notes": "Variable speed",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Power Tools (Circular Saw)",
+      "category": "Other",
+      "typical_watt": 1200,
+      "watt_range": [
+        800,
+        1800
+      ],
+      "runtime_pattern": "short_burst",
+      "notes": "High torque motor",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Garage Door Opener",
+      "category": "Other",
+      "typical_watt": 350,
+      "watt_range": [
+        200,
+        600
+      ],
+      "runtime_pattern": "short_burst",
+      "notes": "Motor + light",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Electric Car Charger (3.6kW)",
+      "category": "Other",
+      "typical_watt": 3600,
+      "watt_range": [
+        3000,
+        3700
+      ],
+      "runtime_pattern": "long_cycle",
+      "notes": "Level 2 slow charging",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Electric Car Charger (7kW)",
+      "category": "Other",
+      "typical_watt": 7000,
+      "watt_range": [
+        6500,
+        7500
+      ],
+      "runtime_pattern": "long_cycle",
+      "notes": "Level 2 fast charging",
+      "source": "UK-DALE"
+    },
+    {
+      "name": "Refrigerator",
+      "category": "Kitchen",
+      "typical_watt": 150,
+      "watt_range": [
+        50,
+        300
+      ],
+      "runtime_pattern": "cycling",
+      "notes": "REDD: compressor + defrost cycles",
+      "source": "REDD"
+    },
+    {
+      "name": "Dishwasher",
+      "category": "Kitchen",
+      "typical_watt": 1800,
+      "watt_range": [
+        1200,
+        2500
+      ],
+      "runtime_pattern": "multi_stage",
+      "notes": "REDD: wash/rinse/dry cycles",
+      "source": "REDD"
+    },
+    {
+      "name": "Electric Stove",
+      "category": "Kitchen",
+      "typical_watt": 2500,
+      "watt_range": [
+        1000,
+        5000
+      ],
+      "runtime_pattern": "variable",
+      "notes": "REDD: multiple elements",
+      "source": "REDD"
+    },
+    {
+      "name": "Clothes Washer",
+      "category": "Laundry",
+      "typical_watt": 500,
+      "watt_range": [
+        50,
+        2500
+      ],
+      "runtime_pattern": "multi_stage",
+      "notes": "REDD: motor + heater",
+      "source": "REDD"
+    },
+    {
+      "name": "Clothes Dryer",
+      "category": "Laundry",
+      "typical_watt": 3000,
+      "watt_range": [
+        2500,
+        5500
+      ],
+      "runtime_pattern": "long_cycle",
+      "notes": "REDD: 220V heating element",
+      "source": "REDD"
+    },
+    {
+      "name": "Lighting (Incandescent)",
+      "category": "Lighting",
+      "typical_watt": 60,
+      "watt_range": [
+        25,
         150
       ],
       "runtime_pattern": "continuous",
-      "source": "UK-DALE"
+      "notes": "REDD: various room fixtures",
+      "source": "REDD"
+    },
+    {
+      "name": "Lighting (Fluorescent)",
+      "category": "Lighting",
+      "typical_watt": 20,
+      "watt_range": [
+        10,
+        40
+      ],
+      "runtime_pattern": "continuous",
+      "notes": "REDD: office/kitchen lighting",
+      "source": "REDD"
+    },
+    {
+      "name": "Electronics (Entertainment)",
+      "category": "Entertainment",
+      "typical_watt": 100,
+      "watt_range": [
+        20,
+        300
+      ],
+      "runtime_pattern": "variable",
+      "notes": "REDD: TV + audio + gaming",
+      "source": "REDD"
+    },
+    {
+      "name": "HVAC (Central Air)",
+      "category": "HVAC",
+      "typical_watt": 3000,
+      "watt_range": [
+        2000,
+        5000
+      ],
+      "runtime_pattern": "cycling",
+      "notes": "REDD: compressor + air handler",
+      "source": "REDD"
+    },
+    {
+      "name": "Space Heater",
+      "category": "HVAC",
+      "typical_watt": 1500,
+      "watt_range": [
+        500,
+        2000
+      ],
+      "runtime_pattern": "cycling",
+      "notes": "REDD: portable electric heater",
+      "source": "REDD"
+    },
+    {
+      "name": "Bathroom GFI",
+      "category": "Personal",
+      "typical_watt": 50,
+      "watt_range": [
+        10,
+        1500
+      ],
+      "runtime_pattern": "variable",
+      "notes": "REDD: hair dryer, shaver, etc.",
+      "source": "REDD"
+    },
+    {
+      "name": "Kitchen Outlets",
+      "category": "Kitchen",
+      "typical_watt": 200,
+      "watt_range": [
+        10,
+        2000
+      ],
+      "runtime_pattern": "variable",
+      "notes": "REDD: various small appliances",
+      "source": "REDD"
+    },
+    {
+      "name": "Tablet Computer",
+      "category": "Office",
+      "typical_watt": 10,
+      "watt_range": [
+        5,
+        20
+      ],
+      "runtime_pattern": "variable",
+      "notes": "ECO: iPad-class devices",
+      "source": "ECO"
+    },
+    {
+      "name": "Stereo System",
+      "category": "Entertainment",
+      "typical_watt": 80,
+      "watt_range": [
+        20,
+        200
+      ],
+      "runtime_pattern": "variable",
+      "notes": "ECO: amplifier + speakers",
+      "source": "ECO"
+    },
+    {
+      "name": "Alarm Clock",
+      "category": "Personal",
+      "typical_watt": 2,
+      "watt_range": [
+        1,
+        5
+      ],
+      "runtime_pattern": "continuous",
+      "notes": "ECO: 24/7 operation",
+      "source": "ECO"
+    },
+    {
+      "name": "Air Purifier",
+      "category": "HVAC",
+      "typical_watt": 40,
+      "watt_range": [
+        15,
+        80
+      ],
+      "runtime_pattern": "continuous",
+      "notes": "ECO: HEPA filter + fan",
+      "source": "ECO"
+    },
+    {
+      "name": "Humidifier",
+      "category": "HVAC",
+      "typical_watt": 30,
+      "watt_range": [
+        15,
+        100
+      ],
+      "runtime_pattern": "cycling",
+      "notes": "ECO: ultrasonic or evaporative",
+      "source": "ECO"
+    },
+    {
+      "name": "Water Cooler",
+      "category": "Kitchen",
+      "typical_watt": 80,
+      "watt_range": [
+        40,
+        150
+      ],
+      "runtime_pattern": "cycling",
+      "notes": "ECO: hot + cold water",
+      "source": "ECO"
+    },
+    {
+      "name": "Wine Refrigerator",
+      "category": "Kitchen",
+      "typical_watt": 100,
+      "watt_range": [
+        50,
+        200
+      ],
+      "runtime_pattern": "cycling",
+      "notes": "ECO: compressor or thermoelectric",
+      "source": "ECO"
+    },
+    {
+      "name": "Espresso Machine",
+      "category": "Kitchen",
+      "typical_watt": 1300,
+      "watt_range": [
+        1000,
+        1800
+      ],
+      "runtime_pattern": "short_burst",
+      "notes": "GREEND: high-pressure pump",
+      "source": "GREEND"
+    },
+    {
+      "name": "Electric Heater (Convection)",
+      "category": "HVAC",
+      "typical_watt": 2000,
+      "watt_range": [
+        1000,
+        3000
+      ],
+      "runtime_pattern": "cycling",
+      "notes": "GREEND: European homes",
+      "source": "GREEND"
+    },
+    {
+      "name": "Electric Blanket",
+      "category": "Personal",
+      "typical_watt": 60,
+      "watt_range": [
+        30,
+        100
+      ],
+      "runtime_pattern": "cycling",
+      "notes": "GREEND: thermostat-controlled",
+      "source": "GREEND"
+    },
+    {
+      "name": "Water Bed Heater",
+      "category": "Personal",
+      "typical_watt": 150,
+      "watt_range": [
+        100,
+        250
+      ],
+      "runtime_pattern": "cycling",
+      "notes": "GREEND: overnight heating",
+      "source": "GREEND"
     }
   ],
   "metadata": {
     "sources": [
       "PLAID",
-      "UK-DALE"
+      "UK-DALE",
+      "REDD",
+      "ECO",
+      "GREEND"
     ],
-    "total_appliances": 54,
-    "notes": "Combined appliance signature library from PLAID and UK-DALE datasets"
+    "total_appliances": 127,
+    "by_source": {
+      "PLAID": 11,
+      "UK-DALE": 93,
+      "REDD": 12,
+      "ECO": 7,
+      "GREEND": 4
+    },
+    "by_category": {
+      "Lighting": 4,
+      "HVAC": 16,
+      "Kitchen": 30,
+      "Personal": 9,
+      "Office": 15,
+      "Cleaning": 6,
+      "Laundry": 11,
+      "Entertainment": 17,
+      "Network": 7,
+      "Water": 3,
+      "Other": 9
+    },
+    "notes": "Comprehensive appliance signature library from 5 major NILM datasets",
+    "updated": "2026-03-21"
   }
 }
