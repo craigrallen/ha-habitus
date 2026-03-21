@@ -889,6 +889,9 @@ async function addYamlToHA(yaml, btn) {
   <button class="active" onclick="gotoTab('home',this)" title="Home">
     <span class="nav-icon">🏠</span><span class="nav-label">Home</span>
   </button>
+  <button onclick="gotoTab('anomalies',this)" title="Anomalies">
+    <span class="nav-icon">🚨</span><span class="nav-label">Alerts</span>
+  </button>
   <button onclick="gotoTab('suggestions',this)" title="Suggestions">
     <span class="nav-icon">💡</span><span class="nav-label">Ideas</span>
   </button>
@@ -971,7 +974,68 @@ async function addYamlToHA(yaml, btn) {
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════ -->
-<!-- TAB 2: SUGGESTIONS                                             -->
+<!-- TAB 2: ANOMALIES                                               -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="tab-anomalies" class="tab">
+  
+  <!-- Current Status Card -->
+  <div class="sec" style="margin-bottom:16px">
+    <div class="sec-header">
+      <h2>🚨 Current Status</h2>
+      <span class="sec-sub" id="anom-status-sub">Real-time anomaly detection</span>
+    </div>
+    <div id="anom-status-card" style="padding:16px;border-radius:8px;background:var(--card2)">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <div style="font-size:2.5rem" id="anom-status-icon">⏳</div>
+        <div style="flex:1">
+          <div style="font-size:1.2rem;font-weight:600;margin-bottom:4px" id="anom-status-text">Loading...</div>
+          <div style="font-size:.85rem;color:var(--text3)" id="anom-status-detail">Checking anomaly status...</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:2rem;font-weight:700" id="anom-score-large">—</div>
+          <div style="font-size:.75rem;color:var(--text3)">Anomaly Score</div>
+        </div>
+      </div>
+      <div style="font-size:.78rem;color:var(--text3);border-top:1px solid var(--border);padding-top:8px" id="anom-last-check">Last check: —</div>
+    </div>
+  </div>
+
+  <!-- Active Anomalies -->
+  <div class="sec">
+    <div class="sec-header">
+      <h2>⚠️ Active Anomalies</h2>
+      <span class="sec-sub" id="active-anom-count">0 entities currently anomalous</span>
+    </div>
+    <div id="active-anomalies-list">
+      <div style="color:var(--text3);padding:16px">Loading anomalies...</div>
+    </div>
+  </div>
+
+  <!-- Recent History (Last 7 Days) -->
+  <div class="sec">
+    <div class="sec-header">
+      <h2>📜 Recent History</h2>
+      <span class="sec-sub">Anomalies detected in the last 7 days</span>
+    </div>
+    <div id="anom-history-list">
+      <div style="color:var(--text3);padding:16px">Loading history...</div>
+    </div>
+  </div>
+
+  <!-- Anomaly Patterns -->
+  <div class="sec">
+    <div class="sec-header">
+      <h2>📊 Patterns</h2>
+      <span class="sec-sub">Recurring anomalies and trends</span>
+    </div>
+    <div id="anom-patterns">
+      <div style="color:var(--text3);padding:16px">Analyzing patterns...</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- TAB 3: SUGGESTIONS                                             -->
 <!-- ═══════════════════════════════════════════════════════════════ -->
 <div id="tab-suggestions" class="tab">
 
@@ -1989,6 +2053,11 @@ function gotoTab(id, btn) {
       if (oc.includes("'"+tabId+"'") || oc.includes('"'+tabId+'"')) b.classList.add('active');
     });
   }
+  
+  // Load tab-specific data on demand
+  if (tabId === 'anomalies') {
+    loadAnomalies();
+  }
 }
 
 function toast(msg, type='ts') {
@@ -2286,6 +2355,84 @@ function loadEnergyWeather(){
       </tr>`;
     }).join('');
   });
+}
+
+async function loadAnomalies() {
+  const [state, anomalies] = await Promise.all([
+    api('api/state').catch(()=>({})),
+    api('api/anomalies').catch(()=>({})),
+  ]);
+  
+  const score = state.anomaly_score ?? 0;
+  const ents = (anomalies.entities || []).filter(a => !dismissedAnomalies.has(anomalyKey(a)));
+  const lastCheck = state.last_run ? new Date(state.last_run).toLocaleString() : 'Never';
+  
+  // Status card
+  const statusIcon = score >= 70 ? '🚨' : score >= 40 ? '⚠️' : '✅';
+  const statusText = score >= 70 ? 'Anomaly Detected' : score >= 40 ? 'Elevated Activity' : 'All Normal';
+  const statusDetail = score >= 70 
+    ? `${ents.length} entities showing unusual behavior`
+    : score >= 40
+    ? `Some activity outside normal patterns`
+    : 'All sensors within expected ranges';
+  const statusColor = score >= 70 ? 'var(--red)' : score >= 40 ? 'var(--amber)' : 'var(--green)';
+  
+  document.getElementById('anom-status-icon').textContent = statusIcon;
+  document.getElementById('anom-status-text').textContent = statusText;
+  document.getElementById('anom-status-text').style.color = statusColor;
+  document.getElementById('anom-status-detail').textContent = statusDetail;
+  document.getElementById('anom-score-large').textContent = score;
+  document.getElementById('anom-score-large').style.color = statusColor;
+  document.getElementById('anom-last-check').textContent = `Last check: ${lastCheck}`;
+  
+  // Active anomalies list
+  document.getElementById('active-anom-count').textContent = `${ents.length} ${ents.length === 1 ? 'entity' : 'entities'} currently anomalous`;
+  
+  const activeHtml = ents.length
+    ? ents.map(e => {
+        const severity = e.z_score >= 4 ? 'critical' : e.z_score >= 3 ? 'warning' : 'info';
+        const severityBadge = e.z_score >= 4
+          ? '<span class="badge b-alert">Critical</span>'
+          : e.z_score >= 3
+          ? '<span class="badge b-warn">Warning</span>'
+          : '<span class="badge b-info">Info</span>';
+        const severityColor = e.z_score >= 3 ? 'var(--red)' : e.z_score >= 1.5 ? 'var(--amber)' : 'var(--green)';
+        
+        return `
+          <div style="padding:12px;border-radius:8px;background:var(--card2);margin-bottom:8px;border-left:3px solid ${severityColor}">
+            <div style="display:flex;align-items:start;gap:12px;margin-bottom:8px">
+              <div style="flex:1">
+                <div style="font-weight:600;margin-bottom:4px">${e.name}</div>
+                <div style="font-size:.85rem;color:var(--text3)">
+                  Current: <strong>${e.current_value}${e.unit}</strong> vs expected: ${e.baseline_mean}${e.unit} (±${e.baseline_std}${e.unit})
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                ${severityBadge}
+                <div style="font-size:1.2rem;font-weight:700;color:${severityColor}">${e.z_score.toFixed(1)}σ</div>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn" style="padding:4px 12px;font-size:.75rem" onclick="dismissAnomaly('${(e.id || e.entity_id || '').replace(/'/g, "\\'")}', '${(e.entity_id || '').replace(/'/g, "\\'")}', ${e.z_score || 0})">Mark as Expected</button>
+              <button class="btn" style="padding:4px 12px;font-size:.75rem" onclick="viewEntityDetail('${(e.entity_id || '').replace(/'/g, "\\'")}')">View Details</button>
+            </div>
+          </div>
+        `;
+      }).join('')
+    : '<div style="padding:16px;text-align:center;color:var(--text3)">✅ No anomalies detected — all sensors within normal ranges</div>';
+  
+  document.getElementById('active-anomalies-list').innerHTML = activeHtml;
+  
+  // History (placeholder for now — would need backend API to store anomaly events)
+  document.getElementById('anom-history-list').innerHTML = '<div style="padding:16px;text-align:center;color:var(--text3)">📜 Anomaly history tracking coming soon</div>';
+  
+  // Patterns (placeholder)
+  document.getElementById('anom-patterns').innerHTML = '<div style="padding:16px;text-align:center;color:var(--text3)">📊 Pattern analysis coming soon</div>';
+}
+
+function viewEntityDetail(entityId) {
+  // Placeholder for entity detail modal
+  toast(`Entity detail view for ${entityId} — coming soon`, 'ti');
 }
 
 async function load() {
