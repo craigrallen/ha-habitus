@@ -1731,11 +1731,7 @@ async function addYamlToHA(yaml, btn) {
         if (eids.length) {
           eids.forEach(eid => addProxyRow(eid));
         }
-        // Refresh selects with full sensor options
-        document.querySelectorAll('.power-proxy-sel').forEach(sel => {
-          const cur = sel.value;
-          sel.innerHTML = buildOptions(cur);
-        });
+        // addProxyRow() already builds correct options with selected values — no refresh needed
         document.getElementById('power-proxy-status').textContent = eids.length ? `${eids.length} proxy sensor(s) configured` : 'Not configured';
       } catch(e) {}
     }
