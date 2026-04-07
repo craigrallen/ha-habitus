@@ -2521,9 +2521,17 @@ async def run(days_history: int, mode: str = "full") -> None:
 
                 log.info("Running HMM activity state model...")
                 try:
-                    area_data5 = ha_areas._load_cache()
-                    e2a5 = area_data5.get("entity_to_area", {})
-                    activity_hmm.train_activity_model(e2a5, days=min(days_history, 30))
+                    import signal
+                    def timeout_handler(signum, frame):
+                        raise TimeoutError("HMM training exceeded 60s timeout")
+                    signal.signal(signal.SIGALRM, timeout_handler)
+                    signal.alarm(60)  # 60-second timeout
+                    try:
+                        area_data5 = ha_areas._load_cache()
+                        e2a5 = area_data5.get("entity_to_area", {})
+                        activity_hmm.train_activity_model(e2a5, days=min(days_history, 30))
+                    finally:
+                        signal.alarm(0)  # Cancel alarm
                 except Exception as e:
                     log.warning("HMM activity model failed: %s", e)
 
@@ -2800,8 +2808,16 @@ async def run(days_history: int, mode: str = "full") -> None:
 
             log.info("Running HMM activity state model...")
             try:
-                e2a_hm = ha_areas._load_cache().get("entity_to_area", {})
-                activity_hmm.train_activity_model(e2a_hm, days=min(days_history, 30))
+                import signal
+                def timeout_handler(signum, frame):
+                    raise TimeoutError("HMM training exceeded 60s timeout")
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(60)  # 60-second timeout
+                try:
+                    e2a_hm = ha_areas._load_cache().get("entity_to_area", {})
+                    activity_hmm.train_activity_model(e2a_hm, days=min(days_history, 30))
+                finally:
+                    signal.alarm(0)  # Cancel alarm
             except Exception as e:
                 log.warning("HMM activity model failed: %s", e)
 
