@@ -23,7 +23,8 @@ AUTO_SCORES_PATH = os.path.join(DATA_DIR, "automation_scores.json")
 GAP_PATH = os.path.join(DATA_DIR, "automation_gap.json")
 DATA_QUALITY_PATH = os.path.join(DATA_DIR, "data_quality.json")
 
-app = Flask(__name__, template_folder="templates")
+_TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+app = Flask(__name__, template_folder=_TEMPLATE_DIR)
 
 
 def _read(path: str, default: object = None) -> object:

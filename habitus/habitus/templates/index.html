@@ -4,16 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Habitus</title>
-<script>
-// Detect the ingress base path so relative fetch() calls resolve correctly.
-// HA serves add-ons at /api/hassio_ingress/<slug>/ — we need that as our base.
-(function(){
-  var base = document.createElement('base');
-  var loc  = window.location.pathname.replace(/\/+$/, '') + '/';
-  base.href = loc;
-  document.head.appendChild(base);
-})();
-</script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
