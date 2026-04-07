@@ -6,7 +6,7 @@ import os
 import yaml as _yaml  # type: ignore[import-untyped]
 from flask import Flask, jsonify, render_template, request
 
-from . import trainer as _trainer
+from habitus import trainer as _trainer
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 STATE_PATH = os.path.join(DATA_DIR, "run_state.json")
@@ -117,7 +117,7 @@ def api_full_train():
     import asyncio
     from concurrent.futures import ThreadPoolExecutor
 
-    from .main import run
+    from habitus.main import run
 
     def do_train():
         asyncio.run(run(days_history=365, mode="full"))
@@ -141,7 +141,7 @@ def api_rescan():
                 os.remove(p)
         days = int(os.environ.get("HABITUS_DAYS", "365"))
         # Use progressive training: 30d → 60d → 90d → 180d → max
-        from . import progressive as _prog  # noqa: PLC0415
+        from habitus import progressive as _prog  # noqa: PLC0415
 
         if _prog.is_expanding():
             return jsonify({"ok": False, "error": "Progressive training already running"}), 409
@@ -207,11 +207,6 @@ def api_settings():
         if "power_entity" in data:
             settings["power_entity"] = data["power_entity"]
             os.environ["HABITUS_POWER_ENTITY"] = data["power_entity"]
-        # 3-phase power entity selectors
-        for phase_key in ("power_entity_phase1", "power_entity_phase2", "power_entity_phase3"):
-            if phase_key in data:
-                settings[phase_key] = data[phase_key]
-                os.environ[f"HABITUS_{phase_key.upper()}"] = data[phase_key]
         state["user_settings"] = settings
         try:
             with open(state_path, "w") as f:
@@ -283,19 +278,18 @@ def api_automation_gap():
 @app.route("/ingress/api/insights")
 def api_insights():
     """Return energy insights: peak hours, top consumers, waste, solar ratio."""
-    from . import insights as _ins  # noqa: PLC0415
+    from habitus import insights as _ins  # noqa: PLC0415
 
     return jsonify(_ins.compute_insights())
 
 
-# ── Entity Ignore List ───────────────────────────────────────────────────────
+# ── New Feature Endpoints ────────────────────────────────────────────────────
 
 
 @app.route("/api/ignore_list")
 @app.route("/ingress/api/ignore_list")
 def api_ignore_list():
-    """Return the entity ignore list with reasons."""
-    from . import entity_ignore as _ign  # noqa: PLC0415
+    from habitus import entity_ignore as _ign  # noqa: PLC0415
 
     return jsonify(_ign.get_ignore_list())
 
@@ -303,103 +297,73 @@ def api_ignore_list():
 @app.route("/api/ignore_entity", methods=["POST"])
 @app.route("/ingress/api/ignore_entity", methods=["POST"])
 def api_ignore_entity():
-    """Add an entity to the ignore list."""
-    from . import entity_ignore as _ign  # noqa: PLC0415
+    from habitus import entity_ignore as _ign  # noqa: PLC0415
 
     data = request.get_json() or {}
-    entity_id = data.get("entity_id", "")
-    reason = data.get("reason", "")
-    if not entity_id:
+    eid = data.get("entity_id", "")
+    if not eid:
         return jsonify({"ok": False, "error": "entity_id required"}), 400
-    _ign.add_entity(entity_id, reason)
+    _ign.add_entity(eid, data.get("reason", ""))
     return jsonify({"ok": True})
 
 
 @app.route("/api/unignore_entity", methods=["POST"])
 @app.route("/ingress/api/unignore_entity", methods=["POST"])
 def api_unignore_entity():
-    """Remove an entity from the ignore list."""
-    from . import entity_ignore as _ign  # noqa: PLC0415
+    from habitus import entity_ignore as _ign  # noqa: PLC0415
 
     data = request.get_json() or {}
-    entity_id = data.get("entity_id", "")
-    if not entity_id:
+    eid = data.get("entity_id", "")
+    if not eid:
         return jsonify({"ok": False, "error": "entity_id required"}), 400
-    _ign.remove_entity(entity_id)
+    _ign.remove_entity(eid)
     return jsonify({"ok": True})
-
-
-# ── CSV Export ───────────────────────────────────────────────────────────────
 
 
 @app.route("/api/export/<dataset>")
 @app.route("/ingress/api/export/<dataset>")
 def api_export(dataset: str):
-    """Export data as CSV download.
-
-    Supported datasets: ``baselines``, ``anomalies``, ``energy``, ``history``.
-    """
     from flask import Response
 
-    from . import csv_export as _csv  # noqa: PLC0415
+    from habitus import csv_export as _csv  # noqa: PLC0415
 
     if dataset not in _csv.AVAILABLE_EXPORTS:
         return jsonify({"error": f"Unknown dataset: {dataset}"}), 404
     filename, export_fn = _csv.AVAILABLE_EXPORTS[dataset]
-    csv_data = export_fn()
     return Response(
-        csv_data,
+        export_fn(),
         mimetype="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
 
-# ── NL Explanations ──────────────────────────────────────────────────────────
-
-
 @app.route("/api/explain")
 @app.route("/ingress/api/explain")
 def api_explain():
-    """Return plain English explanation of current anomaly state."""
-    from . import nl_explanations as _nl  # noqa: PLC0415
+    from habitus import nl_explanations as _nl  # noqa: PLC0415
 
     anomaly_data = _read(ANOMALIES_PATH) or {}
     anomalies = anomaly_data.get("anomalies", [])
     score = anomaly_data.get("weighted_score", anomaly_data.get("score", 0))
-
     baselines = _read(os.path.join(DATA_DIR, "entity_baselines.json")) or {}
-    total_entities = len([k for k in baselines if not k.startswith("_")])
-
-    overall = _nl.explain_overall_score(int(score), anomalies, total_entities)
-    entity_explanations = [
-        {
-            "entity_id": a.get("entity_id", a.get("name", "")),
-            "explanation": _nl.explain_entity_anomaly(a),
-        }
-        for a in anomalies[:10]
-    ]
-
-    drift_data = _read(DRIFT_PATH) or {}
-    drift_explanation = _nl.explain_drift(drift_data)
-
+    total = len([k for k in baselines if not k.startswith("_")])
     return jsonify(
         {
-            "overall": overall,
+            "overall": _nl.explain_overall_score(int(score), anomalies, total),
             "score": int(score),
-            "entities": entity_explanations,
-            "drift": drift_explanation,
+            "entities": [
+                {"entity_id": a.get("entity_id", ""), "explanation": _nl.explain_entity_anomaly(a)}
+                for a in anomalies[:10]
+            ],
+            "drift": _nl.explain_drift(_read(DRIFT_PATH) or {}),
         }
     )
-
-
-# ── Vacation Mode ────────────────────────────────────────────────────────────
 
 
 @app.route("/api/vacation")
 @app.route("/ingress/api/vacation")
 def api_vacation():
-    """Return vacation mode state."""
-    from . import vacation_mode as _vac  # noqa: PLC0415
+    from habitus import vacation_mode as _vac  # noqa: PLC0415
 
     return jsonify(_vac.get_state())
 
@@ -407,142 +371,129 @@ def api_vacation():
 @app.route("/api/vacation/toggle", methods=["POST"])
 @app.route("/ingress/api/vacation/toggle", methods=["POST"])
 def api_vacation_toggle():
-    """Toggle vacation mode on/off."""
-    from . import vacation_mode as _vac  # noqa: PLC0415
+    from habitus import vacation_mode as _vac  # noqa: PLC0415
 
     state = _vac.deactivate() if _vac.is_active() else _vac.activate(manual=True)
     return jsonify({"ok": True, "state": state})
 
 
-# ── Device Health ────────────────────────────────────────────────────────────
-
-
 @app.route("/api/device_health")
 @app.route("/ingress/api/device_health")
 def api_device_health():
-    """Return device health report with degradation alerts."""
-    from . import device_health as _dh  # noqa: PLC0415
+    from habitus import device_health as _dh  # noqa: PLC0415
 
     return jsonify(_dh.get_health_report())
-
-
-# ── Weekly Report ────────────────────────────────────────────────────────────
 
 
 @app.route("/api/weekly_report")
 @app.route("/ingress/api/weekly_report")
 def api_weekly_report():
-    """Return the latest weekly report (or generate a new one)."""
-    from . import weekly_report as _wr  # noqa: PLC0415
+    from habitus import weekly_report as _wr  # noqa: PLC0415
 
     existing = _read(os.path.join(DATA_DIR, "weekly_report.json"))
     if existing:
         return jsonify(existing)
-    report = _wr.generate_report()
-    return jsonify(report)
-
-
-# ── Sleep Quality ─────────────────────────────────────────────────────────────
+    return jsonify(_wr.generate_report())
 
 
 @app.route("/api/sleep")
 @app.route("/ingress/api/sleep")
 def api_sleep():
-    """Return sleep quality report."""
-    from . import sleep_quality as _sleep  # noqa: PLC0415
+    from habitus import sleep_quality as _sl  # noqa: PLC0415
 
-    return jsonify(_sleep.load())
-
-
-# ── Comfort Score ────────────────────────────────────────────────────────────
+    return jsonify(_sl.load())
 
 
 @app.route("/api/comfort")
 @app.route("/ingress/api/comfort")
 def api_comfort():
-    """Return comfort intelligence report."""
-    from . import comfort_score as _comfort  # noqa: PLC0415
+    from habitus import comfort_score as _co  # noqa: PLC0415
 
-    return jsonify(_comfort.load())
-
-
-# ── NILM Disaggregation ─────────────────────────────────────────────────────
+    return jsonify(_co.load())
 
 
 @app.route("/api/nilm_breakdown")
 @app.route("/ingress/api/nilm_breakdown")
 def api_nilm_breakdown():
-    """Return NILM seq2point disaggregation results."""
     return jsonify(_read(os.path.join(DATA_DIR, "nilm_seq2point.json")) or {})
-
-
-# ── Room Thresholds ──────────────────────────────────────────────────────────
 
 
 @app.route("/api/room_thresholds")
 @app.route("/ingress/api/room_thresholds")
 def api_room_thresholds():
-    """Return per-entity zone mapping and threshold multipliers."""
-    from . import room_thresholds as _rt  # noqa: PLC0415
+    from habitus import room_thresholds as _rt  # noqa: PLC0415
 
     baselines = _read(os.path.join(DATA_DIR, "entity_baselines.json")) or {}
-    entity_ids = [k for k in baselines if not k.startswith("_")]
-    return jsonify(_rt.get_zone_map(entity_ids))
+    return jsonify(_rt.get_zone_map([k for k in baselines if not k.startswith("_")]))
 
 
 @app.route("/api/room_thresholds/override", methods=["POST"])
 @app.route("/ingress/api/room_thresholds/override", methods=["POST"])
 def api_room_threshold_override():
-    """Set or remove a per-entity threshold override."""
-    from . import room_thresholds as _rt  # noqa: PLC0415
+    from habitus import room_thresholds as _rt  # noqa: PLC0415
 
     data = request.get_json() or {}
-    entity_id = data.get("entity_id", "")
-    if not entity_id:
+    eid = data.get("entity_id", "")
+    if not eid:
         return jsonify({"ok": False, "error": "entity_id required"}), 400
-    multiplier = data.get("multiplier")
-    if multiplier is not None:
-        _rt.set_override(entity_id, float(multiplier))
+    mult = data.get("multiplier")
+    if mult is not None:
+        _rt.set_override(eid, float(mult))
     else:
-        _rt.remove_override(entity_id)
+        _rt.remove_override(eid)
     return jsonify({"ok": True})
-
-
-# ── Actionable Notifications ─────────────────────────────────────────────────
 
 
 @app.route("/api/notification_action", methods=["POST"])
 @app.route("/ingress/api/notification_action", methods=["POST"])
 def api_notification_action():
-    """Handle mobile app notification action callback."""
-    from . import actionable_notifications as _notif  # noqa: PLC0415
+    from habitus import actionable_notifications as _an  # noqa: PLC0415
 
     data = request.get_json() or {}
-    action = data.get("action", "")
-    entity_id = data.get("entity_id", "")
-    return jsonify(_notif.handle_action(action, entity_id))
+    return jsonify(_an.handle_action(data.get("action", ""), data.get("entity_id", "")))
 
 
 @app.route("/api/snooze", methods=["POST"])
 @app.route("/ingress/api/snooze", methods=["POST"])
 def api_snooze():
-    """Snooze all notifications for N hours."""
-    from . import actionable_notifications as _notif  # noqa: PLC0415
+    from habitus import actionable_notifications as _an  # noqa: PLC0415
 
     data = request.get_json() or {}
-    hours = data.get("hours", 24)
-    return jsonify(_notif.snooze(int(hours)))
+    return jsonify(_an.snooze(int(data.get("hours", 24))))
 
 
 @app.route("/api/unsnooze", methods=["POST"])
 @app.route("/ingress/api/unsnooze", methods=["POST"])
 def api_unsnooze():
-    """Cancel notification snooze."""
-    from . import actionable_notifications as _notif  # noqa: PLC0415
+    from habitus import actionable_notifications as _an  # noqa: PLC0415
 
-    return jsonify(_notif.unsnooze())
+    return jsonify(_an.unsnooze())
 
 
-def start_web(port: int = 8099) -> None:
-    """Start the Flask web server."""
+@app.route("/api/energy_budget")
+@app.route("/ingress/api/energy_budget")
+def api_energy_budget():
+    from habitus import energy_budget as _eb  # noqa: PLC0415
+
+    return jsonify(_eb.get_budget_status())
+
+
+@app.route("/api/energy_budget", methods=["POST"])
+@app.route("/ingress/api/energy_budget", methods=["POST"])
+def api_set_energy_budget():
+    from habitus import energy_budget as _eb  # noqa: PLC0415
+
+    data = request.get_json() or {}
+    return jsonify(_eb.set_budget(data.get("monthly_kwh"), data.get("monthly_cost")))
+
+
+@app.route("/api/benchmarks")
+@app.route("/ingress/api/benchmarks")
+def api_benchmarks():
+    from habitus import community_benchmarks as _cb  # noqa: PLC0415
+
+    return jsonify(_cb.run())
+
+
+def start_web(port=8099):
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
