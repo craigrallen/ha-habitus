@@ -124,11 +124,7 @@ def _infer_household_rhythm(features: pd.DataFrame) -> dict[str, Any]:
     def _best_window(df: pd.DataFrame, metric: str) -> tuple[int | None, float]:
         if df.empty:
             return None, 0.0
-        h = (
-            df.groupby("hour_of_day")[metric]
-            .mean()
-            .sort_values(ascending=False)
-        )
+        h = df.groupby("hour_of_day")[metric].mean().sort_values(ascending=False)
         if h.empty:
             return None, 0.0
         return int(h.index[0]), float(h.iloc[0])
@@ -228,9 +224,7 @@ def _normalize_slug(value: str) -> str:
     return clean.strip("_")
 
 
-def _stabilize_suggestion_yaml(
-    suggestion: dict[str, Any], used_aliases: set[str]
-) -> None:
+def _stabilize_suggestion_yaml(suggestion: dict[str, Any], used_aliases: set[str]) -> None:
     raw_yaml = (suggestion.get("yaml") or "").strip()
     if not raw_yaml:
         return
@@ -252,7 +246,9 @@ def _stabilize_suggestion_yaml(
         return
 
     alias = str(auto.get("alias") or suggestion.get("title") or "Habitus automation").strip()
-    alias_slug = _normalize_slug(alias) or _normalize_slug(str(suggestion.get("id", "habitus_auto")))
+    alias_slug = _normalize_slug(alias) or _normalize_slug(
+        str(suggestion.get("id", "habitus_auto"))
+    )
     if not alias_slug:
         alias_slug = "habitus_auto"
 
@@ -363,11 +359,7 @@ def discover_patterns(features: pd.DataFrame) -> dict[str, Any]:
             _ph_col = f"power_{_ph}_w"
             if _ph_col not in features.columns:
                 continue
-            _daily_ph = (
-                features.groupby("day_of_week")
-                .agg(mean_power=(_ph_col, "mean"))
-                .round(2)
-            )
+            _daily_ph = features.groupby("day_of_week").agg(mean_power=(_ph_col, "mean")).round(2)
             patterns[f"weekly_{_ph}"] = {
                 day_names[i]: {"mean_power_w": float(_daily_ph.loc[i, "mean_power"])}
                 for i in range(7)
@@ -474,12 +466,15 @@ def generate_suggestions(
     light_entity = _pick_entity(stat_ids, ["light"], ["living", "hall", "kitchen", "ceiling"])
     person_entity = _pick_entity(stat_ids, ["person", "device_tracker"])
     climate_entity = _pick_entity(stat_ids, ["climate"], ["heat", "thermostat", "hvac"])
-    power_entity = _pick_entity(
-        stat_ids,
-        ["sensor"],
-        ["total_load", "power", "consumption", "watt", "mastervolt", "load"],
-        ["temperature", "humidity", "battery_soc"],
-    ) or "sensor.mastervolt_total_load"
+    power_entity = (
+        _pick_entity(
+            stat_ids,
+            ["sensor"],
+            ["total_load", "power", "consumption", "watt", "mastervolt", "load"],
+            ["temperature", "humidity", "battery_soc"],
+        )
+        or "sensor.mastervolt_total_load"
+    )
 
     # ── ROUTINE ───────────────────────────────────────────────────────────────
     if wakeup:
@@ -529,7 +524,9 @@ def generate_suggestions(
             }
         )
 
-    weekend_hour = rhythm.get("weekend_peak_hour") if rhythm.get("weekend_peak_hour") is not None else 9
+    weekend_hour = (
+        rhythm.get("weekend_peak_hour") if rhythm.get("weekend_peak_hour") is not None else 9
+    )
     suggestions.append(
         {
             "id": "weekend_mode",
@@ -588,7 +585,8 @@ def generate_suggestions(
         if controllable:
             actions = "\n".join(
                 [
-                    "    - service: homeassistant.turn_off\n      target:\n        entity_id: " + eid
+                    "    - service: homeassistant.turn_off\n      target:\n        entity_id: "
+                    + eid
                     for eid in controllable
                 ]
             )
@@ -830,7 +828,7 @@ def generate_suggestions(
         else:
             # Fallback: 1.5× peak observed (conservative default)
             threshold_w = int(peak_w * 1.5)
-        
+
         suggestions.append(
             {
                 "id": "inverter_overload",
@@ -1214,11 +1212,13 @@ def run(
     # Enrich suggestions with cost estimates for energy-consuming entities
     try:
         from . import cost_estimator as _ce
+
         suggestions = _ce.enrich_with_cost(suggestions)
     except Exception as e:
         log.warning("Cost enrichment for suggestions failed: %s", e)
 
     from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+
     _atomic_write(PATTERNS_PATH, patterns)
     _atomic_write(SUGGESTIONS_PATH, suggestions)
     log.info(

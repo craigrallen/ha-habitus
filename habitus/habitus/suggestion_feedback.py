@@ -181,8 +181,4 @@ def apply_feedback_to_suggestions(
 def get_dismissed_ids() -> set[str]:
     """Return set of suggestion IDs that have been dismissed ≥ 2 times."""
     summary = get_feedback_summary()
-    return {
-        sid
-        for sid, count in summary["suppressions"].items()
-        if count >= 2
-    }
+    return {sid for sid, count in summary["suppressions"].items() if count >= 2}

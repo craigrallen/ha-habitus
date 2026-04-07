@@ -3,11 +3,10 @@
 Accepts a natural language description and generates HA automation YAML.
 Patterns: time trigger, state trigger, condition-based, notification.
 """
+
 from __future__ import annotations
 
-import json
 import logging
-import os
 import re
 from typing import Any
 
@@ -19,7 +18,10 @@ log = logging.getLogger("habitus")
 _TIME_PATTERNS = [
     re.compile(r"at\s+(\d{1,2}):(\d{2})\s*(am|pm)?", re.IGNORECASE),
     re.compile(r"at\s+(\d{1,2})\s*(am|pm)", re.IGNORECASE),
-    re.compile(r"every\s+(?:morning|day|night|evening)\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", re.IGNORECASE),
+    re.compile(
+        r"every\s+(?:morning|day|night|evening)\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?",
+        re.IGNORECASE,
+    ),
     re.compile(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)", re.IGNORECASE),
 ]
 
@@ -51,14 +53,57 @@ _ENTITY_KEYWORDS = {
 }
 
 _TRIGGER_WORDS = {
-    "state_on": ["turns on", "turns on", "switched on", "activated", "opens", "opened", "enters", "arrives", "comes home"],
-    "state_off": ["turns off", "switched off", "deactivated", "closes", "closed", "leaves", "goes away"],
+    "state_on": [
+        "turns on",
+        "turns on",
+        "switched on",
+        "activated",
+        "opens",
+        "opened",
+        "enters",
+        "arrives",
+        "comes home",
+    ],
+    "state_off": [
+        "turns off",
+        "switched off",
+        "deactivated",
+        "closes",
+        "closed",
+        "leaves",
+        "goes away",
+    ],
     "motion": ["motion detected", "motion", "movement detected", "someone moves"],
     "no_motion": ["no motion", "no movement", "nobody moves", "empty"],
-    "time": ["at", "every", "daily", "morning", "evening", "night", "sunset", "sunrise", "noon", "midnight", "bedtime"],
-    "temperature_above": ["temperature above", "temp above", "hotter than", "warmer than", "exceeds"],
+    "time": [
+        "at",
+        "every",
+        "daily",
+        "morning",
+        "evening",
+        "night",
+        "sunset",
+        "sunrise",
+        "noon",
+        "midnight",
+        "bedtime",
+    ],
+    "temperature_above": [
+        "temperature above",
+        "temp above",
+        "hotter than",
+        "warmer than",
+        "exceeds",
+    ],
     "temperature_below": ["temperature below", "temp below", "colder than", "cooler than"],
-    "nobody_home": ["nobody home", "no one home", "everyone leaves", "away", "not home", "empty house"],
+    "nobody_home": [
+        "nobody home",
+        "no one home",
+        "everyone leaves",
+        "away",
+        "not home",
+        "empty house",
+    ],
     "someone_home": ["someone home", "arrives home", "comes home", "returns home"],
 }
 
@@ -87,7 +132,7 @@ def _parse_time(text: str) -> str | None:
             return time_str
 
     # Pattern: HH:MM optional am/pm
-    m = re.search(r'\bat\s+(\d{1,2}):(\d{2})\s*(am|pm)?', lower)
+    m = re.search(r"\bat\s+(\d{1,2}):(\d{2})\s*(am|pm)?", lower)
     if m:
         hour = int(m.group(1))
         minute = int(m.group(2))
@@ -99,7 +144,7 @@ def _parse_time(text: str) -> str | None:
         return f"{max(0,min(23,hour)):02d}:{max(0,min(59,minute)):02d}:00"
 
     # Pattern: at Xam or at Xpm
-    m = re.search(r'\bat\s+(\d{1,2})\s*(am|pm)\b', lower)
+    m = re.search(r"\bat\s+(\d{1,2})\s*(am|pm)\b", lower)
     if m:
         hour = int(m.group(1))
         ampm = m.group(2)
@@ -110,7 +155,7 @@ def _parse_time(text: str) -> str | None:
         return f"{max(0,min(23,hour)):02d}:00:00"
 
     # Pattern: every ... at Xam/pm or at X:XX
-    m = re.search(r'\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b', lower)
+    m = re.search(r"\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b", lower)
     if m:
         hour = int(m.group(1))
         minute = int(m.group(2)) if m.group(2) else 0
@@ -156,11 +201,13 @@ def _extract_entities(text: str) -> list[dict[str, str]]:
                 # Build a guess at entity_id
                 entity_id_guess = _guess_entity_id(domain, kw, context, text)
 
-                found.append({
-                    "domain": domain,
-                    "keyword": kw,
-                    "entity_id": entity_id_guess,
-                })
+                found.append(
+                    {
+                        "domain": domain,
+                        "keyword": kw,
+                        "entity_id": entity_id_guess,
+                    }
+                )
                 break  # one match per domain
 
     return found
@@ -170,8 +217,17 @@ def _guess_entity_id(domain: str, keyword: str, context: str, full_text: str) ->
     """Guess a plausible entity_id from context."""
     # Look for room qualifiers
     room_words = [
-        "living room", "bedroom", "kitchen", "bathroom", "hallway",
-        "office", "garage", "garden", "front", "back", "master",
+        "living room",
+        "bedroom",
+        "kitchen",
+        "bathroom",
+        "hallway",
+        "office",
+        "garage",
+        "garden",
+        "front",
+        "back",
+        "master",
     ]
     for room in room_words:
         if room in context:
@@ -191,7 +247,15 @@ def _extract_action(text: str) -> dict[str, str]:
     lower = text.lower()
 
     # Check notify first (higher priority to avoid "open" clash)
-    priority_order = ["notify", "set_temperature", "lock", "unlock", "toggle", "turn_off", "turn_on"]
+    priority_order = [
+        "notify",
+        "set_temperature",
+        "lock",
+        "unlock",
+        "toggle",
+        "turn_off",
+        "turn_on",
+    ]
     all_actions = {**_ACTION_WORDS}
 
     for action in priority_order:
@@ -219,7 +283,12 @@ def _extract_trigger_type(text: str) -> dict[str, Any]:
 
     # Check for state triggers
     for trigger_type, phrases in _TRIGGER_WORDS.items():
-        if trigger_type.startswith("state_") or trigger_type in ("motion", "no_motion", "nobody_home", "someone_home"):
+        if trigger_type.startswith("state_") or trigger_type in (
+            "motion",
+            "no_motion",
+            "nobody_home",
+            "someone_home",
+        ):
             for phrase in phrases:
                 if phrase in lower:
                     return {"type": "state", "kind": trigger_type, "phrase": phrase}
@@ -229,7 +298,10 @@ def _extract_trigger_type(text: str) -> dict[str, Any]:
         for phrase in _TRIGGER_WORDS[trigger_type]:
             if phrase in lower:
                 # Try to extract the temperature value
-                temp_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:°?c|degrees|°)?", lower[lower.find(phrase) + len(phrase):])
+                temp_match = re.search(
+                    r"(\d+(?:\.\d+)?)\s*(?:°?c|degrees|°)?",
+                    lower[lower.find(phrase) + len(phrase) :],
+                )
                 temp_val = float(temp_match.group(1)) if temp_match else 20.0
                 return {
                     "type": "numeric_state",
@@ -380,7 +452,9 @@ def parse_intent(text: str) -> dict[str, Any]:
             "condition": None,
             "alias": "Unnamed Automation",
             "confidence": 0.0,
-            "clarification_needed": ["Please describe what should trigger the automation and what it should do."],
+            "clarification_needed": [
+                "Please describe what should trigger the automation and what it should do."
+            ],
             "generated_yaml": "",
         }
 

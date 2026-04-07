@@ -13,9 +13,8 @@ Runs in the training thread to avoid blocking the web UI.
 import datetime
 import json
 import logging
-import math
 import os
-from collections import Counter, defaultdict
+from collections import defaultdict
 from typing import Any
 
 from .ha_db import managed_read_connection, resolve_ha_db_path, table_exists
@@ -64,7 +63,8 @@ def _get_state_change_events(days: int = 30) -> dict[str, list[tuple[float, str]
             events: dict[str, list[tuple[float, str]]] = defaultdict(list)
 
             if has_meta:
-                rows = conn.execute(f"""
+                rows = conn.execute(
+                    f"""
                     SELECT sm.entity_id, s.state, s.last_changed_ts
                     FROM states s
                     JOIN states_meta sm ON s.metadata_id = sm.metadata_id
@@ -72,23 +72,31 @@ def _get_state_change_events(days: int = 30) -> dict[str, list[tuple[float, str]
                     AND ({like_clauses})
                     AND s.state NOT IN ('unavailable', 'unknown', '')
                     ORDER BY s.last_changed_ts
-                """, (cutoff_ts,)).fetchall()
+                """,
+                    (cutoff_ts,),
+                ).fetchall()
             else:
                 like_clauses_plain = " OR ".join(f"entity_id LIKE '{d}.%'" for d in all_domains)
-                rows = conn.execute(f"""
+                rows = conn.execute(
+                    f"""
                     SELECT entity_id, state, last_changed_ts
                     FROM states
                     WHERE last_changed_ts > ?
                     AND ({like_clauses_plain})
                     AND state NOT IN ('unavailable', 'unknown', '')
                     ORDER BY last_changed_ts
-                """, (cutoff_ts,)).fetchall()
+                """,
+                    (cutoff_ts,),
+                ).fetchall()
 
         for eid, state, ts in rows:
             events[eid].append((ts, state))
 
-        log.info("Correlation engine: loaded %d events across %d entities",
-                 sum(len(v) for v in events.values()), len(events))
+        log.info(
+            "Correlation engine: loaded %d events across %d entities",
+            sum(len(v) for v in events.values()),
+            len(events),
+        )
         return dict(events)
     except Exception as e:
         log.warning("Failed to load state events: %s", e)
@@ -104,10 +112,7 @@ def _compute_temporal_correlations(
     Uses lift (observed / expected) to filter out noise.
     """
     # Focus on entities with enough activity
-    active_entities = {
-        eid: evts for eid, evts in events.items()
-        if len(evts) >= MIN_COOCCURRENCES
-    }
+    active_entities = {eid: evts for eid, evts in events.items() if len(evts) >= MIN_COOCCURRENCES}
 
     # Limit to MAX_ENTITIES most active
     if len(active_entities) > MAX_ENTITIES:
@@ -143,7 +148,7 @@ def _compute_temporal_correlations(
 
     for i, eid_a in enumerate(entity_ids):
         minutes_a = entity_minutes[eid_a]
-        rate_a = event_rates[eid_a]
+        event_rates[eid_a]
 
         for j in range(i + 1, n_entities):
             eid_b = entity_ids[j]
@@ -176,26 +181,32 @@ def _compute_temporal_correlations(
             room_a = entity_to_area.get(eid_a, "")
             room_b = entity_to_area.get(eid_b, "")
 
-            correlations.append({
-                "entity_a": eid_a,
-                "entity_b": eid_b,
-                "name_a": eid_a.split(".")[-1].replace("_", " ").title(),
-                "name_b": eid_b.split(".")[-1].replace("_", " ").title(),
-                "room_a": room_a,
-                "room_b": room_b,
-                "direction": "a_then_b",
-                "cooccurrences": a_then_b,
-                "total_a": len(minutes_a),
-                "confidence": round(confidence, 3),
-                "lift": round(lift, 2),
-                "same_room": room_a == room_b and room_a != "",
-                "cross_room": room_a != room_b and room_a != "" and room_b != "",
-            })
+            correlations.append(
+                {
+                    "entity_a": eid_a,
+                    "entity_b": eid_b,
+                    "name_a": eid_a.split(".")[-1].replace("_", " ").title(),
+                    "name_b": eid_b.split(".")[-1].replace("_", " ").title(),
+                    "room_a": room_a,
+                    "room_b": room_b,
+                    "direction": "a_then_b",
+                    "cooccurrences": a_then_b,
+                    "total_a": len(minutes_a),
+                    "confidence": round(confidence, 3),
+                    "lift": round(lift, 2),
+                    "same_room": room_a == room_b and room_a != "",
+                    "cross_room": room_a != room_b and room_a != "" and room_b != "",
+                }
+            )
 
             checked += 1
 
     correlations.sort(key=lambda c: -c["lift"])
-    log.info("Correlation engine: found %d significant correlations from %d pairs", len(correlations), checked)
+    log.info(
+        "Correlation engine: found %d significant correlations from %d pairs",
+        len(correlations),
+        checked,
+    )
     return correlations
 
 
@@ -239,11 +250,7 @@ def _build_automation_suggestion(corr: dict) -> dict[str, Any] | None:
     # Generate YAML
     a_domain = corr["entity_a"].split(".")[0]
     trigger_yaml = ""
-    if a_domain == "binary_sensor":
-        trigger_yaml = f"""    - platform: state
-      entity_id: {corr['entity_a']}
-      to: "on" """
-    elif a_domain in ACTION_DOMAINS:
+    if a_domain == "binary_sensor" or a_domain in ACTION_DOMAINS:
         trigger_yaml = f"""    - platform: state
       entity_id: {corr['entity_a']}
       to: "on" """
@@ -332,8 +339,11 @@ def run_correlation_analysis(entity_to_area: dict[str, str], days: int = 30) -> 
     with open(CORRELATIONS_PATH, "w") as f:
         json.dump(result, f, indent=2, default=str)
 
-    log.info("Correlation analysis complete: %d correlations, %d suggestions",
-             len(correlations), len(suggestions))
+    log.info(
+        "Correlation analysis complete: %d correlations, %d suggestions",
+        len(correlations),
+        len(suggestions),
+    )
     return result
 
 

@@ -63,7 +63,7 @@ _NON_POWER = re.compile(
 )
 
 MAX_PLAUSIBLE_W = 25_000  # 25kW upper bound
-MIN_PLAUSIBLE_W = 1.0     # below 1W = not a real load (noise / always-zero sensors)
+MIN_PLAUSIBLE_W = 1.0  # below 1W = not a real load (noise / always-zero sensors)
 
 
 def is_device_sensor(entity_id: str, name: str = "") -> bool:

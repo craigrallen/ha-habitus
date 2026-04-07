@@ -67,7 +67,9 @@ def _loop(windows: list[int]) -> None:
         try:
             asyncio.run(run(days_history=days, mode="full"))
         except Exception as e:
-            import traceback, sys
+            import sys
+            import traceback
+
             log.error("Progressive training failed at %d days: %s", days, e)
             traceback.print_exc(file=sys.stderr)
             print(f"PROGRESSIVE CRASH: {e}", file=sys.stderr, flush=True)

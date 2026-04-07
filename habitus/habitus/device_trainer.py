@@ -18,11 +18,10 @@ import logging
 import os
 import sqlite3
 import time
-from typing import Any
-
-from .ha_db import resolve_ha_db_path
 
 import numpy as np
+
+from .ha_db import resolve_ha_db_path
 
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
@@ -49,6 +48,7 @@ def _save_custom_signatures(sigs: list[dict]):
 def start_training_session(power_entity: str) -> dict:
     """Start a device training session. Captures current baseline power."""
     import requests
+
     ha_url = os.environ.get("HA_URL", "http://supervisor/core")
     token = os.environ.get("SUPERVISOR_TOKEN", os.environ.get("HABITUS_HA_TOKEN", ""))
 
@@ -76,8 +76,7 @@ def start_training_session(power_entity: str) -> dict:
     with open(TRAINING_SESSION_PATH, "w") as f:
         json.dump(session, f, indent=2, default=str)
 
-    log.info("device_trainer: started session, baseline=%.1fW on %s",
-             baseline_w or 0, power_entity)
+    log.info("device_trainer: started session, baseline=%.1fW on %s", baseline_w or 0, power_entity)
     return session
 
 
@@ -104,12 +103,15 @@ def stop_training_session(device_name: str, device_category: str = "custom") -> 
     if db_path:
         try:
             conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-            rows = conn.execute("""
+            rows = conn.execute(
+                """
                 SELECT s.state, s.last_changed_ts FROM states s
                 JOIN states_meta sm ON s.metadata_id = sm.metadata_id
                 WHERE sm.entity_id = ? AND s.last_changed_ts BETWEEN ? AND ?
                 ORDER BY s.last_changed_ts
-            """, (power_entity, start_ts, end_ts)).fetchall()
+            """,
+                (power_entity, start_ts, end_ts),
+            ).fetchall()
             conn.close()
 
             for state_val, ts in rows:
@@ -137,6 +139,7 @@ def stop_training_session(device_name: str, device_category: str = "custom") -> 
 
     # Detect shape
     from .appliance_fingerprint import detect_power_shape
+
     shape = detect_power_shape(list(watts))
 
     # Inrush detection (first reading vs average)
@@ -160,7 +163,9 @@ def stop_training_session(device_name: str, device_category: str = "custom") -> 
         "has_inrush": has_inrush,
         "inrush_w": round(inrush_w, 1),
         "readings_count": len(readings),
-        "profile": [round(float(w), 1) for w in watts[::max(1, len(watts) // 50)]],  # Downsample to ~50 points
+        "profile": [
+            round(float(w), 1) for w in watts[:: max(1, len(watts) // 50)]
+        ],  # Downsample to ~50 points
     }
 
     # Save to custom signatures
@@ -173,8 +178,14 @@ def stop_training_session(device_name: str, device_category: str = "custom") -> 
     with open(TRAINING_SESSION_PATH, "w") as f:
         json.dump(session, f, indent=2, default=str)
 
-    log.info("device_trainer: captured '%s' — peak=%.0fW, avg=%.0fW, shape=%s, duration=%.1fmin",
-             device_name, peak_w, avg_w, shape, duration_min)
+    log.info(
+        "device_trainer: captured '%s' — peak=%.0fW, avg=%.0fW, shape=%s, duration=%.1fmin",
+        device_name,
+        peak_w,
+        avg_w,
+        shape,
+        duration_min,
+    )
     return signature
 
 

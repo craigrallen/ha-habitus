@@ -76,12 +76,15 @@ def _get_aggregate_power(entity_id: str, days: int = 7) -> list[tuple[float, flo
             with managed_read_connection(db_path) as conn:
                 if conn is None:
                     return []
-                rows = conn.execute("""
+                rows = conn.execute(
+                    """
                     SELECT s.state, s.last_changed_ts FROM states s
                     JOIN states_meta sm ON s.metadata_id = sm.metadata_id
                     WHERE sm.entity_id = ? AND s.last_changed_ts > ?
                     ORDER BY s.last_changed_ts
-                """, (entity_id, cutoff_ts)).fetchall()
+                """,
+                    (entity_id, cutoff_ts),
+                ).fetchall()
 
             result = []
             for state_val, ts in rows:
@@ -99,6 +102,7 @@ def _get_aggregate_power(entity_id: str, days: int = 7) -> list[tuple[float, flo
     # 2) HA API fallback
     try:
         import requests
+
         ha_url = os.environ.get("HA_URL", "http://supervisor/core")
         token = os.environ.get("SUPERVISOR_TOKEN", os.environ.get("HABITUS_HA_TOKEN", ""))
         if not token:
@@ -160,20 +164,24 @@ def _detect_edges(readings: list[tuple[float, float]]) -> list[dict]:
 
     # Compute rolling average for smoothing
     window = min(STEADY_STATE_SAMPLES, len(watts))
-    smoothed = np.convolve(watts, np.ones(window) / window, mode='valid')
+    smoothed = np.convolve(watts, np.ones(window) / window, mode="valid")
 
     for i in range(1, len(smoothed)):
         delta = smoothed[i] - smoothed[i - 1]
         if abs(delta) >= MIN_EDGE_WATTS:
             ts_idx = i + window - 1
             if ts_idx < len(timestamps):
-                edges.append({
-                    "timestamp": timestamps[ts_idx],
-                    "time": datetime.datetime.fromtimestamp(timestamps[ts_idx], tz=datetime.UTC).isoformat(),
-                    "delta_w": round(float(delta), 1),
-                    "direction": "up" if delta > 0 else "down",
-                    "power_after": round(float(smoothed[i]), 1),
-                })
+                edges.append(
+                    {
+                        "timestamp": timestamps[ts_idx],
+                        "time": datetime.datetime.fromtimestamp(
+                            timestamps[ts_idx], tz=datetime.UTC
+                        ).isoformat(),
+                        "delta_w": round(float(delta), 1),
+                        "direction": "up" if delta > 0 else "down",
+                        "power_after": round(float(smoothed[i]), 1),
+                    }
+                )
 
     return edges
 
@@ -209,15 +217,17 @@ def _pair_edges(edges: list[dict]) -> list[dict]:
             down = down_edges[best]
             used_down.add(best)
             duration_min = (down["timestamp"] - up["timestamp"]) / 60
-            events.append({
-                "start_ts": up["timestamp"],
-                "end_ts": down["timestamp"],
-                "start": up["time"],
-                "end": down["time"],
-                "power_w": round(abs(up["delta_w"]), 0),
-                "duration_min": round(duration_min, 1),
-                "hour": datetime.datetime.fromtimestamp(up["timestamp"], tz=datetime.UTC).hour,
-            })
+            events.append(
+                {
+                    "start_ts": up["timestamp"],
+                    "end_ts": down["timestamp"],
+                    "start": up["time"],
+                    "end": down["time"],
+                    "power_w": round(abs(up["delta_w"]), 0),
+                    "duration_min": round(duration_min, 1),
+                    "hour": datetime.datetime.fromtimestamp(up["timestamp"], tz=datetime.UTC).hour,
+                }
+            )
 
     return events
 
@@ -233,6 +243,7 @@ def _cluster_events(events: list[dict]) -> list[dict]:
     powers = np.array([e["power_w"] for e in events]).reshape(-1, 1)
 
     from sklearn.cluster import KMeans
+
     # Choose k: min of 10, or number of distinct 100W buckets
     n_buckets = len({int(p[0] // 100) for p in powers})
     k = min(max(2, n_buckets), 10, len(events))
@@ -252,20 +263,26 @@ def _cluster_events(events: list[dict]) -> list[dict]:
         durations = [e["duration_min"] for e in cluster_events]
         hours = [e["hour"] for e in cluster_events]
 
-        clusters.append({
-            "id": i,
-            "centroid_w": round(centroid_w, 0),
-            "event_count": len(cluster_events),
-            "avg_duration_min": round(float(np.mean(durations)), 1),
-            "peak_hours": [h for h, _ in Counter(hours).most_common(3)],
-            "total_kwh": round(sum(e["power_w"] * e["duration_min"] / 60 / 1000 for e in cluster_events), 2),
-        })
+        clusters.append(
+            {
+                "id": i,
+                "centroid_w": round(centroid_w, 0),
+                "event_count": len(cluster_events),
+                "avg_duration_min": round(float(np.mean(durations)), 1),
+                "peak_hours": [h for h, _ in Counter(hours).most_common(3)],
+                "total_kwh": round(
+                    sum(e["power_w"] * e["duration_min"] / 60 / 1000 for e in cluster_events), 2
+                ),
+            }
+        )
 
     clusters.sort(key=lambda c: -c["centroid_w"])
     return clusters
 
 
-def _learn_signatures_from_known_monitors(exclude_entity: str = "", days: int = 30) -> dict[str, dict[str, Any]]:
+def _learn_signatures_from_known_monitors(
+    exclude_entity: str = "", days: int = 30
+) -> dict[str, dict[str, Any]]:
     """Learn appliance signatures from known HA power monitors (smart plugs etc).
 
     Primary source: recorder DB
@@ -279,10 +296,19 @@ def _learn_signatures_from_known_monitors(exclude_entity: str = "", days: int = 
         if eid == exclude_entity:
             return True
         low = eid.lower()
-        return any(k in low for k in (
-            'shore_power', 'mastervolt', 'solar_', 'battery_', 'inverter',
-            'charger_input_power', 'wind_turbine', 'combined_wattage'
-        ))
+        return any(
+            k in low
+            for k in (
+                "shore_power",
+                "mastervolt",
+                "solar_",
+                "battery_",
+                "inverter",
+                "charger_input_power",
+                "wind_turbine",
+                "combined_wattage",
+            )
+        )
 
     def _build_sig(eid: str, watts: list[float]):
         if len(watts) < 20:
@@ -294,19 +320,19 @@ def _learn_signatures_from_known_monitors(exclude_entity: str = "", days: int = 
         median_w = float(np.median(active))
         p90_w = float(np.percentile(active, 90))
         duty = float(len(active) / len(arr))
-        key = eid.replace('sensor.', '').replace('.', '_')
+        key = eid.replace("sensor.", "").replace(".", "_")
         low = eid.lower()
         learned[key] = {
-            'power': round(median_w, 1),
-            'power_p90': round(p90_w, 1),
-            'icon': '🔎',
-            'source': 'ha_monitor',
-            'entity_id': eid,
-            'duty_cycle': round(duty, 3),
+            "power": round(median_w, 1),
+            "power_p90": round(p90_w, 1),
+            "icon": "🔎",
+            "source": "ha_monitor",
+            "entity_id": eid,
+            "duty_cycle": round(duty, 3),
         }
-        if any(k in low for k in ('water_heater', 'waterheater', 'boiler', 'varmvatten', 'heater')):
-            learned[key]['icon'] = '🚿'
-            learned[key]['priority'] = 1
+        if any(k in low for k in ("water_heater", "waterheater", "boiler", "varmvatten", "heater")):
+            learned[key]["icon"] = "🚿"
+            learned[key]["priority"] = 1
 
     # 1) DB learning
     db_path = resolve_ha_db_path()
@@ -346,20 +372,26 @@ def _learn_signatures_from_known_monitors(exclude_entity: str = "", days: int = 
                     if _skip_entity(eid):
                         continue
                     if has_meta:
-                        rows = conn.execute("""
+                        rows = conn.execute(
+                            """
                             SELECT s.state
                             FROM states s
                             JOIN states_meta sm ON s.metadata_id = sm.metadata_id
                             WHERE sm.entity_id = ? AND s.last_changed_ts > ?
                             ORDER BY s.last_changed_ts
-                        """, (eid, cutoff_ts)).fetchall()
+                        """,
+                            (eid, cutoff_ts),
+                        ).fetchall()
                     else:
-                        rows = conn.execute("""
+                        rows = conn.execute(
+                            """
                             SELECT state
                             FROM states
                             WHERE entity_id = ? AND last_changed_ts > ?
                             ORDER BY last_changed_ts
-                        """, (eid, cutoff_ts)).fetchall()
+                        """,
+                            (eid, cutoff_ts),
+                        ).fetchall()
                     watts = []
                     for (state_val,) in rows:
                         try:
@@ -378,6 +410,7 @@ def _learn_signatures_from_known_monitors(exclude_entity: str = "", days: int = 
 
     try:
         import requests
+
         ha_url = os.environ.get("HA_URL", "http://supervisor/core")
         token = os.environ.get("SUPERVISOR_TOKEN", os.environ.get("HABITUS_HA_TOKEN", ""))
         if not token:
@@ -391,34 +424,49 @@ def _learn_signatures_from_known_monitors(exclude_entity: str = "", days: int = 
         states = r.json()
         candidates = []
         for s in states:
-            eid = s.get('entity_id', '')
-            if not eid.startswith('sensor.'):
+            eid = s.get("entity_id", "")
+            if not eid.startswith("sensor."):
                 continue
             low = eid.lower()
-            if any(k in low for k in ('_power', '_watt', '_watts', 'energy_watts', 'consumption_w')) and not _skip_entity(eid):
+            if any(
+                k in low for k in ("_power", "_watt", "_watts", "energy_watts", "consumption_w")
+            ) and not _skip_entity(eid):
                 candidates.append(eid)
 
         # Limit for performance, prioritize heater-like names first
-        candidates.sort(key=lambda e: 0 if any(k in e.lower() for k in ('water_heater','boiler','varmvatten','heater')) else 1)
+        candidates.sort(
+            key=lambda e: (
+                0
+                if any(k in e.lower() for k in ("water_heater", "boiler", "varmvatten", "heater"))
+                else 1
+            )
+        )
         candidates = candidates[:20]
 
         for eid in candidates:
             url = f"{ha_url}/api/history/period/{cutoff.isoformat()}"
             params = {
-                'filter_entity_id': eid,
-                'minimal_response': '1',
-                'no_attributes': '1',
-                'significant_changes_only': '0',
+                "filter_entity_id": eid,
+                "minimal_response": "1",
+                "no_attributes": "1",
+                "significant_changes_only": "0",
             }
             rr = requests.get(url, headers=headers, params=params, timeout=45)
             if rr.status_code != 200:
                 continue
             payload = rr.json()
-            series = payload[0] if payload and isinstance(payload, list) and payload and isinstance(payload[0], list) else []
+            series = (
+                payload[0]
+                if payload
+                and isinstance(payload, list)
+                and payload
+                and isinstance(payload[0], list)
+                else []
+            )
             watts = []
             for item in series:
                 try:
-                    w = float(item.get('state'))
+                    w = float(item.get("state"))
                     if 0 <= w <= 25000:
                         watts.append(w)
                 except Exception:
@@ -430,7 +478,9 @@ def _learn_signatures_from_known_monitors(exclude_entity: str = "", days: int = 
     return learned
 
 
-def _match_to_appliances(clusters: list[dict], learned_sigs: dict[str, dict[str, Any]] | None = None) -> list[dict]:
+def _match_to_appliances(
+    clusters: list[dict], learned_sigs: dict[str, dict[str, Any]] | None = None
+) -> list[dict]:
     """Match discovered clusters to known appliance signatures."""
     # Load custom signatures
     custom_sigs = {}
@@ -484,8 +534,9 @@ def _match_to_appliances(clusters: list[dict], learned_sigs: dict[str, dict[str,
     return matched
 
 
-def _estimate_current_breakdown(readings: list[tuple[float, float]],
-                                 matched_clusters: list[dict]) -> list[dict]:
+def _estimate_current_breakdown(
+    readings: list[tuple[float, float]], matched_clusters: list[dict]
+) -> list[dict]:
     """Estimate current power breakdown based on recent readings + known appliances.
 
     Uses the most recent stable power level and decomposes it into
@@ -508,23 +559,27 @@ def _estimate_current_breakdown(readings: list[tuple[float, float]],
     for cluster in sorted_clusters:
         appliance_w = cluster["centroid_w"]
         if appliance_w <= remaining + 50:  # 50W tolerance
-            breakdown.append({
-                "appliance": cluster["appliance"],
-                "icon": cluster["icon"],
-                "estimated_w": round(min(appliance_w, remaining), 0),
-                "confidence": cluster["match_confidence"],
-            })
+            breakdown.append(
+                {
+                    "appliance": cluster["appliance"],
+                    "icon": cluster["icon"],
+                    "estimated_w": round(min(appliance_w, remaining), 0),
+                    "confidence": cluster["match_confidence"],
+                }
+            )
             remaining -= appliance_w
             if remaining < 20:
                 break
 
     if remaining > 20:
-        breakdown.append({
-            "appliance": "Other / Unidentified",
-            "icon": "❓",
-            "estimated_w": round(max(0, remaining), 0),
-            "confidence": 0,
-        })
+        breakdown.append(
+            {
+                "appliance": "Other / Unidentified",
+                "icon": "❓",
+                "estimated_w": round(max(0, remaining), 0),
+                "confidence": 0,
+            }
+        )
 
     return breakdown
 
@@ -601,7 +656,7 @@ def correlate_phase_edges(edges_by_phase: dict, window_sec: int = 120) -> list[d
             continue
         group = [edge]
         used.add(i)
-        for j, other in enumerate(all_edges[i + 1:], i + 1):
+        for j, other in enumerate(all_edges[i + 1 :], i + 1):
             if j in used:
                 continue
             ts_i = edge["ts"]
@@ -629,13 +684,15 @@ def correlate_phase_edges(edges_by_phase: dict, window_sec: int = 120) -> list[d
         else:
             phase_type = "three_phase"
 
-        groups.append({
-            "ts": edge["ts"],
-            "total_delta_w": sum(e["delta"] for e in group),
-            "phase_type": phase_type,
-            "phases": sorted(set(phases_in_group)),
-            "per_phase": {e["phase"]: e["delta"] for e in group},
-        })
+        groups.append(
+            {
+                "ts": edge["ts"],
+                "total_delta_w": sum(e["delta"] for e in group),
+                "phase_type": phase_type,
+                "phases": sorted(set(phases_in_group)),
+                "per_phase": {e["phase"]: e["delta"] for e in group},
+            }
+        )
     return groups
 
 
@@ -718,8 +775,12 @@ def run_disaggregation(power_entity: str = "", days: int = 7) -> dict[str, Any]:
     phase_entities = [e.strip() for e in power_entity.split(",") if e.strip()]
     is_multi_phase = len(phase_entities) > 1
 
-    log.info("nilm: running disaggregation on %s (%d days, phases=%d)",
-             power_entity, days, len(phase_entities))
+    log.info(
+        "nilm: running disaggregation on %s (%d days, phases=%d)",
+        power_entity,
+        days,
+        len(phase_entities),
+    )
 
     # ── Aggregate readings (sum of phases for the main pipeline) ──────────────
     if is_multi_phase:
@@ -731,13 +792,16 @@ def run_disaggregation(power_entity: str = "", days: int = 7) -> dict[str, Any]:
 
         # Build combined total from all phases
         from collections import defaultdict as _dd
+
         ts_sums: dict[float, float] = _dd(float)
         for ph_readings in all_phase_readings.values():
             for ts, w in ph_readings:
                 ts_sums[ts] += w
         readings: list[tuple[float, float]] = sorted(ts_sums.items())
     else:
-        readings = _get_aggregate_power(phase_entities[0] if phase_entities else power_entity, days=days)
+        readings = _get_aggregate_power(
+            phase_entities[0] if phase_entities else power_entity, days=days
+        )
         all_phase_readings = {}
 
     if len(readings) < 20:
@@ -768,8 +832,11 @@ def run_disaggregation(power_entity: str = "", days: int = 7) -> dict[str, Any]:
             ]
         correlated_groups = correlate_phase_edges(edges_by_phase, window_sec=120)
         matched = _annotate_clusters_with_phase(matched, correlated_groups)
-        log.info("nilm: %d correlated phase-edge groups from %d phases",
-                 len(correlated_groups), len(phase_entities))
+        log.info(
+            "nilm: %d correlated phase-edge groups from %d phases",
+            len(correlated_groups),
+            len(phase_entities),
+        )
     else:
         # Single-phase: add default annotations so output schema is consistent
         for c in matched:
@@ -781,6 +848,7 @@ def run_disaggregation(power_entity: str = "", days: int = 7) -> dict[str, Any]:
     # ── Enrich unnamed slots with device library matches ──────────────────────
     try:
         from . import device_library as _dl  # noqa: PLC0415
+
         for slot in matched:
             if not slot.get("name") or slot.get("name", "").startswith("Device "):
                 _match = _dl.match_wattage_to_device(slot.get("watts", slot.get("centroid_w", 0)))
@@ -833,7 +901,9 @@ def run_disaggregation(power_entity: str = "", days: int = 7) -> dict[str, Any]:
             [v.get("entity_id", "") for v in learned_monitor_sigs.values() if v.get("entity_id")]
         )[:50],
         "current_breakdown": breakdown,
-        "current_total_w": round(float(np.median([w for _, w in readings[-10:]])), 0) if readings else 0,
+        "current_total_w": (
+            round(float(np.median([w for _, w in readings[-10:]])), 0) if readings else 0
+        ),
         "discovered_appliances": matched,
         "energy_24h": energy_breakdown,
         "total_kwh_24h": round(total_kwh_24h, 2),
@@ -846,6 +916,11 @@ def run_disaggregation(power_entity: str = "", days: int = 7) -> dict[str, Any]:
     with open(NILM_PATH, "w") as f:
         json.dump(result, f, indent=2, default=str)
 
-    log.info("nilm: %d edges, %d events, %d appliance slots, current=%.0fW",
-             len(edges), len(events), len(matched), result["current_total_w"])
+    log.info(
+        "nilm: %d edges, %d events, %d appliance slots, current=%.0fW",
+        len(edges),
+        len(events),
+        len(matched),
+        result["current_total_w"],
+    )
     return result

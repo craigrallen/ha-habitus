@@ -237,6 +237,7 @@ def save(result: dict) -> None:
     """Persist phantom load analysis results to disk."""
     try:
         from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+
         _atomic_write(PHANTOM_PATH, result)
     except OSError as e:
         log.warning("Could not save phantom data: %s", e)

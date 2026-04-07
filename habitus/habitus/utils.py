@@ -2,8 +2,10 @@
 
 Shared low-level utilities used across multiple modules.
 """
+
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -41,8 +43,6 @@ def atomic_write(path: str | os.PathLike, data: Any, *, indent: int = 2) -> None
         os.replace(tmp_path, path)
     except Exception:
         # Clean up the temp file so we don't leave strays
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp_path)
-        except OSError:
-            pass
         raise

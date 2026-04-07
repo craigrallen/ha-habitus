@@ -9,13 +9,13 @@ Guest signals:
 Computes guest_probability (0-1) with contributing factors.
 If > 0.6: suggests Guest Mode automation pack.
 """
+
 from __future__ import annotations
 
 import datetime
 import json
 import logging
 import os
-from collections import defaultdict
 from typing import Any
 
 log = logging.getLogger("habitus")
@@ -24,6 +24,7 @@ DATA_DIR = os.environ.get("DATA_DIR", "/data")
 
 def _get_data_dir() -> str:
     return os.environ.get("DATA_DIR", DATA_DIR)
+
 
 GUEST_MODE_PATH = os.path.join(DATA_DIR, "guest_mode.json")
 BASELINE_PATH = os.path.join(DATA_DIR, "baseline.json")
@@ -92,7 +93,7 @@ def _concurrent_activations(events: list[dict[str, Any]], window_seconds: int = 
 
     timed.sort()
     concurrent_counts = []
-    for i, t in enumerate(timed):
+    for _i, t in enumerate(timed):
         window_end = t + datetime.timedelta(seconds=window_seconds)
         count = sum(1 for t2 in timed if t <= t2 <= window_end)
         concurrent_counts.append(count)
@@ -120,9 +121,11 @@ def _unusual_rooms_active(events: list[dict[str, Any]], baseline: dict[str, Any]
     unusual = []
     for eid in recent_entities:
         eid_lower = eid.lower()
-        if any(kw in eid_lower for kw in GUEST_ROOM_KEYWORDS):
-            unusual.append(eid)
-        elif eid not in baseline_entities and any(kw in eid_lower for kw in ("light.", "switch.")):
+        if (
+            any(kw in eid_lower for kw in GUEST_ROOM_KEYWORDS)
+            or eid not in baseline_entities
+            and any(kw in eid_lower for kw in ("light.", "switch."))
+        ):
             unusual.append(eid)
 
     return unusual
@@ -208,11 +211,12 @@ def _generate_guest_suggestions(unusual_rooms: list[str]) -> list[dict[str, Any]
     suggestions = []
 
     # 1. Disable private automations
-    suggestions.append({
-        "type": "disable_private",
-        "title": "Disable private automations",
-        "description": "Disable bedroom/presence-based automations while guests are present",
-        "generated_yaml": """automation:
+    suggestions.append(
+        {
+            "type": "disable_private",
+            "title": "Disable private automations",
+            "description": "Disable bedroom/presence-based automations while guests are present",
+            "generated_yaml": """automation:
   alias: "Habitus — Disable private automations (Guest Mode)"
   trigger:
     - platform: state
@@ -229,14 +233,16 @@ def _generate_guest_suggestions(unusual_rooms: list[str]) -> list[dict[str, Any]
         title: "Guest Mode Active"
         message: "Private automations disabled for guest visit"
 """,
-    })
+        }
+    )
 
     # 2. Enable hallway night lights
-    suggestions.append({
-        "type": "guest_night_lights",
-        "title": "Enable guest-friendly night lights",
-        "description": "Turn on hallway and bathroom night lights for guest navigation",
-        "generated_yaml": """automation:
+    suggestions.append(
+        {
+            "type": "guest_night_lights",
+            "title": "Enable guest-friendly night lights",
+            "description": "Turn on hallway and bathroom night lights for guest navigation",
+            "generated_yaml": """automation:
   alias: "Habitus — Guest night lights"
   trigger:
     - platform: state
@@ -250,14 +256,16 @@ def _generate_guest_suggestions(unusual_rooms: list[str]) -> list[dict[str, Any]
         brightness_pct: 20
         color_temp: 400
 """,
-    })
+        }
+    )
 
     # 3. Bathroom fan on motion
-    suggestions.append({
-        "type": "guest_bathroom_fan",
-        "title": "Bathroom fan on motion (guest comfort)",
-        "description": "Automatically activate bathroom fan when motion detected",
-        "generated_yaml": """automation:
+    suggestions.append(
+        {
+            "type": "guest_bathroom_fan",
+            "title": "Bathroom fan on motion (guest comfort)",
+            "description": "Automatically activate bathroom fan when motion detected",
+            "generated_yaml": """automation:
   alias: "Habitus — Guest bathroom fan"
   trigger:
     - platform: state
@@ -276,7 +284,8 @@ def _generate_guest_suggestions(unusual_rooms: list[str]) -> list[dict[str, Any]
       target:
         entity_id: switch.bathroom_fan
 """,
-    })
+        }
+    )
 
     return suggestions
 
@@ -297,9 +306,14 @@ def run(
     result["timestamp"] = datetime.datetime.now(datetime.UTC).isoformat()
 
     from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+
     _atomic_write(os.path.join(os.environ.get("DATA_DIR", "/data"), "guest_mode.json"), result)
 
-    log.info("Guest mode: probability=%.2f, factors=%s", result["guest_probability"], result.get("factors", {}))
+    log.info(
+        "Guest mode: probability=%.2f, factors=%s",
+        result["guest_probability"],
+        result.get("factors", {}),
+    )
     return result
 
 

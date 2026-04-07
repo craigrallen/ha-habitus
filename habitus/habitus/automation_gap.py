@@ -317,23 +317,43 @@ def _keyword_overlap(auto_alias, intent):
 
 def _extract_yaml_semantics(sug_yaml: str) -> dict[str, set[str]]:
     if not sug_yaml:
-        return {"trigger_entities": set(), "action_entities": set(), "services": set(), "platforms": set()}
+        return {
+            "trigger_entities": set(),
+            "action_entities": set(),
+            "services": set(),
+            "platforms": set(),
+        }
 
     try:
         parsed = yaml.safe_load(sug_yaml)
     except Exception:
-        return {"trigger_entities": set(), "action_entities": set(), "services": set(), "platforms": set()}
+        return {
+            "trigger_entities": set(),
+            "action_entities": set(),
+            "services": set(),
+            "platforms": set(),
+        }
 
     if isinstance(parsed, list) and parsed:
         parsed = parsed[0]
     if not isinstance(parsed, dict):
-        return {"trigger_entities": set(), "action_entities": set(), "services": set(), "platforms": set()}
+        return {
+            "trigger_entities": set(),
+            "action_entities": set(),
+            "services": set(),
+            "platforms": set(),
+        }
 
     auto = parsed.get("automation", parsed)
     if isinstance(auto, list) and auto:
         auto = auto[0]
     if not isinstance(auto, dict):
-        return {"trigger_entities": set(), "action_entities": set(), "services": set(), "platforms": set()}
+        return {
+            "trigger_entities": set(),
+            "action_entities": set(),
+            "services": set(),
+            "platforms": set(),
+        }
 
     trigger = auto.get("trigger", [])
     action = auto.get("action", [])
@@ -444,8 +464,12 @@ def _generate_yaml(parsed_sug):
     raw = parsed_sug["raw"]
 
     light_entity = next((e for e in entities if e.startswith("light.")), None) or "light.your_light"
-    switch_entity = next((e for e in entities if e.startswith("switch.")), None) or "switch.your_switch"
-    climate_entity = next((e for e in entities if e.startswith("climate.")), None) or "climate.your_thermostat"
+    switch_entity = (
+        next((e for e in entities if e.startswith("switch.")), None) or "switch.your_switch"
+    )
+    climate_entity = (
+        next((e for e in entities if e.startswith("climate.")), None) or "climate.your_thermostat"
+    )
     lock_entity = next((e for e in entities if e.startswith("lock.")), None) or "lock.your_lock"
 
     alias = raw[:60].strip().rstrip(".")
@@ -475,7 +499,11 @@ def _generate_yaml(parsed_sug):
             or next((e for e in entities if e.startswith("media_player.")), None)
             or switch_entity
         )
-        service = "media_player.turn_off" if standby_target.startswith("media_player.") else "switch.turn_off"
+        service = (
+            "media_player.turn_off"
+            if standby_target.startswith("media_player.")
+            else "switch.turn_off"
+        )
         return (
             f'alias: "{alias}"\n'
             "trigger:\n"
@@ -717,6 +745,7 @@ async def analyse(ha_url, ha_token, suggestions, auto_scores=None):
     # Enrich gaps with cost estimates for energy-consuming entities
     try:
         from . import cost_estimator as _ce
+
         gaps = _ce.enrich_with_cost(gaps, entity_field="entities", default_hours=1.0)
         # Also try primary entity from entities list
         for gap in gaps:
@@ -743,6 +772,7 @@ async def analyse(ha_url, ha_token, suggestions, auto_scores=None):
 def save(result):
     """Save gap analysis to disk."""
     from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+
     _atomic_write(GAP_PATH, result)
     log.info(
         "automation_gap: saved %d gaps — %s",

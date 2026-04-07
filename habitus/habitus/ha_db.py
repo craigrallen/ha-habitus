@@ -9,9 +9,11 @@ from __future__ import annotations
 import os
 import sqlite3
 import threading
-from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
-from typing import Any
+from contextlib import contextmanager, suppress
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Sequence
 
 
 class _ReadPool:
@@ -29,10 +31,8 @@ class _ReadPool:
                     existing.execute("SELECT 1")
                     return existing
                 except sqlite3.Error:
-                    try:
+                    with suppress(sqlite3.Error):
                         existing.close()
-                    except sqlite3.Error:
-                        pass
                     self._connections.pop(db_path, None)
 
             conn = sqlite3.connect(
@@ -49,10 +49,8 @@ class _ReadPool:
     def close_all(self) -> None:
         with self._lock:
             for conn in self._connections.values():
-                try:
+                with suppress(sqlite3.Error):
                     conn.close()
-                except sqlite3.Error:
-                    pass
             self._connections.clear()
 
 

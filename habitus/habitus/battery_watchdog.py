@@ -5,6 +5,7 @@ Tracks current level, trend (drain per day), estimated_days_remaining.
 Groups by area/room.
 Alert levels: ok (>30%), low (10-30%), critical (<10%).
 """
+
 from __future__ import annotations
 
 import datetime
@@ -21,6 +22,7 @@ DATA_DIR = os.environ.get("DATA_DIR", "/data")
 
 def _get_data_dir() -> str:
     return os.environ.get("DATA_DIR", DATA_DIR)
+
 
 BATTERY_PATH = os.path.join(DATA_DIR, "battery_status.json")
 
@@ -192,7 +194,9 @@ def run_battery_check(
         eid = entity_state.get("entity_id", "")
         state_val = entity_state.get("state", "")
         attrs = entity_state.get("attributes", {})
-        friendly_name = attrs.get("friendly_name", eid.replace("sensor.", "").replace("_", " ").title())
+        friendly_name = attrs.get(
+            "friendly_name", eid.replace("sensor.", "").replace("_", " ").title()
+        )
 
         try:
             level = float(state_val)
@@ -261,6 +265,7 @@ def run_battery_check(
 def save_battery_status(report: dict[str, Any]) -> None:
     """Save battery status report."""
     from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+
     _atomic_write(os.path.join(os.environ.get("DATA_DIR", "/data"), "battery_status.json"), report)
     log.info(
         "Battery watchdog: %d batteries — critical=%d, low=%d, ok=%d",
@@ -275,7 +280,9 @@ def load_battery_status() -> dict[str, Any]:
     """Load cached battery status."""
     try:
         if os.path.exists(os.path.join(os.environ.get("DATA_DIR", "/data"), "battery_status.json")):
-            with open(os.path.join(os.environ.get("DATA_DIR", "/data"), "battery_status.json")) as f:
+            with open(
+                os.path.join(os.environ.get("DATA_DIR", "/data"), "battery_status.json")
+            ) as f:
                 return json.load(f)
     except Exception:
         pass

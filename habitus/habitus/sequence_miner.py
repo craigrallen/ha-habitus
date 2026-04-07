@@ -5,11 +5,9 @@ Unlike co-occurrence (scenes), this captures the FLOW of behaviour.
 """
 
 import datetime
-import json
 import logging
 import os
 import sqlite3
-from collections import defaultdict
 from typing import Any
 
 from .ha_db import resolve_ha_db_path
@@ -18,8 +16,16 @@ log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 SEQUENCES_PATH = os.path.join(DATA_DIR, "sequences.json")
 
-ACTION_DOMAINS = ("light", "switch", "media_player", "climate", "fan", "cover",
-                  "binary_sensor", "input_boolean")
+ACTION_DOMAINS = (
+    "light",
+    "switch",
+    "media_player",
+    "climate",
+    "fan",
+    "cover",
+    "binary_sensor",
+    "input_boolean",
+)
 # Max gap between events in a sequence (minutes)
 MAX_GAP_MIN = 10
 # Min gap to separate sequences (minutes)
@@ -45,7 +51,8 @@ def _load_event_streams(entity_to_area: dict[str, str], days: int = 30) -> list[
 
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        rows = conn.execute(f"""
+        rows = conn.execute(
+            f"""
             SELECT sm.entity_id, s.state, s.last_changed_ts
             FROM states s
             JOIN states_meta sm ON s.metadata_id = sm.metadata_id
@@ -53,7 +60,9 @@ def _load_event_streams(entity_to_area: dict[str, str], days: int = 30) -> list[
             AND ({like_clauses})
             AND s.state NOT IN ('unavailable', 'unknown', '')
             ORDER BY s.last_changed_ts
-        """, (cutoff_ts,)).fetchall()
+        """,
+            (cutoff_ts,),
+        ).fetchall()
         conn.close()
     except Exception as e:
         log.warning("sequence_miner: DB query failed: %s", e)
@@ -68,8 +77,20 @@ def _load_event_streams(entity_to_area: dict[str, str], days: int = 30) -> list[
     last_ts = 0.0
 
     for eid, state, ts in rows:
-        if state in ("on", "off", "heat", "cool", "auto", "playing", "paused", "idle",
-                      "home", "not_home", "open", "closed"):
+        if state in (
+            "on",
+            "off",
+            "heat",
+            "cool",
+            "auto",
+            "playing",
+            "paused",
+            "idle",
+            "home",
+            "not_home",
+            "open",
+            "closed",
+        ):
             room = entity_to_area.get(eid, "unknown")
             symbol = f"{room}:{eid.split('.')[-1]}:{state}"
 
@@ -81,9 +102,7 @@ def _load_event_streams(entity_to_area: dict[str, str], days: int = 30) -> list[
             # Skip if same as last event (dedup)
             if not current_session or current_session[-1] != symbol:
                 # Check gap within sequence
-                if last_ts > 0 and (ts - last_ts) <= MAX_GAP_MIN * 60:
-                    current_session.append(symbol)
-                elif not current_session:
+                if last_ts > 0 and (ts - last_ts) <= MAX_GAP_MIN * 60 or not current_session:
                     current_session.append(symbol)
                 else:
                     if len(current_session) >= 2:
@@ -141,20 +160,21 @@ def mine_sequences(entity_to_area: dict[str, str], days: int = 30) -> dict[str, 
             category = "pair"
 
         description = " → ".join(
-            f"{e['entity'].replace('_',' ').title()} ({e['state']})"
-            for e in entities
+            f"{e['entity'].replace('_',' ').title()} ({e['state']})" for e in entities
         )
 
-        results.append({
-            "pattern": pattern,
-            "support": support,
-            "frequency_pct": round(support / len(sessions) * 100, 1),
-            "length": len(pattern),
-            "rooms": sorted(rooms),
-            "entities": entities,
-            "category": category,
-            "description": description,
-        })
+        results.append(
+            {
+                "pattern": pattern,
+                "support": support,
+                "frequency_pct": round(support / len(sessions) * 100, 1),
+                "length": len(pattern),
+                "rooms": sorted(rooms),
+                "entities": entities,
+                "category": category,
+                "description": description,
+            }
+        )
 
     result = {
         "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
@@ -164,7 +184,10 @@ def mine_sequences(entity_to_area: dict[str, str], days: int = 30) -> dict[str, 
     }
 
     from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+
     _atomic_write(SEQUENCES_PATH, result)
 
-    log.info("sequence_miner: found %d frequent patterns from %d sessions", len(results), len(sessions))
+    log.info(
+        "sequence_miner: found %d frequent patterns from %d sessions", len(results), len(sessions)
+    )
     return result

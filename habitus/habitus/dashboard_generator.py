@@ -3,6 +3,7 @@
 Analyses entity usage frequency + area grouping + domain.
 Generates valid Lovelace YAML dashboard.
 """
+
 from __future__ import annotations
 
 import json
@@ -20,13 +21,23 @@ DATA_DIR = os.environ.get("DATA_DIR", "/data")
 def _get_data_dir() -> str:
     return os.environ.get("DATA_DIR", DATA_DIR)
 
+
 DASHBOARD_PATH = os.path.join(DATA_DIR, "dashboard.yaml")
 BASELINE_PATH = os.path.join(DATA_DIR, "baseline.json")
 BATTERY_PATH = os.path.join(DATA_DIR, "battery_status.json")
 HA_AUTOMATIONS_PATH = os.path.join(DATA_DIR, "ha_automations.json")
 
 # Domains considered as "controls" (quick access)
-CONTROL_DOMAINS = {"light", "switch", "media_player", "climate", "fan", "cover", "lock", "input_boolean"}
+CONTROL_DOMAINS = {
+    "light",
+    "switch",
+    "media_player",
+    "climate",
+    "fan",
+    "cover",
+    "lock",
+    "input_boolean",
+}
 
 # Domains for sensor display
 SENSOR_DOMAINS = {"sensor", "binary_sensor"}
@@ -61,9 +72,21 @@ def _infer_area(entity_id: str, attrs: dict[str, Any] | None = None) -> str:
 
     eid_lower = entity_id.lower()
     rooms = [
-        "living_room", "bedroom", "master_bedroom", "kitchen", "bathroom",
-        "hallway", "office", "garage", "garden", "front", "back", "basement",
-        "dining", "laundry", "utility",
+        "living_room",
+        "bedroom",
+        "master_bedroom",
+        "kitchen",
+        "bathroom",
+        "hallway",
+        "office",
+        "garage",
+        "garden",
+        "front",
+        "back",
+        "basement",
+        "dining",
+        "laundry",
+        "utility",
     ]
     for room in rooms:
         if room in eid_lower:
@@ -85,7 +108,7 @@ def _is_battery_entity(entity_id: str) -> bool:
 
 def _build_entity_card(entity_id: str, name: str | None = None) -> dict[str, Any]:
     """Build a basic entity card."""
-    domain = entity_id.split(".")[0]
+    entity_id.split(".")[0]
     card: dict[str, Any] = {"type": "tile", "entity": entity_id}
     if name:
         card["name"] = name
@@ -162,10 +185,7 @@ def generate_dashboard(
             }
 
     # Sort entities by frequency
-    control_entities = [
-        e for e in entity_info.values()
-        if e["domain"] in CONTROL_DOMAINS
-    ]
+    control_entities = [e for e in entity_info.values() if e["domain"] in CONTROL_DOMAINS]
     control_entities.sort(key=lambda e: e.get("frequency", 0), reverse=True)
 
     # Group by area
@@ -174,10 +194,7 @@ def generate_dashboard(
         area_entities[e["area"]].append(e["entity_id"])
 
     # Find energy entities
-    energy_entities = [
-        eid for eid in entity_info
-        if _is_energy_entity(eid)
-    ]
+    energy_entities = [eid for eid in entity_info if _is_energy_entity(eid)]
 
     # Find battery entities
     battery_entities_list = battery_data.get("batteries", [])
@@ -189,16 +206,20 @@ def generate_dashboard(
     # Section 1: Quick Controls (high-frequency entities)
     top_entities = [e["entity_id"] for e in control_entities[:8]]
     if top_entities:
-        cards.append({
-            "type": "horizontal-stack",
-            "title": "Quick Controls",
-            "cards": [_build_entity_card(eid) for eid in top_entities[:4]],
-        })
-        if len(top_entities) > 4:
-            cards.append({
+        cards.append(
+            {
                 "type": "horizontal-stack",
-                "cards": [_build_entity_card(eid) for eid in top_entities[4:8]],
-            })
+                "title": "Quick Controls",
+                "cards": [_build_entity_card(eid) for eid in top_entities[:4]],
+            }
+        )
+        if len(top_entities) > 4:
+            cards.append(
+                {
+                    "type": "horizontal-stack",
+                    "cards": [_build_entity_card(eid) for eid in top_entities[4:8]],
+                }
+            )
 
     # Section 2: Per-room sections
     for area, area_eids in sorted(area_entities.items()):
@@ -209,19 +230,23 @@ def generate_dashboard(
 
     # Section 3: Energy section
     if energy_entities:
-        cards.append({
-            "type": "entities",
-            "title": "⚡ Energy",
-            "entities": [{"entity": eid} for eid in energy_entities[:8]],
-        })
+        cards.append(
+            {
+                "type": "entities",
+                "title": "⚡ Energy",
+                "entities": [{"entity": eid} for eid in energy_entities[:8]],
+            }
+        )
 
     # Section 4: Battery section
     if battery_entity_ids:
-        cards.append({
-            "type": "entities",
-            "title": "🔋 Battery Status",
-            "entities": [{"entity": eid} for eid in battery_entity_ids[:10]],
-        })
+        cards.append(
+            {
+                "type": "entities",
+                "title": "🔋 Battery Status",
+                "entities": [{"entity": eid} for eid in battery_entity_ids[:10]],
+            }
+        )
 
     # Section 5: Automations card
     if automations_raw:
@@ -232,11 +257,13 @@ def generate_dashboard(
 
         auto_aliases = [a.get("alias", "") for a in auto_list if a.get("alias")]
         if auto_aliases:
-            cards.append({
-                "type": "markdown",
-                "title": "🤖 Active Automations",
-                "content": "\n".join(f"• {alias}" for alias in auto_aliases[:10]),
-            })
+            cards.append(
+                {
+                    "type": "markdown",
+                    "title": "🤖 Active Automations",
+                    "content": "\n".join(f"• {alias}" for alias in auto_aliases[:10]),
+                }
+            )
 
     dashboard = {
         "title": "Habitus Dashboard",

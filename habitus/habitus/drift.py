@@ -150,6 +150,7 @@ def detect_drift(df: pd.DataFrame) -> dict:
 def save(data: dict) -> None:
     """Save drift results to disk."""
     from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+
     _atomic_write(DRIFT_PATH, data)
     log.info("Drift analysis saved: %s", data.get("summary", ""))
 

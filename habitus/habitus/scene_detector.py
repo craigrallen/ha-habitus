@@ -105,12 +105,14 @@ def _get_state_changes(days: int = 30) -> list[dict[str, Any]]:
                 continue
             if state in ("unavailable", "unknown", ""):
                 continue
-            results.append({
-                "entity_id": entity_id,
-                "state": state,
-                "timestamp": float(ts),
-                "dt": datetime.datetime.fromtimestamp(float(ts), tz=datetime.UTC),
-            })
+            results.append(
+                {
+                    "entity_id": entity_id,
+                    "state": state,
+                    "timestamp": float(ts),
+                    "dt": datetime.datetime.fromtimestamp(float(ts), tz=datetime.UTC),
+                }
+            )
         log.info("Scene detector: loaded %d state changes from HA database", len(results))
         return results
     except Exception as e:
@@ -197,8 +199,7 @@ def _cluster_pairs_to_scenes(
     """
     # Filter to pairs that co-occur often enough
     frequent_pairs = {
-        pair: times for pair, times in pair_occurrences.items()
-        if len(times) >= min_co
+        pair: times for pair, times in pair_occurrences.items() if len(times) >= min_co
     }
 
     if not frequent_pairs:
@@ -277,7 +278,7 @@ def _split_large_component(
             if count > 0:
                 neighbors.append((e, count))
         neighbors.sort(key=lambda x: -x[1])
-        for e, _ in neighbors[:max_size - 1]:
+        for e, _ in neighbors[: max_size - 1]:
             group.add(e)
             used.add(e)
         if len(group) >= 2:
@@ -382,20 +383,54 @@ def _analyze_time_patterns(
 
 # Known room keywords — matched against entity IDs, friendly names, and HA areas
 ROOM_KEYWORDS = [
-    "living_room", "living room", "lounge", "family_room",
-    "bedroom", "master_bedroom", "guest_bedroom", "kids_room",
-    "kitchen", "galley",
-    "bathroom", "bath", "shower", "ensuite",
-    "hallway", "hall", "corridor", "entry", "foyer", "entrance",
-    "office", "study", "den", "workspace",
-    "dining", "dining_room",
-    "garage", "workshop",
-    "garden", "patio", "deck", "terrace", "balcony",
-    "laundry", "utility",
-    "nursery", "playroom",
+    "living_room",
+    "living room",
+    "lounge",
+    "family_room",
+    "bedroom",
+    "master_bedroom",
+    "guest_bedroom",
+    "kids_room",
+    "kitchen",
+    "galley",
+    "bathroom",
+    "bath",
+    "shower",
+    "ensuite",
+    "hallway",
+    "hall",
+    "corridor",
+    "entry",
+    "foyer",
+    "entrance",
+    "office",
+    "study",
+    "den",
+    "workspace",
+    "dining",
+    "dining_room",
+    "garage",
+    "workshop",
+    "garden",
+    "patio",
+    "deck",
+    "terrace",
+    "balcony",
+    "laundry",
+    "utility",
+    "nursery",
+    "playroom",
     # Boat-specific
-    "wheelhouse", "engine_room", "salon", "saloon", "cabin", "cockpit",
-    "foredeck", "aft_deck", "anchor", "helm",
+    "wheelhouse",
+    "engine_room",
+    "salon",
+    "saloon",
+    "cabin",
+    "cockpit",
+    "foredeck",
+    "aft_deck",
+    "anchor",
+    "helm",
 ]
 
 # Hoisted once to avoid per-call sorting inside _extract_room.
@@ -429,6 +464,7 @@ def _extract_rooms_from_entities(entities: set[str]) -> list[str]:
     # Pass 0: HA configured areas (authoritative)
     try:
         from . import ha_areas
+
         ha_rooms = ha_areas.get_entities_rooms(list(entities))
         for r in ha_rooms:
             if r.lower() not in seen:
@@ -454,11 +490,35 @@ def _extract_rooms_from_entities(entities: set[str]) -> list[str]:
         for eid in entities:
             part = eid.split(".")[-1]
             # Remove numeric suffixes and common generic suffixes
-            for suffix in ("_light", "_lamp", "_main", "_ceiling", "_switch", "_plug",
-                           "_media_player", "_fan", "_cover", "_strip", "_dimmer",
-                           "_sensor", "_motion", "_door", "_window", "_contact",
-                           "_power", "_energy", "_temperature", "_humidity",
-                           "_1", "_2", "_3", "_left", "_right", "_on", "_off"):
+            for suffix in (
+                "_light",
+                "_lamp",
+                "_main",
+                "_ceiling",
+                "_switch",
+                "_plug",
+                "_media_player",
+                "_fan",
+                "_cover",
+                "_strip",
+                "_dimmer",
+                "_sensor",
+                "_motion",
+                "_door",
+                "_window",
+                "_contact",
+                "_power",
+                "_energy",
+                "_temperature",
+                "_humidity",
+                "_1",
+                "_2",
+                "_3",
+                "_left",
+                "_right",
+                "_on",
+                "_off",
+            ):
                 part = part.removesuffix(suffix)
             if part:
                 name_parts.append(part)
@@ -466,6 +526,7 @@ def _extract_rooms_from_entities(entities: set[str]) -> list[str]:
         if name_parts:
             # Find most common prefix token
             from collections import Counter
+
             tokens = []
             for p in name_parts:
                 tokens.extend(p.split("_")[:2])  # first 2 tokens
@@ -501,9 +562,7 @@ def _compute_scene_confidence(entities: set[str], time_info: dict[str, Any]) -> 
         for offset in range(3)
     )
     time_consistency = (
-        (total_in_peak / max(time_info["count"], 1)) * 100
-        if time_info["count"] > 0
-        else 0
+        (total_in_peak / max(time_info["count"], 1)) * 100 if time_info["count"] > 0 else 0
     )
 
     domains_in_scene = {e.split(".")[0] for e in entities}
@@ -606,9 +665,7 @@ def detect_scenes(days: int = 30) -> list[dict[str, Any]]:
     return results
 
 
-def _build_description(
-    name: str, entities: list[str], time_info: dict[str, Any]
-) -> str:
+def _build_description(name: str, entities: list[str], time_info: dict[str, Any]) -> str:
     """Build a human-readable description of a discovered scene."""
     count = time_info.get("count", 0)
     peak = time_info.get("peak_hour", 18)
@@ -631,7 +688,7 @@ def _build_description(
         f"We noticed {ent_str} activate together around "
         f"{peak:02d}:00 {day_str}. "
         f"Detected {count} times in the last 30 days — "
-        f"this looks like an implicit \"{name}\" scene."
+        f'this looks like an implicit "{name}" scene.'
     )
 
 

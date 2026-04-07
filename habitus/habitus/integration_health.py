@@ -6,6 +6,7 @@ For every entity in HA states:
 - Group by integration (inferred from entity_id prefix or domain)
 - Compute integration health score per domain (% entities healthy)
 """
+
 from __future__ import annotations
 
 import datetime
@@ -24,6 +25,7 @@ DATA_DIR = os.environ.get("DATA_DIR", "/data")
 def _get_data_dir() -> str:
     return os.environ.get("DATA_DIR", DATA_DIR)
 
+
 INTEGRATION_HEALTH_PATH = os.path.join(DATA_DIR, "integration_health.json")
 
 HA_URL = os.environ.get("HA_URL", "http://supervisor/core")
@@ -31,18 +33,18 @@ HA_TOKEN = os.environ.get("SUPERVISOR_TOKEN", os.environ.get("HABITUS_HA_TOKEN",
 
 # Staleness thresholds by domain (seconds)
 STALE_THRESHOLDS: dict[str, int] = {
-    "sensor": 24 * 3600,           # 24 hours
-    "binary_sensor": 7 * 24 * 3600, # 7 days
-    "switch": 7 * 24 * 3600,        # 7 days
-    "light": 7 * 24 * 3600,         # 7 days
-    "climate": 24 * 3600,            # 24 hours
-    "motion": 3600,                  # 1 hour (special case for motion sensors)
-    "person": 7 * 24 * 3600,         # 7 days
-    "media_player": 24 * 3600,       # 24 hours
-    "cover": 7 * 24 * 3600,          # 7 days
-    "input_boolean": 30 * 24 * 3600, # 30 days
-    "automation": 7 * 24 * 3600,     # 7 days
-    "default": 7 * 24 * 3600,        # 7 days default
+    "sensor": 24 * 3600,  # 24 hours
+    "binary_sensor": 7 * 24 * 3600,  # 7 days
+    "switch": 7 * 24 * 3600,  # 7 days
+    "light": 7 * 24 * 3600,  # 7 days
+    "climate": 24 * 3600,  # 24 hours
+    "motion": 3600,  # 1 hour (special case for motion sensors)
+    "person": 7 * 24 * 3600,  # 7 days
+    "media_player": 24 * 3600,  # 24 hours
+    "cover": 7 * 24 * 3600,  # 7 days
+    "input_boolean": 30 * 24 * 3600,  # 30 days
+    "automation": 7 * 24 * 3600,  # 7 days
+    "default": 7 * 24 * 3600,  # 7 days default
 }
 
 UNAVAILABLE_STATES = {"unavailable", "unknown"}
@@ -227,7 +229,9 @@ def run_integration_health_check(
         "stale_count": len(stale_entities),
         "unavailable_count": len(unavailable_entities),
         "healthy_count": total_healthy,
-        "stale_entities": sorted(stale_entities, key=lambda e: e.get("age_hours") or 0, reverse=True)[:50],
+        "stale_entities": sorted(
+            stale_entities, key=lambda e: e.get("age_hours") or 0, reverse=True
+        )[:50],
         "unavailable_entities": unavailable_entities[:50],
         "integration_scores": integration_scores,
     }
@@ -246,7 +250,10 @@ def _score_label(score: float) -> str:
 def save_integration_health(report: dict[str, Any]) -> None:
     """Save integration health report."""
     from .utils import atomic_write as _atomic_write  # noqa: PLC0415
-    _atomic_write(os.path.join(os.environ.get("DATA_DIR", "/data"), "integration_health.json"), report)
+
+    _atomic_write(
+        os.path.join(os.environ.get("DATA_DIR", "/data"), "integration_health.json"), report
+    )
     log.info(
         "Integration health: score=%.1f%%, stale=%d, unavailable=%d",
         report["overall_score"],
@@ -258,8 +265,12 @@ def save_integration_health(report: dict[str, Any]) -> None:
 def load_integration_health() -> dict[str, Any]:
     """Load cached integration health report."""
     try:
-        if os.path.exists(os.path.join(os.environ.get("DATA_DIR", "/data"), "integration_health.json")):
-            with open(os.path.join(os.environ.get("DATA_DIR", "/data"), "integration_health.json")) as f:
+        if os.path.exists(
+            os.path.join(os.environ.get("DATA_DIR", "/data"), "integration_health.json")
+        ):
+            with open(
+                os.path.join(os.environ.get("DATA_DIR", "/data"), "integration_health.json")
+            ) as f:
                 return json.load(f)
     except Exception:
         pass

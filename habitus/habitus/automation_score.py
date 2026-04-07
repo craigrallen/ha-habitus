@@ -112,7 +112,7 @@ async def score_all(ha_url: str | None = None, ha_token: str | None = None) -> l
 
                     # Check if safety-critical automation (emergency/alarm)
                     is_safety = is_safety_critical(friendly, auto_id)
-                    
+
                     if len(triggers) < MIN_TRIGGERS:
                         # Safety automations are scored even with low triggers
                         if is_safety:
@@ -187,12 +187,12 @@ async def score_all(ha_url: str | None = None, ha_token: str | None = None) -> l
                         "override_rate": override_rate,
                         "score": score,
                     }
-                    
+
                     # Mark safety-critical automations
                     if is_safety:
                         result["safety_critical"] = True
                         result["note"] = "Emergency automation — protected from deletion"
-                    
+
                     results.append(result)
 
                 except Exception as e:
@@ -245,14 +245,14 @@ def _add_seconds(iso_str: str, seconds: int) -> str:
 
 def is_safety_critical(automation_name: str, automation_id: str) -> bool:
     """Detect if an automation is safety-critical (emergency/alarm).
-    
-    Safety automations should NOT be penalized for low run counts — 
+
+    Safety automations should NOT be penalized for low run counts —
     zero recent runs means the system is healthy.
-    
+
     Args:
         automation_name: Friendly name of the automation.
         automation_id: Entity ID (e.g., automation.bilge_pump_alarm).
-    
+
     Returns:
         True if automation matches safety patterns.
     """
@@ -263,6 +263,7 @@ def is_safety_critical(automation_name: str, automation_id: str) -> bool:
 def save(results: list) -> None:
     """Save automation scores to disk."""
     from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+
     _atomic_write(SCORES_PATH, results)
     log.info("Automation scores saved: %d automations scored", len(results))
 

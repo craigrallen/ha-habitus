@@ -111,7 +111,7 @@ def _build_co_occurrence_index(
     for scene in discovered_scenes:
         entities = scene.get("entities", [])
         occurrences = scene.get("occurrences", 1)
-        for i, a in enumerate(entities):
+        for _i, a in enumerate(entities):
             for b in entities:
                 if a != b:
                     index[a][b] += occurrences
@@ -145,8 +145,7 @@ def _build_trigger_yaml(scene_name: str, trigger_config: dict[str, Any]) -> str:
                     {
                         "condition": "time",
                         "weekday": [
-                            ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][d]
-                            for d in mapped
+                            ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][d] for d in mapped
                         ],
                     }
                 ]
@@ -185,15 +184,17 @@ def _suggest_triggers(
         trigger_time = f"{int(peak_hour):02d}:00:00"
         trigger_cfg = {"type": "time", "time": trigger_time, "days": day_pattern}
         yaml_snippet = _build_trigger_yaml(scene_name, trigger_cfg)
-        suggestions.append({
-            "description": (
-                f"Trigger at {trigger_time} ({day_pattern}) "
-                f"— matches observed activation pattern"
-            ),
-            "trigger_yaml": yaml_snippet,
-            "confidence": min(95, int(discovered_scene.get("confidence", 60))),
-            "source": "time_pattern",
-        })
+        suggestions.append(
+            {
+                "description": (
+                    f"Trigger at {trigger_time} ({day_pattern}) "
+                    f"— matches observed activation pattern"
+                ),
+                "trigger_yaml": yaml_snippet,
+                "confidence": min(95, int(discovered_scene.get("confidence", 60))),
+                "source": "time_pattern",
+            }
+        )
 
     return suggestions
 
@@ -237,9 +238,7 @@ def analyse_scenes(
     co_index = _build_co_occurrence_index(discovered_scenes)
 
     # Build a set of all entities across discovered scenes for quick lookup
-    all_discovered_entity_sets = [
-        set(s.get("entities", [])) for s in discovered_scenes
-    ]
+    [set(s.get("entities", [])) for s in discovered_scenes]
 
     results: list[dict[str, Any]] = []
 
@@ -300,14 +299,18 @@ def analyse_scenes(
         # Enrich with room context
         try:
             from . import room_clustering
+
             rooms = room_clustering.get_rooms_for_entities(list(scene_entities))
         except Exception:
             rooms = []
         room_label = (
-            rooms[0] if len(rooms) == 1
-            else " and ".join(rooms[:2]) if len(rooms) == 2
-            else ", ".join(rooms[:2]) + " and more" if rooms
-            else ""
+            rooms[0]
+            if len(rooms) == 1
+            else (
+                " and ".join(rooms[:2])
+                if len(rooms) == 2
+                else ", ".join(rooms[:2]) + " and more" if rooms else ""
+            )
         )
 
         why = []
@@ -318,23 +321,23 @@ def analyse_scenes(
                 f"with this scene{room_ctx} but not included"
             )
         if suggested_triggers:
-            why.append(
-                f"Activation time pattern detected — automation trigger suggested"
-            )
+            why.append("Activation time pattern detected — automation trigger suggested")
         if not why:
             why.append("No improvement suggestions found based on current learned patterns")
 
-        results.append({
-            "scene_id": scene_id,
-            "scene_name": scene_name,
-            "scene_entities": sorted(scene_entities),
-            "rooms": rooms,
-            "room_label": room_label,
-            "missing_entities": missing_list,
-            "suggested_triggers": suggested_triggers,
-            "improvement_score": score,
-            "why_suggested": "; ".join(why),
-        })
+        results.append(
+            {
+                "scene_id": scene_id,
+                "scene_name": scene_name,
+                "scene_entities": sorted(scene_entities),
+                "rooms": rooms,
+                "room_label": room_label,
+                "missing_entities": missing_list,
+                "suggested_triggers": suggested_triggers,
+                "improvement_score": score,
+                "why_suggested": "; ".join(why),
+            }
+        )
 
     # Sort by improvement score descending
     results.sort(key=lambda r: -r["improvement_score"])

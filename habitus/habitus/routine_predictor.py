@@ -19,7 +19,7 @@ import datetime
 import json
 import logging
 import os
-from collections import Counter, defaultdict
+from collections import Counter
 from typing import Any
 
 from .ha_db import managed_read_connection, resolve_ha_db_path, table_exists
@@ -38,7 +38,17 @@ MAX_SHOWER_DURATION_MIN = 45
 PREHEAT_MINUTES = 60
 
 # Room keywords
-BATHROOM_KEYWORDS = ("bathroom", "bath", "shower", "ensuite", "wc", "toilet", "washroom", "badrum", "dusch")
+BATHROOM_KEYWORDS = (
+    "bathroom",
+    "bath",
+    "shower",
+    "ensuite",
+    "wc",
+    "toilet",
+    "washroom",
+    "badrum",
+    "dusch",
+)
 KITCHEN_KEYWORDS = ("kitchen", "galley", "kök")
 BEDROOM_KEYWORDS = ("bedroom", "bed_room", "master_bed", "sovrum")
 
@@ -89,8 +99,11 @@ def _find_humidity_sensors() -> dict[str, str]:
             else:
                 sensors[eid] = "other"
 
-        log.info("Found %d humidity sensors: %s", len(sensors),
-                 {v: sum(1 for x in sensors.values() if x == v) for v in set(sensors.values())})
+        log.info(
+            "Found %d humidity sensors: %s",
+            len(sensors),
+            {v: sum(1 for x in sensors.values() if x == v) for v in set(sensors.values())},
+        )
         return sensors
     except Exception as e:
         log.warning("Failed to find humidity sensors: %s", e)
@@ -113,20 +126,26 @@ def _get_humidity_history(entity_id: str, days: int = 30) -> list[tuple[float, f
             has_meta = table_exists(conn, "states_meta")
 
             if has_meta:
-                rows = conn.execute("""
+                rows = conn.execute(
+                    """
                     SELECT s.state, s.last_changed_ts
                     FROM states s
                     JOIN states_meta sm ON s.metadata_id = sm.metadata_id
                     WHERE sm.entity_id = ? AND s.last_changed_ts > ?
                     ORDER BY s.last_changed_ts
-                """, (entity_id, cutoff_ts)).fetchall()
+                """,
+                    (entity_id, cutoff_ts),
+                ).fetchall()
             else:
-                rows = conn.execute("""
+                rows = conn.execute(
+                    """
                     SELECT state, last_changed_ts
                     FROM states
                     WHERE entity_id = ? AND last_changed_ts > ?
                     ORDER BY last_changed_ts
-                """, (entity_id, cutoff_ts)).fetchall()
+                """,
+                    (entity_id, cutoff_ts),
+                ).fetchall()
 
         readings = []
         for state_val, ts in rows:
@@ -157,7 +176,7 @@ def detect_humidity_spikes(readings: list[tuple[float, float]]) -> list[dict[str
     spike_peak = 0.0
     baseline = readings[0][1]  # initial baseline
 
-    for i, (ts, val) in enumerate(readings):
+    for _i, (ts, val) in enumerate(readings):
         # Update rolling baseline (exponential moving average, slow)
         baseline = baseline * 0.98 + val * 0.02
 
@@ -177,18 +196,20 @@ def detect_humidity_spikes(readings: list[tuple[float, float]]) -> list[dict[str
                 duration_min = (ts - spike_start) / 60 if spike_start else 0
                 if MIN_SHOWER_DURATION_MIN <= duration_min <= MAX_SHOWER_DURATION_MIN:
                     spike_dt = datetime.datetime.fromtimestamp(spike_start, tz=datetime.UTC)
-                    spikes.append({
-                        "start_ts": spike_start,
-                        "end_ts": ts,
-                        "start": spike_dt.isoformat(),
-                        "hour": spike_dt.hour,
-                        "minute": spike_dt.minute,
-                        "day_of_week": spike_dt.weekday(),
-                        "duration_min": round(duration_min, 1),
-                        "peak_humidity": round(spike_peak, 1),
-                        "baseline_humidity": round(baseline, 1),
-                        "spike_magnitude": round(spike_peak - baseline, 1),
-                    })
+                    spikes.append(
+                        {
+                            "start_ts": spike_start,
+                            "end_ts": ts,
+                            "start": spike_dt.isoformat(),
+                            "hour": spike_dt.hour,
+                            "minute": spike_dt.minute,
+                            "day_of_week": spike_dt.weekday(),
+                            "duration_min": round(duration_min, 1),
+                            "peak_humidity": round(spike_peak, 1),
+                            "baseline_humidity": round(baseline, 1),
+                            "spike_magnitude": round(spike_peak - baseline, 1),
+                        }
+                    )
                 in_spike = False
                 spike_start = None
                 spike_peak = 0.0
@@ -224,7 +245,7 @@ def analyse_routine(spikes: list[dict[str, Any]], room: str) -> dict[str, Any] |
     # Day pattern
     day_counts = Counter(s["day_of_week"] for s in spikes)
     weekday_count = sum(day_counts.get(d, 0) for d in range(5))
-    weekend_count = sum(day_counts.get(d, 0) for d in (5, 6))
+    sum(day_counts.get(d, 0) for d in (5, 6))
     weekday_pct = weekday_count / max(len(spikes), 1)
 
     if weekday_pct > 0.8:
@@ -378,8 +399,12 @@ def run_routine_prediction(days: int = 30) -> dict[str, Any]:
         json.dump(result, f, indent=2, default=str)
 
     if routines:
-        log.info("Routine predictor: %d routines from %d events across %d sensors",
-                 len(routines), total_events, len(sensors))
+        log.info(
+            "Routine predictor: %d routines from %d events across %d sensors",
+            len(routines),
+            total_events,
+            len(sensors),
+        )
     return result
 
 

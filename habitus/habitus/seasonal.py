@@ -228,8 +228,8 @@ def score_with_best_model(X_raw: Any) -> tuple[int, str]:
         #   low=0.6  medium=1.0 (default)  high=1.5
         sensitivity = float(os.environ.get("HABITUS_ANOMALY_SENSITIVITY", "1.0"))
         sensitivity = max(0.3, min(3.0, sensitivity))
-        normalized = max(0.0, (-raw + 0.1) / 0.6)   # 0=normal, 1=anomalous
-        curved = normalized ** (1.5 / sensitivity)   # softer curve at low sensitivity
+        normalized = max(0.0, (-raw + 0.1) / 0.6)  # 0=normal, 1=anomalous
+        curved = normalized ** (1.5 / sensitivity)  # softer curve at low sensitivity
         score = int(max(0, min(100, curved * 100)))
         return score, used
     except (FileNotFoundError, ValueError, EOFError, OSError) as e:

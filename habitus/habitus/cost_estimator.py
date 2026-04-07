@@ -4,6 +4,7 @@ Uses energy tariff config (default 0.30 EUR/kWh, peak 0.45, off-peak 0.15).
 Estimates wattage from NILM data or domain defaults.
 Computes monthly_saving_eur and annual_saving_eur.
 """
+
 from __future__ import annotations
 
 import json
@@ -17,6 +18,7 @@ DATA_DIR = os.environ.get("DATA_DIR", "/data")
 
 def _get_data_dir() -> str:
     return os.environ.get("DATA_DIR", DATA_DIR)
+
 
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 NILM_PATH = os.path.join(DATA_DIR, "nilm.json")
