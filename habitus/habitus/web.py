@@ -6,7 +6,7 @@ import os
 import yaml as _yaml  # type: ignore[import-untyped]
 from flask import Flask, jsonify, render_template, request
 
-from habitus import trainer as _trainer
+from . import trainer as _trainer
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 STATE_PATH = os.path.join(DATA_DIR, "run_state.json")
@@ -117,7 +117,7 @@ def api_full_train():
     import asyncio
     from concurrent.futures import ThreadPoolExecutor
 
-    from habitus.main import run
+    from .main import run
 
     def do_train():
         asyncio.run(run(days_history=365, mode="full"))
@@ -141,7 +141,7 @@ def api_rescan():
                 os.remove(p)
         days = int(os.environ.get("HABITUS_DAYS", "365"))
         # Use progressive training: 30d → 60d → 90d → 180d → max
-        from habitus import progressive as _prog  # noqa: PLC0415
+        from . import progressive as _prog  # noqa: PLC0415
 
         if _prog.is_expanding():
             return jsonify({"ok": False, "error": "Progressive training already running"}), 409
@@ -278,7 +278,7 @@ def api_automation_gap():
 @app.route("/ingress/api/insights")
 def api_insights():
     """Return energy insights: peak hours, top consumers, waste, solar ratio."""
-    from habitus import insights as _ins  # noqa: PLC0415
+    from . import insights as _ins  # noqa: PLC0415
 
     return jsonify(_ins.compute_insights())
 
@@ -289,7 +289,7 @@ def api_insights():
 @app.route("/api/ignore_list")
 @app.route("/ingress/api/ignore_list")
 def api_ignore_list():
-    from habitus import entity_ignore as _ign  # noqa: PLC0415
+    from . import entity_ignore as _ign  # noqa: PLC0415
 
     return jsonify(_ign.get_ignore_list())
 
@@ -297,7 +297,7 @@ def api_ignore_list():
 @app.route("/api/ignore_entity", methods=["POST"])
 @app.route("/ingress/api/ignore_entity", methods=["POST"])
 def api_ignore_entity():
-    from habitus import entity_ignore as _ign  # noqa: PLC0415
+    from . import entity_ignore as _ign  # noqa: PLC0415
 
     data = request.get_json() or {}
     eid = data.get("entity_id", "")
@@ -310,7 +310,7 @@ def api_ignore_entity():
 @app.route("/api/unignore_entity", methods=["POST"])
 @app.route("/ingress/api/unignore_entity", methods=["POST"])
 def api_unignore_entity():
-    from habitus import entity_ignore as _ign  # noqa: PLC0415
+    from . import entity_ignore as _ign  # noqa: PLC0415
 
     data = request.get_json() or {}
     eid = data.get("entity_id", "")
@@ -325,7 +325,7 @@ def api_unignore_entity():
 def api_export(dataset: str):
     from flask import Response
 
-    from habitus import csv_export as _csv  # noqa: PLC0415
+    from . import csv_export as _csv  # noqa: PLC0415
 
     if dataset not in _csv.AVAILABLE_EXPORTS:
         return jsonify({"error": f"Unknown dataset: {dataset}"}), 404
@@ -340,7 +340,7 @@ def api_export(dataset: str):
 @app.route("/api/explain")
 @app.route("/ingress/api/explain")
 def api_explain():
-    from habitus import nl_explanations as _nl  # noqa: PLC0415
+    from . import nl_explanations as _nl  # noqa: PLC0415
 
     anomaly_data = _read(ANOMALIES_PATH) or {}
     anomalies = anomaly_data.get("anomalies", [])
@@ -363,7 +363,7 @@ def api_explain():
 @app.route("/api/vacation")
 @app.route("/ingress/api/vacation")
 def api_vacation():
-    from habitus import vacation_mode as _vac  # noqa: PLC0415
+    from . import vacation_mode as _vac  # noqa: PLC0415
 
     return jsonify(_vac.get_state())
 
@@ -371,7 +371,7 @@ def api_vacation():
 @app.route("/api/vacation/toggle", methods=["POST"])
 @app.route("/ingress/api/vacation/toggle", methods=["POST"])
 def api_vacation_toggle():
-    from habitus import vacation_mode as _vac  # noqa: PLC0415
+    from . import vacation_mode as _vac  # noqa: PLC0415
 
     state = _vac.deactivate() if _vac.is_active() else _vac.activate(manual=True)
     return jsonify({"ok": True, "state": state})
@@ -380,7 +380,7 @@ def api_vacation_toggle():
 @app.route("/api/device_health")
 @app.route("/ingress/api/device_health")
 def api_device_health():
-    from habitus import device_health as _dh  # noqa: PLC0415
+    from . import device_health as _dh  # noqa: PLC0415
 
     return jsonify(_dh.get_health_report())
 
@@ -388,7 +388,7 @@ def api_device_health():
 @app.route("/api/weekly_report")
 @app.route("/ingress/api/weekly_report")
 def api_weekly_report():
-    from habitus import weekly_report as _wr  # noqa: PLC0415
+    from . import weekly_report as _wr  # noqa: PLC0415
 
     existing = _read(os.path.join(DATA_DIR, "weekly_report.json"))
     if existing:
@@ -399,7 +399,7 @@ def api_weekly_report():
 @app.route("/api/sleep")
 @app.route("/ingress/api/sleep")
 def api_sleep():
-    from habitus import sleep_quality as _sl  # noqa: PLC0415
+    from . import sleep_quality as _sl  # noqa: PLC0415
 
     return jsonify(_sl.load())
 
@@ -407,7 +407,7 @@ def api_sleep():
 @app.route("/api/comfort")
 @app.route("/ingress/api/comfort")
 def api_comfort():
-    from habitus import comfort_score as _co  # noqa: PLC0415
+    from . import comfort_score as _co  # noqa: PLC0415
 
     return jsonify(_co.load())
 
@@ -421,7 +421,7 @@ def api_nilm_breakdown():
 @app.route("/api/room_thresholds")
 @app.route("/ingress/api/room_thresholds")
 def api_room_thresholds():
-    from habitus import room_thresholds as _rt  # noqa: PLC0415
+    from . import room_thresholds as _rt  # noqa: PLC0415
 
     baselines = _read(os.path.join(DATA_DIR, "entity_baselines.json")) or {}
     return jsonify(_rt.get_zone_map([k for k in baselines if not k.startswith("_")]))
@@ -430,7 +430,7 @@ def api_room_thresholds():
 @app.route("/api/room_thresholds/override", methods=["POST"])
 @app.route("/ingress/api/room_thresholds/override", methods=["POST"])
 def api_room_threshold_override():
-    from habitus import room_thresholds as _rt  # noqa: PLC0415
+    from . import room_thresholds as _rt  # noqa: PLC0415
 
     data = request.get_json() or {}
     eid = data.get("entity_id", "")
@@ -447,7 +447,7 @@ def api_room_threshold_override():
 @app.route("/api/notification_action", methods=["POST"])
 @app.route("/ingress/api/notification_action", methods=["POST"])
 def api_notification_action():
-    from habitus import actionable_notifications as _an  # noqa: PLC0415
+    from . import actionable_notifications as _an  # noqa: PLC0415
 
     data = request.get_json() or {}
     return jsonify(_an.handle_action(data.get("action", ""), data.get("entity_id", "")))
@@ -456,7 +456,7 @@ def api_notification_action():
 @app.route("/api/snooze", methods=["POST"])
 @app.route("/ingress/api/snooze", methods=["POST"])
 def api_snooze():
-    from habitus import actionable_notifications as _an  # noqa: PLC0415
+    from . import actionable_notifications as _an  # noqa: PLC0415
 
     data = request.get_json() or {}
     return jsonify(_an.snooze(int(data.get("hours", 24))))
@@ -465,7 +465,7 @@ def api_snooze():
 @app.route("/api/unsnooze", methods=["POST"])
 @app.route("/ingress/api/unsnooze", methods=["POST"])
 def api_unsnooze():
-    from habitus import actionable_notifications as _an  # noqa: PLC0415
+    from . import actionable_notifications as _an  # noqa: PLC0415
 
     return jsonify(_an.unsnooze())
 
@@ -473,7 +473,7 @@ def api_unsnooze():
 @app.route("/api/energy_budget")
 @app.route("/ingress/api/energy_budget")
 def api_energy_budget():
-    from habitus import energy_budget as _eb  # noqa: PLC0415
+    from . import energy_budget as _eb  # noqa: PLC0415
 
     return jsonify(_eb.get_budget_status())
 
@@ -481,7 +481,7 @@ def api_energy_budget():
 @app.route("/api/energy_budget", methods=["POST"])
 @app.route("/ingress/api/energy_budget", methods=["POST"])
 def api_set_energy_budget():
-    from habitus import energy_budget as _eb  # noqa: PLC0415
+    from . import energy_budget as _eb  # noqa: PLC0415
 
     data = request.get_json() or {}
     return jsonify(_eb.set_budget(data.get("monthly_kwh"), data.get("monthly_cost")))
@@ -490,7 +490,7 @@ def api_set_energy_budget():
 @app.route("/api/benchmarks")
 @app.route("/ingress/api/benchmarks")
 def api_benchmarks():
-    from habitus import community_benchmarks as _cb  # noqa: PLC0415
+    from . import community_benchmarks as _cb  # noqa: PLC0415
 
     return jsonify(_cb.run())
 
