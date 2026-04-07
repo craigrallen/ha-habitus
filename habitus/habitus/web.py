@@ -470,21 +470,15 @@ def api_unsnooze():
     return jsonify(_an.unsnooze())
 
 
-@app.route("/api/energy_budget")
-@app.route("/ingress/api/energy_budget")
+@app.route("/api/energy_budget", methods=["GET", "POST"])
+@app.route("/ingress/api/energy_budget", methods=["GET", "POST"])
 def api_energy_budget():
     from . import energy_budget as _eb  # noqa: PLC0415
 
+    if request.method == "POST":
+        data = request.get_json() or {}
+        return jsonify(_eb.set_budget(data.get("monthly_kwh"), data.get("monthly_cost")))
     return jsonify(_eb.get_budget_status())
-
-
-@app.route("/api/energy_budget", methods=["POST"])
-@app.route("/ingress/api/energy_budget", methods=["POST"])
-def api_set_energy_budget():
-    from . import energy_budget as _eb  # noqa: PLC0415
-
-    data = request.get_json() or {}
-    return jsonify(_eb.set_budget(data.get("monthly_kwh"), data.get("monthly_cost")))
 
 
 @app.route("/api/benchmarks")
