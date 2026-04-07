@@ -605,6 +605,15 @@ body { padding-bottom: 72px; }
     </table></div>
   </div>
 
+  <!-- Anomaly Feedback -->
+  <div class="sec" style="margin-top:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+    <div>
+      <h2 style="margin:0;font-size:1rem">Anomaly Training</h2>
+      <div id="feedback-stats" style="font-size:.78rem;color:var(--text3);margin-top:4px">Loading feedback stats...</div>
+    </div>
+    <button class="btn" onclick="resetAllFeedback()" style="font-size:.78rem;color:var(--amber);background:none;border:1px solid rgba(255,181,71,.3);border-radius:6px;padding:4px 12px;cursor:pointer">Reset All Feedback</button>
+  </div>
+
   <!-- Anomaly Clustering -->
   <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>Anomaly Incidents</h2><span class="sec-sub">Grouped anomalies with probable root cause</span></div>
@@ -1003,6 +1012,36 @@ function confDots(n) {
 }
 
 function fmtW(w,cap){cap=cap||25000;if(!isFinite(w)||w<0||w>cap)return'—';if(w>=1000)return(w/1000).toFixed(1)+'kW';return Math.round(w)+'W';}
+let _haAutomations = [];
+async function loadHAAutomations() {
+  try {
+    const d = await fetch('api/ha_automations').then(r=>r.json()).catch(()=>({}));
+    _haAutomations = d.automations || [];
+  } catch(e) { _haAutomations = []; }
+}
+
+function _isInstalled(suggestion) {
+  // Match by alias normalization: lowercase, strip spaces/dashes/unicode
+  const normalize = s => (s||'').toLowerCase().replace(/[\s—–\-_]+/g, '_').replace(/[^a-z0-9_]/g, '');
+  const sugAlias = normalize(suggestion.title || '');
+  // Also try to extract alias from YAML
+  const yamlMatch = (suggestion.yaml||'').match(/alias:\s*"?([^"\n]+)/);
+  const yamlAlias = yamlMatch ? normalize(yamlMatch[1]) : '';
+
+  for (const ha of _haAutomations) {
+    const haAlias = normalize(ha.alias);
+    const haId = normalize(ha.entity_id.replace('automation.', ''));
+    if (haAlias && (haAlias.includes('habitus') || sugAlias)) {
+      if (haAlias === sugAlias || haAlias === yamlAlias ||
+          haId === sugAlias || haId === yamlAlias ||
+          haAlias.includes(sugAlias) || sugAlias.includes(haAlias)) {
+        return ha;
+      }
+    }
+  }
+  return null;
+}
+
 function renderSuggestions() {
   const list = currentFilter === 'all' ? allSuggestions : allSuggestions.filter(s=>s.category===currentFilter);
   if (!list.length) {
@@ -1012,11 +1051,18 @@ function renderSuggestions() {
   const catBadge = {routine:['b-info','🔁'],energy:['b-warn','⚡'],boat:['b-boat','⛵'],anomaly:['b-alert','🧠'],lovelace:['b-purple','🃏']};
   document.getElementById('sug-list').innerHTML = list.map(s => {
     const [bc, ic] = catBadge[s.category] || ['b-muted','•'];
+    const installed = _isInstalled(s);
+    const installedBadge = installed
+      ? `<span class="badge" style="background:rgba(67,217,139,.12);color:var(--green);border:1px solid rgba(67,217,139,.25)">✓ In HA${installed.state==='off'?' (disabled)':''}</span>`
+      : '';
+    const addBtn = installed
+      ? `<button class="btn" style="opacity:.5;cursor:default;background:var(--card2);color:var(--green);border:1px solid var(--border)" disabled>✓ Already added</button>`
+      : `<button class="btn btn-success" id="add-${s.id}" onclick="addToHA('${s.id}')">+ Add to HA</button>`;
     return `
     <div class="sug ${s.applicable===false?'na':''}">
       <div class="sug-head">
         <h3>${s.title}</h3>
-        <span class="badge ${bc}">${ic} ${s.category}</span>
+        <div style="display:flex;gap:6px;align-items:center">${installedBadge}<span class="badge ${bc}">${ic} ${s.category}</span></div>
       </div>
       <div class="sug-meta">
         <div class="conf-bar"><div class="conf-dots">${confDots(s.confidence)}</div><span style="font-size:.72rem;color:var(--text3)">${s.confidence}% confidence</span></div>
@@ -1026,7 +1072,7 @@ function renderSuggestions() {
       <pre id="yaml-${s.id}">${(s.yaml||'').trim()}</pre>
       <div style="display:flex;gap:8px">
         <button class="btn btn-accent" onclick="copyYaml('${s.id}')">📋 Copy YAML</button>
-        ${s.category!=='lovelace'?`<button class="btn btn-success" id="add-${s.id}" onclick="addToHA('${s.id}')">+ Add to HA</button>`:''}
+        ${s.category!=='lovelace'?addBtn:''}
       </div>
     </div>`;
   }).join('');
@@ -1044,9 +1090,48 @@ async function addToHA(id) {
   try {
     const r = await fetch('api/add_automation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({yaml})});
     const d = await r.json();
-    if (d.ok) { btn.textContent = '✓ Added'; toast('Automation added ✓'); }
+    if (d.ok) {
+      btn.textContent = '✓ Added'; btn.style.background='var(--card2)'; btn.style.color='var(--green)';
+      toast('Automation added ✓');
+      loadHAAutomations(); // refresh installed list
+    }
     else { btn.disabled=false; btn.textContent='+ Add to HA'; toast('Failed: '+(d.error||'?'),'te'); }
   } catch(e) { btn.disabled=false; btn.textContent='+ Add to HA'; toast('Network error','te'); }
+}
+
+// Anomaly feedback — dismiss or confirm
+async function dismissAnomaly(entityId) {
+  try {
+    await fetch('api/feedback', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({entity_id: entityId, action: 'dismissed', anomaly_id: entityId + '_' + new Date().getHours()})});
+    const el = document.getElementById('anom-' + entityId.replace(/\./g,'_'));
+    if (el) {
+      el.style.opacity = '0.4';
+      el.querySelector('.anom-name').textContent += ' — marked normal (30 days)';
+    }
+    toast('Marked as normal — suppressed for 30 days ✓');
+  } catch(e) { toast('Failed to save feedback','te'); }
+}
+
+async function confirmAnomaly(entityId, score) {
+  try {
+    await fetch('api/feedback', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({entity_id: entityId, action: 'confirmed', anomaly_id: entityId + '_' + new Date().getHours(), score: score})});
+    const el = document.getElementById('anom-' + entityId.replace(/\./g,'_'));
+    if (el) {
+      el.style.borderLeft = '3px solid var(--red)';
+    }
+    toast('Confirmed as real anomaly — model will learn from this ✓');
+  } catch(e) { toast('Failed to save feedback','te'); }
+}
+
+async function resetAllFeedback() {
+  if (!confirm('Reset all anomaly feedback? This will clear all dismiss/confirm history and restore default sensitivity.')) return;
+  try {
+    await fetch('api/feedback/reset', {method:'POST'});
+    toast('All feedback reset to defaults ✓');
+    load();
+  } catch(e) { toast('Failed to reset','te'); }
 }
 
 function setGauge(score) {
@@ -1171,14 +1256,20 @@ async function load() {
   // Top anomalies
   const ents = allE.slice(0,5);
   document.getElementById('top-anomalies').innerHTML = ents.length
-    ? ents.map(e => `
-      <div class="anom-item">
-        <div>
+    ? ents.map(e => {
+      const eid = e.entity_id || e.name || '';
+      return `
+      <div class="anom-item" id="anom-${eid.replace(/\./g,'_')}">
+        <div style="flex:1">
           <div class="anom-name">${e.name}</div>
-          <div class="anom-sub">${e.current_value}${e.unit} vs ${e.baseline_mean}${e.unit} expected</div>
+          <div class="anom-sub">${e.current_value!=null?e.current_value:'?'}${e.unit||''} vs ${e.baseline_mean!=null?e.baseline_mean:'?'}${e.unit||''} expected</div>
         </div>
-        <div class="anom-score" style="color:${e.z_score>=3?'var(--red)':e.z_score>=1.5?'var(--amber)':'var(--green)'}">${e.z_score}σ</div>
-      </div>`).join('')
+        <div class="anom-score" style="color:${e.z_score>=3?'var(--red)':e.z_score>=1.5?'var(--amber)':'var(--green)'}; margin-right:8px">${e.z_score}σ</div>
+        <div style="display:flex;gap:4px">
+          <button onclick="dismissAnomaly('${eid}')" title="Mark as normal — suppress for 30 days" style="background:none;border:1px solid var(--border);border-radius:4px;color:var(--text3);cursor:pointer;padding:2px 8px;font-size:.72rem">✓ Normal</button>
+          <button onclick="confirmAnomaly('${eid}',${e.z_score||0})" title="Confirm this is a real anomaly" style="background:none;border:1px solid rgba(255,95,109,.3);border-radius:4px;color:var(--red);cursor:pointer;padding:2px 8px;font-size:.72rem">⚠ Real</button>
+        </div>
+      </div>`}).join('')
     : '<div style="color:var(--text3);font-size:.82rem">No anomalies right now.</div>';
 
   // Baseline table
@@ -1213,8 +1304,9 @@ async function load() {
         </tr>`;}).join('')
     : '<tr><td colspan="6" style="color:var(--text3);padding:16px">No entity anomalies detected.</td></tr>';
 
-  // Suggestions
+  // Suggestions — load HA automations first to show installed status
   allSuggestions = suggestions;
+  await loadHAAutomations();
   renderSuggestions();
 
   // Weekly
@@ -1852,13 +1944,27 @@ async function loadSchedule() {
   } catch(e) {}
 }
 
+// Feedback stats
+async function loadFeedbackStats() {
+  try {
+    const d = await fetch('api/feedback/stats').then(r=>r.json()).catch(()=>({}));
+    const el = document.getElementById('feedback-stats');
+    const s = d.stats || {};
+    const fp = d.false_positive_entities || [];
+    if (!s.total) { el.textContent = 'No feedback given yet — use ✓ Normal / ⚠ Real buttons on anomalies to train.'; return; }
+    let html = `${s.confirmed||0} confirmed, ${s.dismissed||0} dismissed (${s.total} total)`;
+    if (fp.length) html += ` · ${fp.length} entity${fp.length>1?'s':''} auto-suppressed as frequent false positives`;
+    el.innerHTML = html;
+  } catch(e) {}
+}
+
 // Load all new features after main load()
 setTimeout(function(){
   loadExplanation(); loadVacation(); loadPredictiveAlerts();
   loadIncidents(); loadTimeline(); loadRoomThresholds();
   loadBudget(); loadComfort(); loadBenchmarks(); loadNilm(); loadSchedule();
   loadDeviceHealth(); loadSleep(); loadWeeklyReport(); loadShorePower();
-  loadIgnoreList(); loadSoundAlert(); loadPassage(); loadAnchorWatch();
+  loadIgnoreList(); loadSoundAlert(); loadPassage(); loadAnchorWatch(); loadFeedbackStats();
 }, 1500);
 
 // Theme toggle
