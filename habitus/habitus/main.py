@@ -2899,11 +2899,21 @@ async def run(days_history: int, mode: str = "full") -> None:
         log.info("Confidence-weighted entity score: %.3f", weighted_entity_score)
     activity_summary = activity_engine.get_activity_summary()
     top_anomaly = entity_anomalies[0]["description"] if entity_anomalies else None
-    
+
+    # Single source of truth: derive displayed anomaly score from the same
+    # entity anomaly list shown in the UI, not from score_current(features).
+    # This prevents impossible states like score=100 with no entity anomalies.
+    if entity_anomalies:
+        # Scale weighted z-score into 0-100 range, clamp at 100.
+        derived_anomaly_score = int(min(100, round(weighted_entity_score * 20)))
+    else:
+        derived_anomaly_score = 0
+        top_anomaly = None
+
     # Record anomalies to history for trend analysis
     try:
         from . import anomaly_history
-        anomaly_history.record_anomalies(anomaly_score, entity_anomalies)
+        anomaly_history.record_anomalies(derived_anomaly_score, entity_anomalies)
     except Exception as e:
         log.warning(f"Anomaly history recording failed: {e}")
 
@@ -2919,7 +2929,7 @@ async def run(days_history: int, mode: str = "full") -> None:
             "entity_count": entity_count,
             "total_stat_ids": total_stat_ids,
             "total_entities": total_entities,
-            "anomaly_score": anomaly_score,
+            "anomaly_score": derived_anomaly_score,
             "top_anomaly": top_anomaly,
             "seasonal_models": seasonal.seasonal_status(),
             "contamination_tier": contamination_tier_name(training_days),
@@ -2933,7 +2943,7 @@ async def run(days_history: int, mode: str = "full") -> None:
         total=len(stat_ids),
         rows=len(features),
         pct=100,
-        extra={"training_days": training_days, "anomaly_score": anomaly_score},
+        extra={"training_days": training_days, "anomaly_score": derived_anomaly_score},
         completed_at=now_iso,
     )
     save_state(state)
@@ -2942,19 +2952,19 @@ async def run(days_history: int, mode: str = "full") -> None:
     send_notification(
         "🧠 Habitus — Training complete",
         f"Model trained on {training_days} days · {entity_count} sensors · "
-        f"Anomaly score: {anomaly_score}/100",
+        f"Anomaly score: {derived_anomaly_score}/100",
     )
-    is_anomalous = anomaly_score > THRESHOLD
-    log.info(f"Score: {anomaly_score}/100 ({'⚠ ANOMALY' if is_anomalous else '✓ normal'})")
+    is_anomalous = derived_anomaly_score > THRESHOLD
+    log.info(f"Score: {derived_anomaly_score}/100 ({'⚠ ANOMALY' if is_anomalous else '✓ normal'})")
     if is_anomalous:
-        msg_parts = [f"Score: {anomaly_score}/100"]
+        msg_parts = [f"Score: {derived_anomaly_score}/100"]
         if top_anomaly:
             msg_parts.append(top_anomaly)
         if activity_summary.get("highlights"):
             msg_parts.append(activity_summary["highlights"][0])
         send_notification("🧠 Habitus — Unusual Activity", "\n".join(msg_parts))
 
-    _publish_sensors(anomaly_score, is_anomalous, training_days, entity_count)
+    _publish_sensors(derived_anomaly_score, is_anomalous, training_days, entity_count)
     await _register_lovelace_card()
 
     # Surface anomalies and suggestions on the HA dashboard automatically
@@ -2966,9 +2976,9 @@ async def run(days_history: int, mode: str = "full") -> None:
             suggestions = []
     except Exception:
         suggestions = []
-    publish_dashboard_entities(anomaly_score, entity_anomalies, suggestions)
+    publish_dashboard_entities(derived_anomaly_score, entity_anomalies, suggestions)
     state = send_daily_digest(
-        state, anomaly_score, entity_anomalies, suggestions, training_days, entity_count
+        state, derived_anomaly_score, entity_anomalies, suggestions, training_days, entity_count
     )
     save_state(state)
 
