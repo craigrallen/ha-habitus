@@ -492,6 +492,23 @@ body { padding-bottom: 72px; }
     <span class="status-label" id="hdr-label">Loading</span>
     <span class="last-run" id="hdr-lr"></span>
   </div>
+  <script>
+  // Immediately show version + training status (don't wait for full load())
+  (async()=>{
+    try {
+      const s = await fetch('api/state').then(r=>r.json()).catch(()=>({}));
+      const el = document.getElementById('hdr-version');
+      if (el && s.version) el.textContent = 'v' + s.version;
+      const p = await fetch('api/progress').then(r=>r.json()).catch(()=>({}));
+      if (p && p.running) {
+        const lbl = document.getElementById('hdr-label');
+        if (lbl) lbl.textContent = 'Training ' + (p.pct||0) + '% — ' + (p.phase||'working');
+        const dot = document.getElementById('hdr-dot');
+        if (dot) dot.className = 'status-dot warn';
+      }
+    } catch(e) {}
+  })();
+  </script>
 </div>
 
 <nav>
