@@ -726,6 +726,79 @@ body { padding-bottom: 72px; }
   </script>
 
   <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>3-Phase Power (Optional)</h2></div>
+    <p style="color:var(--text3);font-size:.8rem;margin:0 0 12px">For 3-phase installations, select the power sensor for each phase. Habitus sums them for total load. Leave blank for single-phase.</p>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label style="width:60px;font-size:.8rem;color:var(--text2);font-weight:600">Phase 1</label>
+        <select id="phase1-select" class="phase-sel" style="flex:1;min-width:180px;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:.82rem">
+          <option value="">Not set</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label style="width:60px;font-size:.8rem;color:var(--text2);font-weight:600">Phase 2</label>
+        <select id="phase2-select" class="phase-sel" style="flex:1;min-width:180px;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:.82rem">
+          <option value="">Not set</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label style="width:60px;font-size:.8rem;color:var(--text2);font-weight:600">Phase 3</label>
+        <select id="phase3-select" class="phase-sel" style="flex:1;min-width:180px;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:.82rem">
+          <option value="">Not set</option>
+        </select>
+      </div>
+      <button class="btn btn-accent" onclick="savePhases()" style="align-self:flex-start;margin-top:4px">Save Phases</button>
+    </div>
+    <div id="phase-status" style="margin-top:8px;font-size:.78rem;color:var(--text3)"></div>
+  </div>
+  <script>
+  (function(){
+    async function loadPhaseSelectors(){
+      try {
+        const r = await fetch('api/power_sensors');
+        const d = await r.json();
+        const sr = await fetch('api/settings');
+        const settings = (await sr.json()).settings || {};
+        for (const n of [1,2,3]) {
+          const sel = document.getElementById('phase'+n+'-select');
+          sel.innerHTML = '<option value="">Not set</option>';
+          (d.sensors||[]).forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.entity_id;
+            opt.textContent = s.name + ' (' + s.current_w + 'W)';
+            if (s.entity_id === settings['power_entity_phase'+n]) opt.selected = true;
+            sel.appendChild(opt);
+          });
+        }
+      } catch(e) {}
+    }
+    window.savePhases = async function(){
+      const st = document.getElementById('phase-status');
+      const payload = {};
+      for (const n of [1,2,3]) {
+        payload['power_entity_phase'+n] = document.getElementById('phase'+n+'-select').value;
+      }
+      st.textContent = 'Saving…';
+      try {
+        const r = await fetch('api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+        const d = await r.json();
+        if (d.ok) {
+          st.textContent = '✓ Phase sensors saved';
+          st.style.color = 'var(--green)';
+        } else {
+          st.textContent = 'Error: ' + (d.error||'unknown');
+          st.style.color = 'var(--red)';
+        }
+      } catch(e) {
+        st.textContent = 'Error: ' + e;
+        st.style.color = 'var(--red)';
+      }
+    };
+    loadPhaseSelectors();
+  })();
+  </script>
+
+  <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>About</h2></div>
     <div class="about-links">
       <a class="about-link" href="https://github.com/craigrallen/ha-habitus" target="_blank">
