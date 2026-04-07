@@ -562,6 +562,27 @@ body { padding-bottom: 72px; }
     </div>
   </div>
 
+  <!-- NL Explanation -->
+  <div class="sec">
+    <div class="sec-header"><h2>What's Happening</h2><span class="sec-sub">Plain English summary</span></div>
+    <div id="nl-explanation" style="color:var(--text2);font-size:.88rem;line-height:1.6">Loading...</div>
+  </div>
+
+  <!-- Vacation Mode -->
+  <div class="sec" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+    <div>
+      <h2 style="margin:0;font-size:1rem">Vacation Mode</h2>
+      <div id="vacation-status" style="font-size:.78rem;color:var(--text3);margin-top:4px">Checking...</div>
+    </div>
+    <button class="btn btn-accent" id="vacation-btn" onclick="toggleVacation()">Loading...</button>
+  </div>
+
+  <!-- Predictive Alerts -->
+  <div class="sec">
+    <div class="sec-header"><h2>Predictive Alerts</h2><span class="sec-sub">Anomalies predicted 30-60 min ahead</span></div>
+    <div id="predictive-alerts" style="color:var(--text3);font-size:.85rem">Loading...</div>
+  </div>
+
   <div class="sec">
     <div class="sec-header"><h2>Hourly Power Baseline</h2><span class="sec-sub">Learned normal consumption per hour</span></div>
     <div class="table-wrap"><table>
@@ -582,6 +603,24 @@ body { padding-bottom: 72px; }
       <thead><tr><th>Sensor</th><th>Current</th><th>Baseline</th><th>Deviation</th><th>Confidence</th><th style="width:90px"></th></tr></thead>
       <tbody id="bd-table"><tr><td colspan="6" style="color:var(--text3);padding:16px">No entity data yet.</td></tr></tbody>
     </table></div>
+  </div>
+
+  <!-- Anomaly Clustering -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>Anomaly Incidents</h2><span class="sec-sub">Grouped anomalies with probable root cause</span></div>
+    <div id="anomaly-incidents" style="color:var(--text3);font-size:.85rem">Loading...</div>
+  </div>
+
+  <!-- Anomaly Timeline -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>Anomaly Timeline</h2><span class="sec-sub">What happened during the last anomaly</span></div>
+    <div id="anomaly-timeline" style="color:var(--text3);font-size:.85rem">Loading...</div>
+  </div>
+
+  <!-- Room Thresholds -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>Zone Sensitivity</h2><span class="sec-sub">Per-room anomaly thresholds</span></div>
+    <div id="room-thresholds" style="color:var(--text3);font-size:.85rem">Loading...</div>
   </div>
 </div>
 
@@ -620,6 +659,43 @@ body { padding-bottom: 72px; }
       <tbody id="mo-table"></tbody>
     </table>
   </div>
+
+  <!-- Energy Budget -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>Energy Budget</h2><span class="sec-sub">Monthly target vs actual</span></div>
+    <div id="energy-budget">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+        <label style="font-size:.8rem;color:var(--text2)">Monthly target (kWh):</label>
+        <input id="budget-kwh" type="number" placeholder="e.g. 300" style="width:100px;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:.85rem">
+        <button class="btn btn-accent" onclick="saveBudget()">Set Budget</button>
+      </div>
+      <div id="budget-status" style="color:var(--text3);font-size:.85rem">Loading...</div>
+    </div>
+  </div>
+
+  <!-- Appliance Scheduler -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>Appliance Scheduler</h2><span class="sec-sub">Best time to run high-draw appliances</span></div>
+    <div id="appliance-schedule" style="color:var(--text3);font-size:.85rem">Loading...</div>
+  </div>
+
+  <!-- Comfort Score -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>Comfort Score</h2><span class="sec-sub">Temperature + humidity + lighting</span></div>
+    <div id="comfort-score" style="color:var(--text3);font-size:.85rem">Loading...</div>
+  </div>
+
+  <!-- Community Benchmarks -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>How You Compare</h2><span class="sec-sub">Anonymous benchmarks vs similar homes</span></div>
+    <div id="benchmarks" style="color:var(--text3);font-size:.85rem">Loading...</div>
+  </div>
+
+  <!-- NILM Breakdown -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>Appliance Breakdown (NILM)</h2><span class="sec-sub">Estimated per-appliance power</span></div>
+    <div id="nilm-breakdown" style="color:var(--text3);font-size:.85rem">Loading...</div>
+  </div>
 </div>
 
 <!-- INSIGHTS -->
@@ -639,6 +715,30 @@ body { padding-bottom: 72px; }
   <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>Automation Gaps</h2><span class="sec-sub">Suggestions vs existing automations</span></div>
     <div id="auto-gap"><div style="color:var(--text3);padding:12px">Loading...</div></div>
+  </div>
+
+  <!-- Device Health -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>Device Health</h2><span class="sec-sub">Sensor degradation and failure alerts</span></div>
+    <div id="device-health" style="color:var(--text3);font-size:.85rem">Loading...</div>
+  </div>
+
+  <!-- Sleep Quality -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>Sleep Quality</h2><span class="sec-sub">Inferred from motion, lights, and power</span></div>
+    <div id="sleep-quality" style="color:var(--text3);font-size:.85rem">Loading...</div>
+  </div>
+
+  <!-- Weekly Report -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>Weekly Report</h2><span class="sec-sub">7-day intelligence digest</span></div>
+    <div id="weekly-report" style="color:var(--text3);font-size:.85rem">Loading...</div>
+  </div>
+
+  <!-- Shore Power Quality (Marine) -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>Shore Power Quality</h2><span class="sec-sub">Voltage and frequency monitoring</span></div>
+    <div id="shore-power-quality" style="color:var(--text3);font-size:.85rem">Loading...</div>
   </div>
 </div>
 
@@ -797,6 +897,40 @@ body { padding-bottom: 72px; }
     loadPhaseSelectors();
   })();
   </script>
+
+  <!-- Entity Ignore List -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>Ignored Entities</h2><span class="sec-sub">Excluded from anomaly scoring</span></div>
+    <div id="ignore-list" style="color:var(--text3);font-size:.85rem">Loading...</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
+      <input id="ignore-entity-input" placeholder="sensor.entity_id" style="flex:1;min-width:180px;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:.82rem">
+      <button class="btn btn-accent" onclick="addIgnore()">Ignore Entity</button>
+    </div>
+  </div>
+
+  <!-- Sound Alert Config -->
+  <div class="sec" style="margin-top:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+    <div>
+      <h2 style="margin:0;font-size:1rem">Sound Alerts</h2>
+      <div style="font-size:.78rem;color:var(--text3);margin-top:4px">Play sound on dashboard tablets when anomaly exceeds threshold</div>
+    </div>
+    <button class="btn btn-accent" id="sound-btn" onclick="toggleSound()">Loading...</button>
+  </div>
+
+  <!-- Marine: Passage Mode -->
+  <div class="sec" style="margin-top:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+    <div>
+      <h2 style="margin:0;font-size:1rem">Passage Mode</h2>
+      <div id="passage-status" style="font-size:.78rem;color:var(--text3);margin-top:4px">Checking...</div>
+    </div>
+    <button class="btn btn-accent" id="passage-btn" onclick="togglePassage()">Loading...</button>
+  </div>
+
+  <!-- Marine: Anchor Watch -->
+  <div class="sec" style="margin-top:12px">
+    <div class="sec-header"><h2>Anchor Watch</h2><span class="sec-sub">Drag detection and systems monitoring</span></div>
+    <div id="anchor-watch" style="color:var(--text3);font-size:.85rem">Loading...</div>
+  </div>
 
   <div class="sec" style="margin-top:12px">
     <div class="sec-header"><h2>About</h2></div>
@@ -1354,6 +1488,290 @@ function schedulePoll() {
   _pollTimer = setTimeout(() => { load(); schedulePoll(); }, interval);
 }
 schedulePoll();
+
+// ── NEW FEATURE LOADERS ─────────────────────────────────────────────────────
+
+// NL Explanations
+async function loadExplanation() {
+  try {
+    const d = await fetch('api/explain').then(r=>r.json()).catch(()=>({}));
+    const el = document.getElementById('nl-explanation');
+    if (d.overall) {
+      let html = `<div style="font-size:.95rem;margin-bottom:8px">${d.overall}</div>`;
+      if (d.entities && d.entities.length) {
+        html += d.entities.map(e => `<div style="margin:4px 0;padding:6px 10px;background:var(--card2);border-radius:6px;font-size:.82rem"><strong>${e.entity_id.split('.').pop().replace(/_/g,' ')}</strong>: ${e.explanation}</div>`).join('');
+      }
+      if (d.drift && !d.drift.includes('No significant')) {
+        html += `<div style="margin-top:8px;padding:6px 10px;background:rgba(255,181,71,.08);border:1px solid rgba(255,181,71,.2);border-radius:6px;font-size:.82rem">📊 ${d.drift}</div>`;
+      }
+      el.innerHTML = html;
+    } else { el.textContent = 'No anomaly data yet.'; }
+  } catch(e) {}
+}
+
+// Vacation Mode
+async function loadVacation() {
+  try {
+    const d = await fetch('api/vacation').then(r=>r.json()).catch(()=>({}));
+    const btn = document.getElementById('vacation-btn');
+    const st = document.getElementById('vacation-status');
+    if (d.active) {
+      btn.textContent = '🏠 Deactivate';
+      btn.style.background = 'var(--amber)';
+      st.textContent = 'Active since ' + (d.activated_at ? new Date(d.activated_at).toLocaleString() : 'unknown');
+    } else {
+      btn.textContent = '✈️ Activate';
+      btn.style.background = '';
+      st.textContent = 'Inactive — activates automatically after 24h no motion';
+    }
+  } catch(e) {}
+}
+async function toggleVacation() {
+  await fetch('api/vacation/toggle', {method:'POST'});
+  loadVacation();
+  toast('Vacation mode toggled');
+}
+
+// Predictive Alerts
+async function loadPredictiveAlerts() {
+  try {
+    const d = await fetch('api/predictive_alerts').then(r=>r.json()).catch(()=>({}));
+    const el = document.getElementById('predictive-alerts');
+    const alerts = d.alerts || [];
+    if (alerts.length === 0) { el.textContent = 'No upcoming anomalies predicted.'; return; }
+    el.innerHTML = alerts.map(a => `<div style="margin:4px 0;padding:8px 10px;background:${a.severity==='critical'?'rgba(255,95,109,.08)':'rgba(255,181,71,.08)'};border:1px solid ${a.severity==='critical'?'rgba(255,95,109,.2)':'rgba(255,181,71,.2)'};border-radius:6px"><strong>${a.entity_id.split('.').pop().replace(/_/g,' ')}</strong>: ${a.message}</div>`).join('');
+  } catch(e) {}
+}
+
+// Anomaly Incidents
+async function loadIncidents() {
+  try {
+    const d = await fetch('api/anomaly_incidents').then(r=>r.json()).catch(()=>({}));
+    const el = document.getElementById('anomaly-incidents');
+    const incidents = d.incidents || [];
+    if (incidents.length === 0) { el.textContent = 'No anomaly incidents in the last 24 hours.'; return; }
+    el.innerHTML = incidents.map(inc => `<div style="margin:6px 0;padding:10px;background:var(--card2);border-radius:8px;border-left:3px solid var(--amber)"><div style="display:flex;justify-content:space-between;margin-bottom:4px"><strong>${inc.probable_cause||'Unknown cause'}</strong><span style="font-size:.75rem;color:var(--text3)">${new Date(inc.timestamp).toLocaleTimeString()}</span></div><div style="font-size:.8rem;color:var(--text2)">${inc.entities.length} sensors: ${inc.entities.map(e=>e.split('.').pop().replace(/_/g,' ')).join(', ')}</div></div>`).join('');
+  } catch(e) {}
+}
+
+// Anomaly Timeline
+async function loadTimeline() {
+  try {
+    const d = await fetch('api/anomaly_timeline').then(r=>r.json()).catch(()=>({}));
+    const el = document.getElementById('anomaly-timeline');
+    const events = d.timeline || d.events || [];
+    if (events.length === 0) { el.textContent = 'No recent anomaly timeline available.'; return; }
+    el.innerHTML = events.slice(0,10).map(ev => `<div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);font-size:.82rem"><span style="color:var(--text3);min-width:60px">${ev.timestamp ? new Date(ev.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '—'}</span><span style="color:${ev.event_type==='spike'?'var(--red)':'var(--amber)'}">${ev.event_type||'change'}</span><span style="color:var(--text2)">${(ev.name||ev.entity_id||'').split('.').pop().replace(/_/g,' ')}: ${ev.description||''}</span></div>`).join('');
+  } catch(e) {}
+}
+
+// Room Thresholds
+async function loadRoomThresholds() {
+  try {
+    const d = await fetch('api/room_thresholds').then(r=>r.json()).catch(()=>({}));
+    const el = document.getElementById('room-thresholds');
+    const entries = Object.entries(d);
+    if (entries.length === 0) { el.textContent = 'No entity data yet.'; return; }
+    const zones = {};
+    entries.forEach(([eid, info]) => { const z = info.zone||'default'; if(!zones[z]) zones[z]=[]; zones[z].push({eid,...info}); });
+    el.innerHTML = Object.entries(zones).map(([zone, ents]) => `<div style="margin-bottom:8px"><div style="font-weight:600;font-size:.8rem;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">${zone} (${ents[0].multiplier}x sensitivity)</div><div style="font-size:.78rem;color:var(--text3)">${ents.length} entities${ents[0].is_safety_critical?' — ⚠️ safety critical':''}</div></div>`).join('');
+  } catch(e) {}
+}
+
+// Energy Budget
+async function loadBudget() {
+  try {
+    const d = await fetch('api/energy_budget').then(r=>r.json()).catch(()=>({}));
+    const el = document.getElementById('budget-status');
+    if (d.error || !d.budget_kwh) { el.textContent = 'No budget set. Enter a target above.'; return; }
+    const pct = d.pct_used||0;
+    const color = d.on_track ? 'var(--green)' : 'var(--red)';
+    el.innerHTML = `<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:.85rem"><span>Used: ${d.used_kwh||0} kWh</span><span>Budget: ${d.budget_kwh} kWh</span></div><div style="background:var(--border);border-radius:4px;height:8px;margin:6px 0;overflow:hidden"><div style="width:${Math.min(pct,100)}%;height:100%;background:${color};border-radius:4px;transition:width .5s"></div></div><div style="display:flex;justify-content:space-between;font-size:.78rem;color:var(--text3)"><span>${pct.toFixed(0)}% used</span><span>Projected: ${d.projected_total||'?'} kWh</span><span>${d.on_track?'✓ On track':'⚠ Over budget'}</span></div></div>`;
+    if (d.budget_kwh) document.getElementById('budget-kwh').value = d.budget_kwh;
+  } catch(e) {}
+}
+async function saveBudget() {
+  const kwh = parseFloat(document.getElementById('budget-kwh').value);
+  if (!kwh || kwh <= 0) { toast('Enter a valid kWh target','te'); return; }
+  await fetch('api/energy_budget', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({monthly_kwh:kwh})});
+  loadBudget();
+  toast('Budget saved ✓');
+}
+
+// Comfort Score
+async function loadComfort() {
+  try {
+    const d = await fetch('api/comfort').then(r=>r.json()).catch(()=>({}));
+    const el = document.getElementById('comfort-score');
+    if (!d.current_score && d.current_score !== 0) { el.textContent = 'No comfort data yet — needs temperature sensors.'; return; }
+    const sc = d.current_score;
+    const color = sc>=70?'var(--green)':sc>=40?'var(--amber)':'var(--red)';
+    el.innerHTML = `<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap"><div style="font-size:2rem;font-weight:700;color:${color}">${sc}<span style="font-size:1rem;color:var(--text3)">/100</span></div><div><div style="font-size:.85rem;color:var(--text2)">🌡 ${d.temperature?.value_c||'—'}°C (${d.temperature?.score||0}%)</div><div style="font-size:.85rem;color:var(--text2)">💧 ${d.humidity?.value_pct!=null?d.humidity.value_pct+'%':'N/A'} (${d.humidity?.score||0}%)</div></div></div>${d.recommendations?'<div style="margin-top:8px;font-size:.82rem;color:var(--text3)">'+d.recommendations.join(' ')+'</div>':''}`;
+  } catch(e) {}
+}
+
+// Benchmarks
+async function loadBenchmarks() {
+  try {
+    const d = await fetch('api/benchmarks').then(r=>r.json()).catch(()=>({}));
+    const el = document.getElementById('benchmarks');
+    if (!d.comparisons) { el.textContent = 'No benchmark data available yet.'; return; }
+    el.innerHTML = d.comparisons.map(c => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:.82rem"><span style="font-weight:600;text-transform:capitalize">${c.home_type.replace('_',' ')}</span><span>Overnight: <span style="color:${c.overnight_w.status==='average'?'var(--green)':c.overnight_w.status==='below_average'?'var(--accent)':'var(--amber)'}">Your ${c.overnight_w.your_value}W vs ${c.overnight_w.reference_range[0]}-${c.overnight_w.reference_range[1]}W</span></span></div>`).join('');
+  } catch(e) {}
+}
+
+// NILM Breakdown
+async function loadNilm() {
+  try {
+    const d = await fetch('api/nilm_breakdown').then(r=>r.json()).catch(()=>({}));
+    const el = document.getElementById('nilm-breakdown');
+    if (!d.breakdown || d.breakdown.length === 0) { el.textContent = 'No appliance data yet — needs power history.'; return; }
+    el.innerHTML = `<div style="margin-bottom:8px;font-size:.82rem;color:var(--text2)">${d.identified_pct||0}% of load identified (${d.n_appliances_detected||0} appliances)</div>` + d.breakdown.map(b => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:.82rem"><span style="text-transform:capitalize">${b.appliance.replace(/_/g,' ')}</span><span style="color:var(--accent)">${b.avg_power_w}W avg</span><span style="color:var(--text3)">${b.est_daily_kwh} kWh/day</span></div>`).join('');
+  } catch(e) {}
+}
+
+// Device Health
+async function loadDeviceHealth() {
+  try {
+    const d = await fetch('api/device_health').then(r=>r.json()).catch(()=>({}));
+    const el = document.getElementById('device-health');
+    const s = d.summary || {};
+    if (!s.total_devices) { el.textContent = 'No device health data yet.'; return; }
+    let html = `<div style="display:flex;gap:12px;margin-bottom:8px;font-size:.85rem"><span style="color:var(--green)">✓ ${s.healthy||0} healthy</span><span style="color:var(--amber)">⚠ ${s.degraded||0} degraded</span><span style="color:var(--red)">✕ ${s.failing||0} failing</span></div>`;
+    (d.alerts||[]).forEach(a => { html += `<div style="padding:8px 10px;margin:4px 0;background:${a.status==='failing'?'rgba(255,95,109,.08)':'rgba(255,181,71,.08)'};border:1px solid ${a.status==='failing'?'rgba(255,95,109,.2)':'rgba(255,181,71,.2)'};border-radius:6px;font-size:.82rem">${a.message}</div>`; });
+    el.innerHTML = html;
+  } catch(e) {}
+}
+
+// Sleep Quality
+async function loadSleep() {
+  try {
+    const d = await fetch('api/sleep').then(r=>r.json()).catch(()=>({}));
+    const el = document.getElementById('sleep-quality');
+    if (!d.avg_duration_hours) { el.textContent = 'No sleep data yet — needs motion and light sensors.'; return; }
+    el.innerHTML = `<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><div style="font-size:2rem;font-weight:700;color:var(--accent)">${d.avg_quality_score||'—'}<span style="font-size:1rem;color:var(--text3)">/100</span></div><div><div style="font-size:.85rem;color:var(--text2)">⏱ ${d.avg_duration_hours}h avg duration</div><div style="font-size:.85rem;color:var(--text2)">🕐 ${d.avg_onset_hour}:00 avg bedtime</div><div style="font-size:.85rem;color:var(--text2)">📊 ${d.consistency_score}% consistency</div></div></div><div style="font-size:.82rem;color:var(--text3)">${d.recommendation||''}</div>`;
+  } catch(e) {}
+}
+
+// Weekly Report
+async function loadWeeklyReport() {
+  try {
+    const d = await fetch('api/weekly_report').then(r=>r.json()).catch(()=>({}));
+    const el = document.getElementById('weekly-report');
+    if (!d.highlights) { el.textContent = 'No weekly report generated yet.'; return; }
+    let html = `<div style="font-size:.78rem;color:var(--text3);margin-bottom:8px">Week ending ${d.week_ending||'?'}</div>`;
+    html += d.highlights.map(h => `<div style="padding:4px 0;font-size:.85rem;color:var(--text2)">• ${h}</div>`).join('');
+    const a = d.anomaly_summary||{};
+    html += `<div style="display:flex;gap:12px;margin-top:8px;font-size:.78rem;color:var(--text3)"><span>${a.total_events||0} anomaly events</span><span>Peak score: ${a.peak_score||0}</span><span>${(d.sensor_health||{}).total_entities||0} entities</span></div>`;
+    el.innerHTML = html;
+  } catch(e) {}
+}
+
+// Shore Power Quality
+async function loadShorePower() {
+  try {
+    const d = await fetch('api/shore_power_quality').then(r=>r.json()).catch(()=>({}));
+    const el = document.getElementById('shore-power-quality');
+    if (!d.quality_score && d.quality_score !== 0) { el.textContent = 'No shore power data — configure voltage sensor.'; return; }
+    const sc = d.quality_score;
+    const color = sc>=80?'var(--green)':sc>=50?'var(--amber)':'var(--red)';
+    el.innerHTML = `<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap"><div style="font-size:2rem;font-weight:700;color:${color}">${sc}<span style="font-size:1rem;color:var(--text3)">/100</span></div><div><div style="font-size:.85rem;color:var(--text2)">⚡ ${d.avg_voltage||'—'}V avg (${d.min_voltage||'—'}–${d.max_voltage||'—'}V)</div><div style="font-size:.85rem;color:var(--text2)">🔌 ${d.brownout_count||0} brownouts, ${d.sag_events||0} sags</div></div></div>${(d.alerts||[]).length?'<div style="margin-top:8px">'+d.alerts.map(a=>'<div style="color:var(--amber);font-size:.82rem">⚠ '+a+'</div>').join('')+'</div>':''}`;
+  } catch(e) {}
+}
+
+// Entity Ignore List
+async function loadIgnoreList() {
+  try {
+    const d = await fetch('api/ignore_list').then(r=>r.json()).catch(()=>({}));
+    const el = document.getElementById('ignore-list');
+    const ents = d.entities || [];
+    const reasons = d.reasons || {};
+    if (ents.length === 0) { el.textContent = 'No entities ignored.'; return; }
+    el.innerHTML = ents.map(eid => `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border)"><span style="font-size:.82rem">${eid}${reasons[eid]?' — <span style="color:var(--text3)">'+reasons[eid]+'</span>':''}</span><button onclick="removeIgnore('${eid}')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.8rem">✕ Remove</button></div>`).join('');
+  } catch(e) {}
+}
+async function addIgnore() {
+  const inp = document.getElementById('ignore-entity-input');
+  const eid = inp.value.trim();
+  if (!eid) return;
+  await fetch('api/ignore_entity', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({entity_id:eid})});
+  inp.value = '';
+  loadIgnoreList();
+  toast('Entity ignored ✓');
+}
+async function removeIgnore(eid) {
+  await fetch('api/unignore_entity', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({entity_id:eid})});
+  loadIgnoreList();
+  toast('Entity un-ignored ✓');
+}
+
+// Sound Alert
+async function loadSoundAlert() {
+  try {
+    const d = await fetch('api/sound_alert').then(r=>r.json()).catch(()=>({}));
+    const btn = document.getElementById('sound-btn');
+    btn.textContent = d.enabled ? '🔔 Enabled' : '🔕 Disabled';
+    btn.style.background = d.enabled ? 'var(--green)' : '';
+  } catch(e) { document.getElementById('sound-btn').textContent = '🔕 Disabled'; }
+}
+async function toggleSound() {
+  const btn = document.getElementById('sound-btn');
+  const isOn = btn.textContent.includes('Enabled');
+  await fetch('api/sound_alert', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled:!isOn})});
+  loadSoundAlert();
+  toast('Sound alert ' + (!isOn ? 'enabled' : 'disabled'));
+}
+
+// Passage Mode
+async function loadPassage() {
+  try {
+    const d = await fetch('api/passage_mode').then(r=>r.json()).catch(()=>({}));
+    const btn = document.getElementById('passage-btn');
+    const st = document.getElementById('passage-status');
+    if (d.underway) {
+      btn.textContent = '⚓ End Passage'; btn.style.background = 'var(--amber)';
+      st.textContent = 'Underway since ' + (d.detected_at||'?');
+    } else {
+      btn.textContent = '⛵ Start Passage'; btn.style.background = '';
+      st.textContent = 'Harbor mode — passage mode tightens bilge/battery monitoring';
+    }
+  } catch(e) { document.getElementById('passage-btn').textContent = '⛵ Start Passage'; }
+}
+async function togglePassage() {
+  await fetch('api/passage_mode/toggle', {method:'POST'});
+  loadPassage();
+  toast('Passage mode toggled');
+}
+
+// Anchor Watch
+async function loadAnchorWatch() {
+  try {
+    const d = await fetch('api/anchor_watch').then(r=>r.json()).catch(()=>({}));
+    const el = document.getElementById('anchor-watch');
+    if (!d.active) { el.textContent = 'Anchor watch not active.'; return; }
+    el.innerHTML = `<div style="font-size:.85rem">📍 Anchor set — radius: ${d.radius_m||30}m<br>Distance: ${d.distance_m||'?'}m ${d.dragging?'<span style="color:var(--red);font-weight:700">⚠ DRAGGING</span>':'<span style="color:var(--green)">✓ Holding</span>'}</div>`;
+  } catch(e) {}
+}
+
+// Appliance Schedule
+async function loadSchedule() {
+  try {
+    const d = await fetch('api/appliance_schedule').then(r=>r.json()).catch(()=>({}));
+    const el = document.getElementById('appliance-schedule');
+    const recs = d.recommendations || [];
+    if (recs.length === 0) { el.textContent = 'No scheduling recommendations yet — needs NILM + tariff data.'; return; }
+    el.innerHTML = recs.map(r => `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:.82rem"><strong style="text-transform:capitalize">${r.appliance.replace(/_/g,' ')}</strong>: Best at <span style="color:var(--accent)">${r.best_start_hour}:00</span> — saves ${r.savings_vs_now||'?'} kr/cycle. <span style="color:var(--text3)">${r.reason||''}</span></div>`).join('');
+  } catch(e) {}
+}
+
+// Load all new features after main load()
+setTimeout(function(){
+  loadExplanation(); loadVacation(); loadPredictiveAlerts();
+  loadIncidents(); loadTimeline(); loadRoomThresholds();
+  loadBudget(); loadComfort(); loadBenchmarks(); loadNilm(); loadSchedule();
+  loadDeviceHealth(); loadSleep(); loadWeeklyReport(); loadShorePower();
+  loadIgnoreList(); loadSoundAlert(); loadPassage(); loadAnchorWatch();
+}, 1500);
 
 // Theme toggle
 function toggleTheme() {
