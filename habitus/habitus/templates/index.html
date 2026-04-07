@@ -662,14 +662,18 @@ body { padding-bottom: 72px; }
 
   <!-- Energy Budget -->
   <div class="sec" style="margin-top:12px">
-    <div class="sec-header"><h2>Energy Budget</h2><span class="sec-sub">Monthly target vs actual</span></div>
+    <div class="sec-header"><h2>Energy Budget</h2><span class="sec-sub">Smart target from your Energy Dashboard history</span></div>
     <div id="energy-budget">
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-        <label style="font-size:.8rem;color:var(--text2)">Monthly target (kWh):</label>
-        <input id="budget-kwh" type="number" placeholder="e.g. 300" style="width:100px;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:.85rem">
-        <button class="btn btn-accent" onclick="saveBudget()">Set Budget</button>
-      </div>
       <div id="budget-status" style="color:var(--text3);font-size:.85rem">Loading...</div>
+      <div style="margin-top:10px;padding:10px;background:var(--bg2);border:1px solid var(--border);border-radius:8px">
+        <div style="font-size:.78rem;color:var(--text3);margin-bottom:6px">Manual override (leave empty to use auto-budget)</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input id="budget-kwh" type="number" placeholder="Auto" style="width:100px;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:.85rem">
+          <span style="font-size:.8rem;color:var(--text3)">kWh/month</span>
+          <button class="btn btn-accent" onclick="saveBudget()">Override</button>
+          <button class="btn" onclick="clearBudget()" style="font-size:.78rem;color:var(--text3);background:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px;cursor:pointer">Use Auto</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1578,16 +1582,94 @@ async function loadRoomThresholds() {
   } catch(e) {}
 }
 
-// Energy Budget
+// Energy Budget (smart)
 async function loadBudget() {
   try {
     const d = await fetch('api/energy_budget').then(r=>r.json()).catch(()=>({}));
     const el = document.getElementById('budget-status');
-    if (d.error || !d.budget_kwh) { el.textContent = 'No budget set. Enter a target above.'; return; }
-    const pct = d.pct_used||0;
+    if (!d.budget_kwh && !d.auto_budget_kwh) {
+      el.textContent = 'No Energy Dashboard data yet — budget will auto-calculate once available.';
+      return;
+    }
+    const bk = d.budget_kwh || d.auto_budget_kwh || 0;
+    const pct = d.pct_used || 0;
     const color = d.on_track ? 'var(--green)' : 'var(--red)';
-    el.innerHTML = `<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:.85rem"><span>Used: ${d.used_kwh||0} kWh</span><span>Budget: ${d.budget_kwh} kWh</span></div><div style="background:var(--border);border-radius:4px;height:8px;margin:6px 0;overflow:hidden"><div style="width:${Math.min(pct,100)}%;height:100%;background:${color};border-radius:4px;transition:width .5s"></div></div><div style="display:flex;justify-content:space-between;font-size:.78rem;color:var(--text3)"><span>${pct.toFixed(0)}% used</span><span>Projected: ${d.projected_total||'?'} kWh</span><span>${d.on_track?'✓ On track':'⚠ Over budget'}</span></div></div>`;
-    if (d.budget_kwh) document.getElementById('budget-kwh').value = d.budget_kwh;
+    const src = d.budget_source === 'manual' ? 'Manual override' :
+      d.budget_source === 'same_month_avg' ? 'Based on same month in previous years' :
+      d.budget_source === 'trailing_3mo_avg' ? 'Based on last 3 months average' :
+      'Auto-calculated';
+    const cost = d.cost || {};
+    const vs = d.vs_last_month || {};
+
+    let html = '';
+    // Source badge
+    html += `<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+      <span style="font-size:.72rem;padding:3px 8px;border-radius:10px;background:rgba(79,195,247,.12);color:var(--accent)">${src}</span>
+      ${d.pace ? `<span style="font-size:.78rem;color:var(--text3)">${d.pace}</span>` : ''}
+    </div>`;
+
+    // Progress bar
+    html += `<div style="display:flex;justify-content:space-between;font-size:.88rem;font-weight:600">
+      <span>${(d.used_kwh||0).toFixed(0)} kWh used</span>
+      <span>${bk.toFixed(0)} kWh budget</span>
+    </div>
+    <div style="background:var(--border);border-radius:4px;height:10px;margin:8px 0;overflow:hidden">
+      <div style="width:${Math.min(pct,100)}%;height:100%;background:${color};border-radius:4px;transition:width .5s"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:.78rem;color:var(--text3)">
+      <span>${pct.toFixed(0)}% of budget</span>
+      <span>${d.pct_month_elapsed||0}% of month</span>
+      <span style="color:${color};font-weight:600">${d.on_track ? '✓ On track' : '⚠ Over budget'}</span>
+    </div>`;
+
+    // Projections row
+    html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:12px">
+      <div style="padding:8px;background:var(--card2);border-radius:6px;text-align:center">
+        <div style="font-size:.7rem;color:var(--text3);text-transform:uppercase">Projected</div>
+        <div style="font-size:1.1rem;font-weight:700;color:var(--text)">${d.projected_total||'—'} kWh</div>
+      </div>
+      <div style="padding:8px;background:var(--card2);border-radius:6px;text-align:center">
+        <div style="font-size:.7rem;color:var(--text3);text-transform:uppercase">Daily avg</div>
+        <div style="font-size:1.1rem;font-weight:700;color:var(--text)">${(d.daily_avg||0).toFixed(1)} kWh</div>
+      </div>
+      <div style="padding:8px;background:var(--card2);border-radius:6px;text-align:center">
+        <div style="font-size:.7rem;color:var(--text3);text-transform:uppercase">Cost so far</div>
+        <div style="font-size:1.1rem;font-weight:700;color:var(--text)">${cost.so_far||0} ${cost.currency||'kr'}</div>
+      </div>
+      <div style="padding:8px;background:var(--card2);border-radius:6px;text-align:center">
+        <div style="font-size:.7rem;color:var(--text3);text-transform:uppercase">Projected cost</div>
+        <div style="font-size:1.1rem;font-weight:700;color:${d.on_track?'var(--text)':'var(--red)'}">${cost.projected||0} ${cost.currency||'kr'}</div>
+      </div>
+    </div>`;
+
+    // vs last month
+    if (vs.delta_pct != null) {
+      const delta = vs.delta_pct;
+      const deltaColor = Math.abs(delta) < 5 ? 'var(--text3)' : delta > 0 ? 'var(--amber)' : 'var(--green)';
+      html += `<div style="margin-top:10px;font-size:.82rem;color:var(--text2)">
+        vs last month (first ${d.day_of_month} days): <span style="font-weight:600;color:${deltaColor}">${delta > 0 ? '+' : ''}${delta.toFixed(0)}%</span>
+        (${vs.same_days_this||0} vs ${vs.same_days_last||0} kWh)
+      </div>`;
+    }
+    if (d.trend) {
+      html += `<div style="font-size:.78rem;color:var(--text3);margin-top:4px">${d.trend}</div>`;
+    }
+
+    // Seasonal profile
+    const sp = d.seasonal || {};
+    if (sp.profile && Object.keys(sp.profile).length > 3) {
+      html += `<div style="margin-top:12px;font-size:.78rem;color:var(--text3)">
+        Seasonal: highest <strong style="color:var(--amber)">${sp.highest_month} (${sp.highest_kwh} kWh)</strong>,
+        lowest <strong style="color:var(--green)">${sp.lowest_month} (${sp.lowest_kwh} kWh)</strong>
+      </div>`;
+    }
+
+    el.innerHTML = html;
+    if (d.budget_source === 'manual' && d.budget_kwh) {
+      document.getElementById('budget-kwh').value = d.budget_kwh;
+    } else {
+      document.getElementById('budget-kwh').placeholder = `Auto: ${d.auto_budget_kwh||'—'}`;
+    }
   } catch(e) {}
 }
 async function saveBudget() {
@@ -1595,7 +1677,13 @@ async function saveBudget() {
   if (!kwh || kwh <= 0) { toast('Enter a valid kWh target','te'); return; }
   await fetch('api/energy_budget', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({monthly_kwh:kwh})});
   loadBudget();
-  toast('Budget saved ✓');
+  toast('Manual budget set ✓');
+}
+async function clearBudget() {
+  await fetch('api/energy_budget', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({monthly_kwh:0})});
+  document.getElementById('budget-kwh').value = '';
+  loadBudget();
+  toast('Reverted to auto-budget ✓');
 }
 
 // Comfort Score

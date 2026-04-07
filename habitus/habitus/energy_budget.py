@@ -1,8 +1,15 @@
-"""Monthly energy budget tracking with projections.
+"""Smart Energy Budget — auto-computes monthly targets from HA Energy Dashboard history.
 
-Reads phantom load data to estimate monthly consumption and compares
-against a user-defined energy budget (kWh or cost).  Provides daily
-burn-rate calculations, overshoot projections, and alert thresholds.
+Instead of asking the user to guess a budget, derives it from actual
+historical consumption. Uses 12-month rolling data from phantom_loads.json
+(which reads directly from HA's Energy Dashboard statistics).
+
+Smart features:
+- Auto-budget: same-month average from last 1-2 years of history
+- Seasonal awareness: winter months get higher budgets than summer
+- Trend detection: flags if this month is tracking above/below historical norm
+- Day-normalized comparison: compares first N days of this month vs same
+  N days in previous months to detect overshoot early
 """
 
 import datetime
@@ -18,123 +25,206 @@ DATA_DIR = os.environ.get("DATA_DIR", "/data")
 BUDGET_PATH = os.path.join(DATA_DIR, "energy_budget.json")
 PHANTOM_PATH = os.path.join(DATA_DIR, "phantom_loads.json")
 
-# Default cost per kWh when the user hasn't configured one
-_DEFAULT_COST_PER_KWH = 0.12
+KWH_PRICE = float(os.environ.get("HABITUS_KWH_PRICE", "0.30"))
+CURRENCY = os.environ.get("HABITUS_CURRENCY", "kr")
+
+
+def _load_json(path: str, default: Any = None) -> Any:
+    try:
+        if os.path.exists(path):
+            with open(path) as f:
+                return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        pass
+    return default
 
 
 def _load_budget() -> dict[str, Any]:
-    """Load the budget config from disk.
+    data = _load_json(BUDGET_PATH, {})
+    return data if isinstance(data, dict) else {}
+
+
+def _load_phantom() -> dict[str, Any]:
+    data = _load_json(PHANTOM_PATH, {})
+    return data if isinstance(data, dict) else {}
+
+
+def _compute_smart_budget(months_data: list[dict]) -> dict[str, Any]:
+    """Compute a smart monthly budget from historical Energy Dashboard data.
+
+    Uses the same month in previous years as primary reference. Falls back
+    to the trailing 3-month average if no same-month history exists.
+
+    Args:
+        months_data: List of ``{month: "YYYY-MM", kwh: float}`` from
+            phantom_loads.json.
 
     Returns:
-        Budget dict, or empty dict if not yet configured.
+        Dict with ``auto_budget_kwh``, ``method``, ``reference_months``,
+        ``seasonal_factor``.
     """
-    if not os.path.exists(BUDGET_PATH):
-        return {}
-    try:
-        with open(BUDGET_PATH) as fh:
-            return json.load(fh)
-    except (json.JSONDecodeError, OSError) as exc:
-        log.warning("Failed to load energy_budget.json: %s", exc)
-        return {}
+    if not months_data:
+        return {"auto_budget_kwh": 0, "method": "none", "reference_months": []}
+
+    now = datetime.datetime.now(datetime.UTC)
+    current_month_num = now.month
+    current_ym = now.strftime("%Y-%m")
+
+    # Group historical months by month number (Jan=1, Dec=12)
+    by_month_num: dict[int, list[float]] = {}
+    all_kwh: list[float] = []
+    for m in months_data:
+        ym = m.get("month", "")
+        kwh = m.get("kwh", 0)
+        if not ym or kwh <= 0 or ym == current_ym:
+            continue
+        try:
+            month_num = int(ym.split("-")[1])
+        except (ValueError, IndexError):
+            continue
+        by_month_num.setdefault(month_num, []).append(kwh)
+        all_kwh.append(kwh)
+
+    # Method 1: Same calendar month in previous years
+    same_month_history = by_month_num.get(current_month_num, [])
+    if same_month_history:
+        avg = sum(same_month_history) / len(same_month_history)
+        return {
+            "auto_budget_kwh": round(avg, 1),
+            "method": "same_month_avg",
+            "reference_months": [
+                m["month"]
+                for m in months_data
+                if m["month"].endswith(f"-{current_month_num:02d}") and m["month"] != current_ym
+            ],
+            "reference_values": [round(v, 1) for v in same_month_history],
+        }
+
+    # Method 2: Trailing 3-month average (seasonal approximation)
+    completed = [m for m in months_data if m.get("kwh", 0) > 0 and m.get("month", "") != current_ym]
+    completed.sort(key=lambda x: x["month"], reverse=True)
+    recent_3 = completed[:3]
+    if recent_3:
+        avg = sum(m["kwh"] for m in recent_3) / len(recent_3)
+        return {
+            "auto_budget_kwh": round(avg, 1),
+            "method": "trailing_3mo_avg",
+            "reference_months": [m["month"] for m in recent_3],
+            "reference_values": [round(m["kwh"], 1) for m in recent_3],
+        }
+
+    # Method 3: Overall average
+    if all_kwh:
+        avg = sum(all_kwh) / len(all_kwh)
+        return {
+            "auto_budget_kwh": round(avg, 1),
+            "method": "overall_avg",
+            "reference_months": [m["month"] for m in months_data if m["month"] != current_ym],
+            "reference_values": [round(v, 1) for v in all_kwh],
+        }
+
+    return {"auto_budget_kwh": 0, "method": "none", "reference_months": []}
 
 
-def _load_phantom_data() -> dict[str, Any]:
-    """Load phantom load data for energy consumption estimates.
+def _seasonal_profile(months_data: list[dict]) -> dict[str, Any]:
+    """Build a seasonal consumption profile from historical data.
 
     Returns:
-        Phantom loads dict, or empty dict if unavailable.
+        Dict mapping month names to average kWh, plus highest/lowest months.
     """
-    if not os.path.exists(PHANTOM_PATH):
-        return {}
-    try:
-        with open(PHANTOM_PATH) as fh:
-            return json.load(fh)
-    except (json.JSONDecodeError, OSError) as exc:
-        log.warning("Failed to load phantom_loads.json: %s", exc)
-        return {}
+    month_names = [
+        "",
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+    ]
+    by_month: dict[int, list[float]] = {}
+    for m in months_data:
+        kwh = m.get("kwh", 0)
+        if kwh <= 0:
+            continue
+        try:
+            month_num = int(m["month"].split("-")[1])
+        except (ValueError, IndexError):
+            continue
+        by_month.setdefault(month_num, []).append(kwh)
+
+    profile: dict[str, float] = {}
+    for mn, values in sorted(by_month.items()):
+        profile[month_names[mn]] = round(sum(values) / len(values), 1)
+
+    if not profile:
+        return {"profile": {}, "highest": "", "lowest": ""}
+
+    highest = max(profile, key=profile.get)  # type: ignore[arg-type]
+    lowest = min(profile, key=profile.get)  # type: ignore[arg-type]
+    return {
+        "profile": profile,
+        "highest_month": highest,
+        "highest_kwh": profile[highest],
+        "lowest_month": lowest,
+        "lowest_kwh": profile[lowest],
+    }
 
 
 def set_budget(
     monthly_kwh: float | None = None,
     monthly_cost: float | None = None,
-) -> dict:
-    """Set or update the monthly energy budget.
+) -> dict[str, Any]:
+    """Set a manual budget override, or clear to use auto-budget.
 
-    At least one of *monthly_kwh* or *monthly_cost* should be provided.
-    If only cost is given, kWh is estimated using a default rate.
+    Pass ``monthly_kwh=0`` to clear the manual override and revert to
+    the smart auto-budget.
 
     Args:
-        monthly_kwh: Monthly energy budget in kilowatt-hours.
-        monthly_cost: Monthly energy budget in local currency.
+        monthly_kwh: Manual monthly energy budget in kWh. 0 = use auto.
+        monthly_cost: Monthly cost budget (converted to kWh via KWH_PRICE).
 
     Returns:
         The persisted budget configuration dict.
     """
     budget = _load_budget()
+
     if monthly_kwh is not None:
-        budget["monthly_kwh"] = monthly_kwh
-    if monthly_cost is not None:
-        budget["monthly_cost"] = monthly_cost
-        if monthly_kwh is None and "monthly_kwh" not in budget:
-            budget["monthly_kwh"] = monthly_cost / _DEFAULT_COST_PER_KWH
+        if monthly_kwh <= 0:
+            budget.pop("manual_kwh", None)
+        else:
+            budget["manual_kwh"] = monthly_kwh
+
+    if monthly_cost is not None and monthly_cost > 0:
+        budget["manual_kwh"] = monthly_cost / KWH_PRICE
 
     budget["updated_at"] = datetime.datetime.now(datetime.UTC).isoformat()
     atomic_write(BUDGET_PATH, budget)
-    log.info("Energy budget set: %s", budget)
+    log.info("Energy budget updated: %s", budget)
     return budget
 
 
-def get_daily_burn_rate(phantom_data: dict) -> float:
-    """Compute the average daily energy consumption in kWh.
+def get_budget_status() -> dict[str, Any]:
+    """Compute current budget status with smart auto-budget and projections.
 
-    Uses the ``total_monthly_kwh`` field from phantom load data and
-    divides by the number of days in the current month.
-
-    Args:
-        phantom_data: Parsed phantom_loads.json content.
+    Reads HA Energy Dashboard data from phantom_loads.json. If no manual
+    budget is set, auto-computes from historical same-month averages.
 
     Returns:
-        Estimated daily kWh burn rate.  Returns 0.0 if data is missing.
+        Comprehensive budget status with auto-budget, actual consumption,
+        projections, seasonal context, and comparison to history.
     """
-    monthly_kwh = phantom_data.get("total_monthly_kwh", 0.0)
-    if not monthly_kwh:
-        # Fall back: sum individual device standby estimates
-        devices = phantom_data.get("devices", [])
-        total_w = sum(d.get("standby_watts", 0.0) for d in devices)
-        # Standby is 24h — convert watts to daily kWh
-        return (total_w * 24.0) / 1000.0
+    budget_cfg = _load_budget()
+    phantom = _load_phantom()
+    months_data = phantom.get("months", [])
 
     now = datetime.datetime.now(datetime.UTC)
-    days_in_month = (
-        datetime.date(now.year + (now.month // 12), (now.month % 12) + 1, 1)
-        - datetime.date(now.year, now.month, 1)
-    ).days
-    return monthly_kwh / days_in_month
-
-
-def get_budget_status() -> dict:
-    """Compute current budget status with projections.
-
-    Reads the configured budget and phantom load data, then calculates
-    usage so far, remaining budget, projected total, and whether the
-    household is on track.
-
-    Returns:
-        Dict with keys: ``budget_kwh``, ``used_kwh``, ``remaining_kwh``,
-        ``days_remaining``, ``daily_avg``, ``projected_total``,
-        ``on_track``, ``pct_used``, ``pct_month_elapsed``,
-        ``overshoot_kwh``.  Returns a minimal dict with
-        ``error`` if no budget is configured.
-    """
-    budget = _load_budget()
-    if "monthly_kwh" not in budget:
-        return {"error": "No budget configured. Call set_budget() first."}
-
-    budget_kwh: float = budget["monthly_kwh"]
-    phantom_data = _load_phantom_data()
-    daily_avg = get_daily_burn_rate(phantom_data)
-
-    now = datetime.datetime.now(datetime.UTC)
+    current_ym = now.strftime("%Y-%m")
     day_of_month = now.day
     days_in_month = (
         datetime.date(now.year + (now.month // 12), (now.month % 12) + 1, 1)
@@ -142,67 +232,129 @@ def get_budget_status() -> dict:
     ).days
     days_remaining = days_in_month - day_of_month
 
-    used_kwh = daily_avg * day_of_month
-    projected_total = daily_avg * days_in_month
-    remaining_kwh = max(0.0, budget_kwh - used_kwh)
-    overshoot_kwh = max(0.0, projected_total - budget_kwh)
-    pct_used = (used_kwh / budget_kwh * 100.0) if budget_kwh > 0 else 0.0
-    pct_month_elapsed = (day_of_month / days_in_month * 100.0) if days_in_month > 0 else 0.0
-    on_track = projected_total <= budget_kwh
+    # Smart auto-budget from historical data
+    smart = _compute_smart_budget(months_data)
+    auto_budget_kwh = smart.get("auto_budget_kwh", 0)
+
+    # Use manual override if set, otherwise auto-budget
+    manual_kwh = budget_cfg.get("manual_kwh")
+    budget_kwh = manual_kwh if manual_kwh else auto_budget_kwh
+    budget_source = "manual" if manual_kwh else smart.get("method", "none")
+
+    # Actual consumption this month (from Energy Dashboard)
+    this_month_kwh = phantom.get("this_month_kwh", 0)
+    this_month_avg_daily = phantom.get("this_month_avg_daily", 0)
+    last_month_kwh = phantom.get("last_month_kwh", 0)
+
+    # Day-normalized comparison (same first N days)
+    same_days = phantom.get("same_days_comparison", {})
+    same_days_this = same_days.get("this_month_first_n", 0)
+    same_days_last = same_days.get("last_month_first_n", 0)
+    same_days_delta_pct = same_days.get("delta_pct")
+
+    # Projections
+    projected_total = round(this_month_avg_daily * days_in_month, 1) if this_month_avg_daily else 0
+    remaining_kwh = max(0, budget_kwh - this_month_kwh) if budget_kwh else 0
+    overshoot_kwh = max(0, projected_total - budget_kwh) if budget_kwh else 0
+    pct_used = round(this_month_kwh / budget_kwh * 100, 1) if budget_kwh > 0 else 0
+    pct_month = round(day_of_month / days_in_month * 100, 1) if days_in_month else 0
+    on_track = projected_total <= budget_kwh if budget_kwh else True
+
+    # Pace comparison: are we burning faster/slower than budget implies?
+    budget_daily_target = budget_kwh / days_in_month if budget_kwh and days_in_month else 0
+    pace_vs_target = ""
+    if budget_daily_target and this_month_avg_daily:
+        ratio = this_month_avg_daily / budget_daily_target
+        if ratio > 1.15:
+            pace_vs_target = f"Burning {(ratio - 1) * 100:.0f}% faster than budget pace"
+        elif ratio < 0.85:
+            pace_vs_target = f"Running {(1 - ratio) * 100:.0f}% under budget pace"
+        else:
+            pace_vs_target = "On pace with budget"
+
+    # Cost estimates
+    cost_so_far = round(this_month_kwh * KWH_PRICE, 1)
+    cost_projected = round(projected_total * KWH_PRICE, 1)
+    cost_budget = round(budget_kwh * KWH_PRICE, 1) if budget_kwh else 0
+
+    # Seasonal context
+    seasonal = _seasonal_profile(months_data)
+
+    # Month-over-month trend
+    trend = ""
+    if same_days_delta_pct is not None:
+        if same_days_delta_pct > 10:
+            trend = f"Up {same_days_delta_pct:.0f}% vs same period last month"
+        elif same_days_delta_pct < -10:
+            trend = f"Down {abs(same_days_delta_pct):.0f}% vs same period last month"
+        else:
+            trend = "Roughly flat vs last month"
 
     return {
-        "budget_kwh": round(budget_kwh, 2),
-        "used_kwh": round(used_kwh, 2),
-        "remaining_kwh": round(remaining_kwh, 2),
-        "days_remaining": days_remaining,
-        "daily_avg": round(daily_avg, 2),
-        "projected_total": round(projected_total, 2),
+        "budget_kwh": round(budget_kwh, 1) if budget_kwh else None,
+        "budget_source": budget_source,
+        "auto_budget_kwh": round(auto_budget_kwh, 1),
+        "smart_budget": smart,
+        "used_kwh": round(this_month_kwh, 1),
+        "remaining_kwh": round(remaining_kwh, 1),
+        "daily_avg": round(this_month_avg_daily, 2),
+        "budget_daily_target": round(budget_daily_target, 2),
+        "projected_total": projected_total,
         "on_track": on_track,
-        "pct_used": round(pct_used, 1),
-        "pct_month_elapsed": round(pct_month_elapsed, 1),
-        "overshoot_kwh": round(overshoot_kwh, 2),
+        "pct_used": pct_used,
+        "pct_month_elapsed": pct_month,
+        "overshoot_kwh": round(overshoot_kwh, 1),
+        "days_remaining": days_remaining,
+        "pace": pace_vs_target,
+        "trend": trend,
+        "cost": {
+            "so_far": cost_so_far,
+            "projected": cost_projected,
+            "budget": cost_budget,
+            "currency": CURRENCY,
+            "kwh_price": KWH_PRICE,
+        },
+        "vs_last_month": {
+            "last_month_kwh": round(last_month_kwh, 1),
+            "same_days_this": round(same_days_this, 1),
+            "same_days_last": round(same_days_last, 1),
+            "delta_pct": same_days_delta_pct,
+        },
+        "seasonal": seasonal,
+        "month": current_ym,
+        "day_of_month": day_of_month,
+        "days_in_month": days_in_month,
     }
 
 
-def should_alert(status: dict) -> bool:
+def should_alert(status: dict[str, Any]) -> bool:
     """Check whether a budget alert should fire.
 
-    Returns ``True`` if the projected total exceeds the budget by more
-    than 10 percent.
-
-    Args:
-        status: Dict returned by :func:`get_budget_status`.
-
-    Returns:
-        ``True`` if over-budget by >10%, ``False`` otherwise.
+    Returns True if projected total exceeds budget by >10%.
     """
-    budget = status.get("budget_kwh", 0)
-    projected = status.get("projected_total", 0)
+    budget = status.get("budget_kwh") or 0
+    projected = status.get("projected_total") or 0
     if budget <= 0:
         return False
-    return projected > budget * 1.10
+    return bool(projected > budget * 1.10)
 
 
-def format_budget_message(status: dict) -> str:
-    """Format a plain-English budget status message.
+def format_budget_message(status: dict[str, Any]) -> str:
+    """Format a plain-English budget status message."""
+    if not status.get("budget_kwh"):
+        return "No budget data — waiting for Energy Dashboard history."
 
-    Args:
-        status: Dict returned by :func:`get_budget_status`.
-
-    Returns:
-        Human-readable string describing the current budget situation.
-    """
-    if "error" in status:
-        return status["error"]
-
-    on_track_str = "on track" if status["on_track"] else "over budget"
-    msg = (
-        f"Energy budget: {status['used_kwh']:.1f} / {status['budget_kwh']:.1f} kWh used "
-        f"({status['pct_used']:.0f}% of budget, {status['pct_month_elapsed']:.0f}% "
-        f"of month elapsed). "
-        f"Daily avg: {status['daily_avg']:.1f} kWh. "
-        f"Projected total: {status['projected_total']:.1f} kWh — {on_track_str}."
-    )
-    if status["overshoot_kwh"] > 0:
-        msg += f" Overshoot: +{status['overshoot_kwh']:.1f} kWh."
-    return msg
+    cost = status.get("cost", {})
+    parts = [
+        f"Energy: {status['used_kwh']:.0f} / {status['budget_kwh']:.0f} kWh "
+        f"({status['pct_used']:.0f}%)",
+    ]
+    if status.get("pace"):
+        parts.append(status["pace"])
+    if cost.get("projected"):
+        parts.append(f"Projected cost: {cost['projected']} {cost.get('currency', 'kr')}")
+    if status.get("trend"):
+        parts.append(status["trend"])
+    if not status.get("on_track"):
+        parts.append(f"Over budget by ~{status['overshoot_kwh']:.0f} kWh")
+    return ". ".join(parts) + "."
