@@ -283,5 +283,160 @@ def api_insights():
     return jsonify(_ins.compute_insights())
 
 
-def start_web(port=8099):
+# ── Entity Ignore List ───────────────────────────────────────────────────────
+
+
+@app.route("/api/ignore_list")
+@app.route("/ingress/api/ignore_list")
+def api_ignore_list():
+    """Return the entity ignore list with reasons."""
+    from habitus import entity_ignore as _ign  # noqa: PLC0415
+
+    return jsonify(_ign.get_ignore_list())
+
+
+@app.route("/api/ignore_entity", methods=["POST"])
+@app.route("/ingress/api/ignore_entity", methods=["POST"])
+def api_ignore_entity():
+    """Add an entity to the ignore list."""
+    from habitus import entity_ignore as _ign  # noqa: PLC0415
+
+    data = request.get_json() or {}
+    entity_id = data.get("entity_id", "")
+    reason = data.get("reason", "")
+    if not entity_id:
+        return jsonify({"ok": False, "error": "entity_id required"}), 400
+    _ign.add_entity(entity_id, reason)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/unignore_entity", methods=["POST"])
+@app.route("/ingress/api/unignore_entity", methods=["POST"])
+def api_unignore_entity():
+    """Remove an entity from the ignore list."""
+    from habitus import entity_ignore as _ign  # noqa: PLC0415
+
+    data = request.get_json() or {}
+    entity_id = data.get("entity_id", "")
+    if not entity_id:
+        return jsonify({"ok": False, "error": "entity_id required"}), 400
+    _ign.remove_entity(entity_id)
+    return jsonify({"ok": True})
+
+
+# ── CSV Export ───────────────────────────────────────────────────────────────
+
+
+@app.route("/api/export/<dataset>")
+@app.route("/ingress/api/export/<dataset>")
+def api_export(dataset: str):
+    """Export data as CSV download.
+
+    Supported datasets: ``baselines``, ``anomalies``, ``energy``, ``history``.
+    """
+    from flask import Response
+
+    from habitus import csv_export as _csv  # noqa: PLC0415
+
+    if dataset not in _csv.AVAILABLE_EXPORTS:
+        return jsonify({"error": f"Unknown dataset: {dataset}"}), 404
+    filename, export_fn = _csv.AVAILABLE_EXPORTS[dataset]
+    csv_data = export_fn()
+    return Response(
+        csv_data,
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+# ── NL Explanations ──────────────────────────────────────────────────────────
+
+
+@app.route("/api/explain")
+@app.route("/ingress/api/explain")
+def api_explain():
+    """Return plain English explanation of current anomaly state."""
+    from habitus import nl_explanations as _nl  # noqa: PLC0415
+
+    anomaly_data = _read(ANOMALIES_PATH) or {}
+    anomalies = anomaly_data.get("anomalies", [])
+    score = anomaly_data.get("weighted_score", anomaly_data.get("score", 0))
+
+    baselines = _read(os.path.join(DATA_DIR, "entity_baselines.json")) or {}
+    total_entities = len([k for k in baselines if not k.startswith("_")])
+
+    overall = _nl.explain_overall_score(int(score), anomalies, total_entities)
+    entity_explanations = [
+        {
+            "entity_id": a.get("entity_id", a.get("name", "")),
+            "explanation": _nl.explain_entity_anomaly(a),
+        }
+        for a in anomalies[:10]
+    ]
+
+    drift_data = _read(DRIFT_PATH) or {}
+    drift_explanation = _nl.explain_drift(drift_data)
+
+    return jsonify(
+        {
+            "overall": overall,
+            "score": int(score),
+            "entities": entity_explanations,
+            "drift": drift_explanation,
+        }
+    )
+
+
+# ── Vacation Mode ────────────────────────────────────────────────────────────
+
+
+@app.route("/api/vacation")
+@app.route("/ingress/api/vacation")
+def api_vacation():
+    """Return vacation mode state."""
+    from habitus import vacation_mode as _vac  # noqa: PLC0415
+
+    return jsonify(_vac.get_state())
+
+
+@app.route("/api/vacation/toggle", methods=["POST"])
+@app.route("/ingress/api/vacation/toggle", methods=["POST"])
+def api_vacation_toggle():
+    """Toggle vacation mode on/off."""
+    from habitus import vacation_mode as _vac  # noqa: PLC0415
+
+    state = _vac.deactivate() if _vac.is_active() else _vac.activate(manual=True)
+    return jsonify({"ok": True, "state": state})
+
+
+# ── Device Health ────────────────────────────────────────────────────────────
+
+
+@app.route("/api/device_health")
+@app.route("/ingress/api/device_health")
+def api_device_health():
+    """Return device health report with degradation alerts."""
+    from habitus import device_health as _dh  # noqa: PLC0415
+
+    return jsonify(_dh.get_health_report())
+
+
+# ── Weekly Report ────────────────────────────────────────────────────────────
+
+
+@app.route("/api/weekly_report")
+@app.route("/ingress/api/weekly_report")
+def api_weekly_report():
+    """Return the latest weekly report (or generate a new one)."""
+    from habitus import weekly_report as _wr  # noqa: PLC0415
+
+    existing = _read(os.path.join(DATA_DIR, "weekly_report.json"))
+    if existing:
+        return jsonify(existing)
+    report = _wr.generate_report()
+    return jsonify(report)
+
+
+def start_web(port: int = 8099) -> None:
+    """Start the Flask web server."""
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
