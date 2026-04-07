@@ -163,5 +163,5 @@ def load() -> dict[str, Any]:
         with open(DRIFT_PATH) as f:
             data: dict[str, Any] = json.load(f)
             return data
-    except Exception:
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
         return {}

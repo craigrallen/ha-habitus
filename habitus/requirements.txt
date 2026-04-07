@@ -1,8 +1,9 @@
-scikit-learn
-pandas
-numpy
-requests
-websockets
-flask
-pyyaml
-aiohttp
+scikit-learn>=1.4
+pandas>=2.1
+numpy>=1.26
+requests>=2.31
+websockets>=12.0
+flask>=3.0
+pyyaml>=6.0
+aiohttp>=3.9
+joblib>=1.3

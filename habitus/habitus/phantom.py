@@ -234,19 +234,21 @@ async def _run_async() -> dict:
 
 
 def save(result: dict) -> None:
+    """Persist phantom load analysis results to disk."""
     try:
         with open(PHANTOM_PATH, "w") as f:
             json.dump(result, f, indent=2)
-    except Exception as e:
+    except OSError as e:
         log.warning("Could not save phantom data: %s", e)
 
 
 def load() -> dict[str, Any]:
+    """Load phantom load analysis results from disk."""
     try:
         with open(PHANTOM_PATH) as f:
             data: dict[str, Any] = json.load(f)
             return data
-    except Exception:
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
         return {}
 
 

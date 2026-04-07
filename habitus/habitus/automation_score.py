@@ -211,5 +211,5 @@ def load() -> list[Any]:
         with open(SCORES_PATH) as f:
             data: list[Any] = json.load(f)
             return data
-    except Exception:
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
         return []

@@ -6,6 +6,9 @@ import json
 import logging
 import os
 import re
+from typing import Any
+
+import aiohttp
 
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
@@ -87,7 +90,7 @@ _INTENT_PATTERNS = [
 ]
 
 
-def _match_intent(text):
+def _match_intent(text: str) -> dict[str, Any] | None:
     """Try to match a suggestion text to a known intent."""
     lower = text.lower()
     for pat in _INTENT_PATTERNS:
@@ -102,7 +105,7 @@ def _match_intent(text):
     return None
 
 
-def _extract_entities_from_text(text, known_entity_ids):
+def _extract_entities_from_text(text: str, known_entity_ids: list[str]) -> list[str]:
     """Extract entity IDs mentioned (by name fragments) in suggestion text."""
     lower = text.lower()
     matches = []
@@ -117,7 +120,9 @@ def _extract_entities_from_text(text, known_entity_ids):
     return matches
 
 
-def _parse_suggestion(suggestion, known_entity_ids):
+def _parse_suggestion(
+    suggestion: dict[str, Any] | str, known_entity_ids: list[str]
+) -> dict[str, Any]:
     """Parse a suggestion into a structured intent dict."""
     if isinstance(suggestion, dict):
         raw = suggestion.get("description", "") or suggestion.get("title", "")
@@ -142,74 +147,87 @@ def _parse_suggestion(suggestion, known_entity_ids):
     }
 
 
-def _fetch_automations(ha_url, ha_token):
+async def _fetch_automations(ha_url: str, ha_token: str) -> list[dict[str, Any]]:
     """Fetch automation details from HA. Falls back to /api/states if config API 404s."""
-    import urllib.error
-    import urllib.request
-
     headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
-
-    def _get(url):
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read().decode())
+    timeout = aiohttp.ClientTimeout(total=10)
 
     try:
-        data = _get(f"{ha_url}/api/config/automation/config")
-        if isinstance(data, list):
-            log.info("automation_gap: fetched %d automations from config API", len(data))
-            result = []
-            for a in data:
-                alias = a.get("alias", "") or a.get("id", "")
-                result.append(
-                    {
-                        "entity_id": "automation.{}".format(alias.lower().replace(" ", "_")),
-                        "alias": alias,
-                        "trigger": a.get("trigger", []),
-                        "action": a.get("action", []),
-                        "state": "off" if a.get("mode") == "disabled" else "on",
-                        "last_triggered": None,
-                    }
+        async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
+            try:
+                async with session.get(f"{ha_url}/api/config/automation/config") as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if isinstance(data, list):
+                            log.info(
+                                "automation_gap: fetched %d automations from config API",
+                                len(data),
+                            )
+                            result: list[dict[str, Any]] = []
+                            for a in data:
+                                alias = a.get("alias", "") or a.get("id", "")
+                                result.append(
+                                    {
+                                        "entity_id": "automation.{}".format(
+                                            alias.lower().replace(" ", "_")
+                                        ),
+                                        "alias": alias,
+                                        "trigger": a.get("trigger", []),
+                                        "action": a.get("action", []),
+                                        "state": ("off" if a.get("mode") == "disabled" else "on"),
+                                        "last_triggered": None,
+                                    }
+                                )
+                            return result
+            except aiohttp.ClientError as e:
+                log.debug("automation_gap: config API failed (%s), falling back to states", e)
+
+            # Fallback to /api/states
+            async with session.get(f"{ha_url}/api/states") as resp:
+                if resp.status != 200:
+                    log.warning("automation_gap: states API returned %d", resp.status)
+                    return []
+                states = await resp.json()
+                automations = [s for s in states if s["entity_id"].startswith("automation.")]
+                log.info(
+                    "automation_gap: fetched %d automations from states API",
+                    len(automations),
                 )
-            return result
-    except Exception as e:
-        log.debug("automation_gap: config API failed (%s), falling back to states", e)
-
-    try:
-        states = _get(f"{ha_url}/api/states")
-        automations = [s for s in states if s["entity_id"].startswith("automation.")]
-        log.info("automation_gap: fetched %d automations from states API", len(automations))
-        result = []
-        for a in automations:
-            attrs = a.get("attributes", {})
-            result.append(
-                {
-                    "entity_id": a["entity_id"],
-                    "alias": attrs.get("friendly_name", a["entity_id"]),
-                    "trigger": [],
-                    "action": [],
-                    "state": a.get("state", "on"),
-                    "last_triggered": attrs.get("last_triggered"),
-                }
-            )
-        return result
-    except Exception as e:
-        log.warning("automation_gap: states API failed: %s", e)
+                result = []
+                for a in automations:
+                    attrs = a.get("attributes", {})
+                    result.append(
+                        {
+                            "entity_id": a["entity_id"],
+                            "alias": attrs.get("friendly_name", a["entity_id"]),
+                            "trigger": [],
+                            "action": [],
+                            "state": a.get("state", "on"),
+                            "last_triggered": attrs.get("last_triggered"),
+                        }
+                    )
+                return result
+    except aiohttp.ClientError as e:
+        log.warning("automation_gap: failed to fetch automations: %s", e)
         return []
 
 
-def _fetch_all_states(ha_url, ha_token):
+async def _fetch_all_states(ha_url: str, ha_token: str) -> list[dict[str, Any]]:
     """Fetch all HA states to get entity IDs."""
-    import urllib.request
+    headers = {"Authorization": f"Bearer {ha_token}"}
+    timeout = aiohttp.ClientTimeout(total=10)
 
     try:
-        req = urllib.request.Request(
-            f"{ha_url}/api/states",
-            headers={"Authorization": f"Bearer {ha_token}"},
-        )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read().decode())
-    except Exception as e:
+        async with (
+            aiohttp.ClientSession(headers=headers, timeout=timeout) as session,
+            session.get(f"{ha_url}/api/states") as resp,
+        ):
+            if resp.status != 200:
+                log.warning("automation_gap: states API returned %d", resp.status)
+                return []
+            data: list[dict[str, Any]] = await resp.json()
+            return data
+    except aiohttp.ClientError as e:
         log.warning("automation_gap: could not fetch states: %s", e)
         return []
 
@@ -266,7 +284,7 @@ def _match_automation(parsed_sug, automations):
     return best, best_score
 
 
-def _generate_yaml(parsed_sug):
+def _generate_yaml(parsed_sug: dict[str, Any]) -> str:
     """Generate ready-to-use HA automation YAML for a missing suggestion."""
     intent = parsed_sug["intent"]
     entities = parsed_sug["entities"]
@@ -402,7 +420,7 @@ def _generate_yaml(parsed_sug):
         )
 
 
-def _improvement_hint(auto, auto_score):
+def _improvement_hint(auto: dict[str, Any], auto_score: dict[str, Any] | None) -> str:
     """Generate a human-readable hint for why an automation is being overridden."""
     override_rate = auto_score.get("override_rate", 0) if auto_score else 0
     hint_parts = [f"Override rate {override_rate}% — "]
@@ -425,7 +443,12 @@ def _improvement_hint(auto, auto_score):
     return "".join(hint_parts)
 
 
-async def analyse(ha_url, ha_token, suggestions, auto_scores=None):
+async def analyse(
+    ha_url: str,
+    ha_token: str,
+    suggestions: list[Any],
+    auto_scores: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Run automation gap analysis.
 
     Args:
@@ -439,18 +462,9 @@ async def analyse(ha_url, ha_token, suggestions, auto_scores=None):
     """
     auto_scores = auto_scores or []
 
-    try:
-        automations = _fetch_automations(ha_url, ha_token)
-    except Exception as e:
-        log.warning("automation_gap: failed to fetch automations: %s", e)
-        automations = []
-
-    try:
-        all_states = _fetch_all_states(ha_url, ha_token)
-        known_entity_ids = [s["entity_id"] for s in all_states]
-    except Exception as e:
-        log.warning("automation_gap: failed to fetch entity IDs: %s", e)
-        known_entity_ids = []
+    automations = await _fetch_automations(ha_url, ha_token)
+    all_states = await _fetch_all_states(ha_url, ha_token)
+    known_entity_ids = [s["entity_id"] for s in all_states]
 
     score_by_id = {s["entity_id"]: s for s in auto_scores}
     gaps = []
@@ -529,7 +543,7 @@ async def analyse(ha_url, ha_token, suggestions, auto_scores=None):
     }
 
 
-def save(result):
+def save(result: dict[str, Any]) -> None:
     """Save gap analysis to disk."""
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(GAP_PATH, "w") as f:
@@ -541,12 +555,13 @@ def save(result):
     )
 
 
-def load():
+def load() -> dict[str, Any]:
     """Load gap analysis from disk."""
     if not os.path.exists(GAP_PATH):
         return {}
     try:
         with open(GAP_PATH) as f:
-            return json.load(f)
-    except Exception:
+            data: dict[str, Any] = json.load(f)
+            return data
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
         return {}

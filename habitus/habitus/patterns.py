@@ -62,10 +62,20 @@ def discover_patterns(features: pd.DataFrame) -> dict[str, Any]:
         night_power = 50.0
 
     wakeup = next(
-        (h for h in range(5, 12) if hourly.loc[h, "mean_power"] > night_power * 1.5), None
+        (
+            h
+            for h in range(5, 12)
+            if h in hourly.index and hourly.loc[h, "mean_power"] > night_power * 1.5
+        ),
+        None,
     )
     sleep_h = next(
-        (h for h in range(23, 18, -1) if hourly.loc[h, "mean_power"] > night_power * 1.3), None
+        (
+            h
+            for h in range(23, 18, -1)
+            if h in hourly.index and hourly.loc[h, "mean_power"] > night_power * 1.3
+        ),
+        None,
     )
     peak_hour = int(hourly["mean_power"].idxmax())
     peak_power = round(float(hourly["mean_power"].max()), 1)
@@ -167,30 +177,22 @@ def discover_patterns(features: pd.DataFrame) -> dict[str, Any]:
     return patterns
 
 
-def generate_suggestions(
-    patterns: dict[str, Any], features: pd.DataFrame, stat_ids: list[str]
-) -> list[dict[str, Any]]:
-    suggestions = []
-    routine = patterns.get("daily_routine", {})
+def _routine_suggestions(routine: dict[str, Any], night_w: float) -> list[dict[str, Any]]:
+    """Generate routine-based automation suggestions."""
+    items: list[dict[str, Any]] = []
     wakeup = routine.get("estimated_wakeup_hour")
     sleep_h = routine.get("estimated_sleep_hour")
-    peak_h = routine.get("peak_usage_hour", 18)
-    peak_w = routine.get("peak_usage_watts", 500)
-    night_w = routine.get("night_baseline_watts", 100)
 
-    has_bilge = _has(stat_ids, "bilge")
-    has_battery = _has(stat_ids, "battery", "soc")
-    has_shore = _has(stat_ids, "shore", "mains", "grid")
-    has_solar = _has(stat_ids, "solar", "pv", "mppt", "epever", "scm")
-    has_inverter = _has(stat_ids, "inverter", "mastervolt", "load")
-
-    # ── ROUTINE ───────────────────────────────────────────────────────────────
     if wakeup:
-        suggestions.append(
+        items.append(
             {
                 "id": "morning_routine",
                 "title": f"Morning Routine at {wakeup:02d}:00",
-                "description": f"Power consistently rises above {int(night_w*1.5)}W around {wakeup:02d}:00 on weekdays — Habitus detected a recurring morning activity pattern.",
+                "description": (
+                    f"Power consistently rises above {int(night_w * 1.5)}W around "
+                    f"{wakeup:02d}:00 on weekdays — Habitus detected a recurring morning "
+                    "activity pattern."
+                ),
                 "confidence": 85,
                 "category": "routine",
                 "applicable": True,
@@ -211,11 +213,14 @@ def generate_suggestions(
         )
 
     if sleep_h:
-        suggestions.append(
+        items.append(
             {
                 "id": "night_mode",
                 "title": f"Night Mode at {sleep_h:02d}:00",
-                "description": f"Power drops to near-baseline after {sleep_h:02d}:00 most nights. Suggest triggering night mode / reducing loads.",
+                "description": (
+                    f"Power drops to near-baseline after {sleep_h:02d}:00 most nights. "
+                    "Suggest triggering night mode / reducing loads."
+                ),
                 "confidence": 80,
                 "category": "routine",
                 "applicable": True,
@@ -232,11 +237,14 @@ def generate_suggestions(
             }
         )
 
-    suggestions.append(
+    items.append(
         {
             "id": "weekend_mode",
             "title": "Weekend Mode",
-            "description": "Weekend power profile differs significantly from weekdays — suggest separate scene/mode for Saturday/Sunday.",
+            "description": (
+                "Weekend power profile differs significantly from weekdays — suggest "
+                "separate scene/mode for Saturday/Sunday."
+            ),
             "confidence": 70,
             "category": "routine",
             "applicable": True,
@@ -254,13 +262,23 @@ def generate_suggestions(
         entity_id: scene.weekend  # replace with your scene""",
         }
     )
+    return items
 
-    # ── ENERGY ────────────────────────────────────────────────────────────────
-    suggestions.append(
+
+def _energy_suggestions(
+    peak_h: int, peak_w: float, night_w: float, *, has_solar: bool, has_inverter: bool
+) -> list[dict[str, Any]]:
+    """Generate energy-related automation suggestions."""
+    items: list[dict[str, Any]] = []
+
+    items.append(
         {
             "id": "peak_power_alert",
-            "title": f"High Power Alert (>{int(peak_w*1.3)}W)",
-            "description": f"Peak normal usage is {int(peak_w)}W at {peak_h:02d}:00. This fires when load exceeds 130% of that for 10+ minutes.",
+            "title": f"High Power Alert (>{int(peak_w * 1.3)}W)",
+            "description": (
+                f"Peak normal usage is {int(peak_w)}W at {peak_h:02d}:00. "
+                f"This fires when load exceeds 130% of that for 10+ minutes."
+            ),
             "confidence": 90,
             "category": "energy",
             "applicable": has_inverter,
@@ -269,22 +287,26 @@ def generate_suggestions(
   trigger:
     - platform: numeric_state
       entity_id: sensor.mastervolt_total_load
-      above: {int(peak_w*1.3)}
+      above: {int(peak_w * 1.3)}
       for:
         minutes: 10
   action:
     - service: {NOTIFY}
       data:
-        title: "⚡ High Power Usage"
-        message: "Load has exceeded {int(peak_w*1.3)}W for 10+ minutes. Current: {{{{ states('sensor.mastervolt_total_load') }}}}W" """,
+        title: "\u26a1 High Power Usage"
+        message: "Load has exceeded {int(peak_w * 1.3)}W for 10+ minutes. Current: {{{{{{ states('sensor.mastervolt_total_load') }}}}}}W" """,
         }
     )
 
-    suggestions.append(
+    items.append(
         {
             "id": "overnight_standby",
-            "title": f"Overnight Standby Anomaly (>{int(night_w*1.4)}W)",
-            "description": f"Overnight baseline is {int(night_w)}W. Fires between 01:00–05:00 if consumption rises above {int(night_w*1.4)}W — something unexpected is running.",
+            "title": f"Overnight Standby Anomaly (>{int(night_w * 1.4)}W)",
+            "description": (
+                f"Overnight baseline is {int(night_w)}W. Fires between 01:00\u201305:00 if "
+                f"consumption rises above {int(night_w * 1.4)}W \u2014 something unexpected "
+                "is running."
+            ),
             "confidence": 85,
             "category": "energy",
             "applicable": True,
@@ -293,7 +315,7 @@ def generate_suggestions(
   trigger:
     - platform: numeric_state
       entity_id: sensor.mastervolt_total_load
-      above: {int(night_w*1.4)}
+      above: {int(night_w * 1.4)}
   condition:
     - condition: time
       after: "01:00:00"
@@ -301,17 +323,20 @@ def generate_suggestions(
   action:
     - service: {NOTIFY}
       data:
-        title: "🌙 Unusual Overnight Power"
-        message: "Power is {{{{ states('sensor.mastervolt_total_load') }}}}W at night — something may be left on." """,
+        title: "\U0001f319 Unusual Overnight Power"
+        message: "Power is {{{{{{ states('sensor.mastervolt_total_load') }}}}}}W at night \u2014 something may be left on." """,
         }
     )
 
     if has_solar and has_inverter:
-        suggestions.append(
+        items.append(
             {
                 "id": "solar_export",
-                "title": "Solar Surplus — Shift Loads",
-                "description": "When solar production significantly exceeds current load, shift deferrable loads (water heating, charging) to maximise self-consumption.",
+                "title": "Solar Surplus \u2014 Shift Loads",
+                "description": (
+                    "When solar production significantly exceeds current load, shift "
+                    "deferrable loads (water heating, charging) to maximise self-consumption."
+                ),
                 "confidence": 78,
                 "category": "energy",
                 "applicable": True,
@@ -327,130 +352,155 @@ def generate_suggestions(
   action:
     - service: notify.notify
       data:
-        title: "☀️ Solar Surplus"
-        message: "Solar is generating more than you're using — good time to run high-load appliances." """,
+        title: "\u2600\ufe0f Solar Surplus"
+        message: "Solar is generating more than you're using \u2014 good time to run high-load appliances." """,
             }
         )
+    return items
 
-    # ── BOAT / MARINE ─────────────────────────────────────────────────────────
+
+def _boat_suggestions(
+    peak_w: float,
+    *,
+    has_bilge: bool,
+    has_battery: bool,
+    has_shore: bool,
+    has_solar: bool,
+    has_inverter: bool,
+) -> list[dict[str, Any]]:
+    """Generate boat/marine-specific automation suggestions."""
+    items: list[dict[str, Any]] = []
+
     if has_battery:
-        suggestions.append(
+        items.append(
             {
                 "id": "battery_protection",
                 "title": "Battery SOC Protection Alert",
-                "description": "Detected battery monitoring entities. Alert when state of charge drops to a critical level to prevent deep discharge.",
+                "description": (
+                    "Detected battery monitoring entities. Alert when state of charge drops "
+                    "to a critical level to prevent deep discharge."
+                ),
                 "confidence": 95,
                 "category": "boat",
                 "applicable": True,
-                "yaml": """automation:
-  alias: "Habitus — Battery low alert"
-  trigger:
-    - platform: numeric_state
-      entity_id: sensor.house_battery_energy_watts
-      below: -500  # discharging at >500W and battery low
-  condition:
-    - condition: numeric_state
-      entity_id: sensor.house_battery_soc  # adjust entity
-      below: 20
-  action:
-    - service: """
-                + NOTIFY
-                + """
-      data:
-        title: "🔋 Battery Low"
-        message: "House battery SOC is below 20%. Connect shore power or reduce loads." """,
+                "yaml": "automation:\n"
+                '  alias: "Habitus \u2014 Battery low alert"\n'
+                "  trigger:\n"
+                "    - platform: numeric_state\n"
+                "      entity_id: sensor.house_battery_energy_watts\n"
+                "      below: -500  # discharging at >500W and battery low\n"
+                "  condition:\n"
+                "    - condition: numeric_state\n"
+                "      entity_id: sensor.house_battery_soc  # adjust entity\n"
+                "      below: 20\n"
+                "  action:\n"
+                f"    - service: {NOTIFY}\n"
+                "      data:\n"
+                '        title: "\U0001f50b Battery Low"\n'
+                '        message: "House battery SOC is below 20%. '
+                'Connect shore power or reduce loads."',
             }
         )
 
     if has_bilge:
-        suggestions.append(
+        items.append(
             {
                 "id": "bilge_anomaly",
                 "title": "Bilge Pump Anomaly Alert",
-                "description": "Bilge sensors detected. Alert if the bilge pump runs unexpectedly or bilge temperature spikes, which can indicate a leak or equipment issue.",
+                "description": (
+                    "Bilge sensors detected. Alert if the bilge pump runs unexpectedly or "
+                    "bilge temperature spikes, which can indicate a leak or equipment issue."
+                ),
                 "confidence": 95,
                 "category": "boat",
                 "applicable": True,
-                "yaml": """automation:
-  alias: "Habitus — Bilge anomaly"
-  trigger:
-    - platform: state
-      entity_id: binary_sensor.bilge_pump_running  # adjust entity
-      to: "on"
-      for:
-        minutes: 5
-  action:
-    - service: """
-                + NOTIFY
-                + """
-      data:
-        title: "⚠️ Bilge Pump Running"
-        message: "Bilge pump has been running for 5+ minutes. Check for water ingress." """,
+                "yaml": "automation:\n"
+                '  alias: "Habitus \u2014 Bilge anomaly"\n'
+                "  trigger:\n"
+                "    - platform: state\n"
+                "      entity_id: binary_sensor.bilge_pump_running  # adjust entity\n"
+                '      to: "on"\n'
+                "      for:\n"
+                "        minutes: 5\n"
+                "  action:\n"
+                f"    - service: {NOTIFY}\n"
+                "      data:\n"
+                '        title: "\u26a0\ufe0f Bilge Pump Running"\n'
+                '        message: "Bilge pump has been running for 5+ minutes. '
+                'Check for water ingress."',
             }
         )
 
     if has_shore:
-        suggestions.append(
+        items.append(
             {
                 "id": "shore_power_loss",
                 "title": "Shore Power Loss Alert",
-                "description": "Shore power entities detected. Alert immediately when shore power is lost so you can switch to battery/generator before discharge.",
+                "description": (
+                    "Shore power entities detected. Alert immediately when shore power is "
+                    "lost so you can switch to battery/generator before discharge."
+                ),
                 "confidence": 92,
                 "category": "boat",
                 "applicable": True,
-                "yaml": """automation:
-  alias: "Habitus — Shore power lost"
-  trigger:
-    - platform: numeric_state
-      entity_id: sensor.shore_power_smart_meter_electric_consumption_w
-      below: 10
-      for:
-        minutes: 2
-  action:
-    - service: """
-                + NOTIFY
-                + """
-      data:
-        title: "🔌 Shore Power Lost"
-        message: "Shore power appears to have been disconnected. Running on battery." """,
+                "yaml": "automation:\n"
+                '  alias: "Habitus \u2014 Shore power lost"\n'
+                "  trigger:\n"
+                "    - platform: numeric_state\n"
+                "      entity_id: sensor.shore_power_smart_meter_electric_consumption_w\n"
+                "      below: 10\n"
+                "      for:\n"
+                "        minutes: 2\n"
+                "  action:\n"
+                f"    - service: {NOTIFY}\n"
+                "      data:\n"
+                '        title: "\U0001f50c Shore Power Lost"\n'
+                '        message: "Shore power appears to have been disconnected. '
+                'Running on battery."',
             }
         )
 
     if has_inverter and has_solar:
-        suggestions.append(
+        items.append(
             {
                 "id": "inverter_overload",
                 "title": "Inverter Overload Predictor",
-                "description": "Alert when total load is approaching inverter capacity limits, giving time to shed loads before an overload trip.",
+                "description": (
+                    "Alert when total load is approaching inverter capacity limits, giving "
+                    "time to shed loads before an overload trip."
+                ),
                 "confidence": 82,
                 "category": "boat",
                 "applicable": True,
                 "yaml": f"""automation:
-  alias: "Habitus — Inverter approaching overload"
+  alias: "Habitus \u2014 Inverter approaching overload"
   trigger:
     - platform: numeric_state
       entity_id: sensor.mastervolt_total_load
-      above: {int(peak_w*1.5)}
+      above: {int(peak_w * 1.5)}
       for:
         minutes: 3
   action:
     - service: {NOTIFY}
       data:
-        title: "⚡ High Load Warning"
-        message: "Load is {{{{ states('sensor.mastervolt_total_load') }}}}W — approaching inverter limits. Consider shedding loads." """,
+        title: "\u26a1 High Load Warning"
+        message: "Load is {{{{{{ states('sensor.mastervolt_total_load') }}}}}}W \u2014 approaching inverter limits. Consider shedding loads." """,
             }
         )
 
-    suggestions.append(
+    items.append(
         {
             "id": "harbor_mode",
             "title": "Harbor Mode (Away Profile)",
-            "description": "Automatically reduce non-essential loads when no presence is detected for extended periods — keeps standby power minimal while away.",
+            "description": (
+                "Automatically reduce non-essential loads when no presence is detected "
+                "for extended periods \u2014 keeps standby power minimal while away."
+            ),
             "confidence": 72,
             "category": "boat",
             "applicable": True,
             "yaml": """automation:
-  alias: "Habitus — Harbor mode"
+  alias: "Habitus \u2014 Harbor mode"
   description: "Activates low-power profile when away for >2h"
   trigger:
     - platform: state
@@ -464,18 +514,26 @@ def generate_suggestions(
         entity_id: scene.harbor_mode  # create this scene""",
         }
     )
+    return items
 
-    # ── ANOMALY ───────────────────────────────────────────────────────────────
-    suggestions.append(
+
+def _anomaly_suggestions() -> list[dict[str, Any]]:
+    """Generate anomaly and monitoring automation suggestions."""
+    items: list[dict[str, Any]] = []
+
+    items.append(
         {
             "id": "anomaly_alert",
             "title": f"Habitus Anomaly Alert (Score >{THRESHOLD})",
-            "description": f"Send a notification when Habitus detects unusual behaviour scoring above {THRESHOLD}/100 for 5+ minutes.",
+            "description": (
+                f"Send a notification when Habitus detects unusual behaviour scoring "
+                f"above {THRESHOLD}/100 for 5+ minutes."
+            ),
             "confidence": 95,
             "category": "anomaly",
             "applicable": True,
             "yaml": f"""automation:
-  alias: "Habitus — Anomaly alert"
+  alias: "Habitus \u2014 Anomaly alert"
   trigger:
     - platform: state
       entity_id: binary_sensor.habitus_anomaly_detected
@@ -485,83 +543,95 @@ def generate_suggestions(
   action:
     - service: {NOTIFY}
       data:
-        title: "🧠 Habitus — Unusual Activity"
+        title: "\U0001f9e0 Habitus \u2014 Unusual Activity"
         message: >
           Habitus detected unusual home behaviour.
-          Score: {{{{ states('sensor.habitus_anomaly_score') }}}}/100.
-          Trained on {{{{ states('sensor.habitus_training_days') }}}} days of history.""",
+          Score: {{{{{{ states('sensor.habitus_anomaly_score') }}}}}}/100.
+          Trained on {{{{{{ states('sensor.habitus_training_days') }}}}}} days of history.""",
         }
     )
 
-    suggestions.append(
+    items.append(
         {
             "id": "sensor_watchdog",
             "title": "Sensor Watchdog",
-            "description": "Alert when a key sensor goes unavailable for more than 1 hour — catches connectivity issues, battery failures, or hardware faults early.",
+            "description": (
+                "Alert when a key sensor goes unavailable for more than 1 hour \u2014 catches "
+                "connectivity issues, battery failures, or hardware faults early."
+            ),
             "confidence": 80,
             "category": "anomaly",
             "applicable": True,
-            "yaml": """automation:
-  alias: "Habitus — Sensor unavailable watchdog"
-  trigger:
-    - platform: state
-      entity_id:
-        - sensor.habitus_anomaly_score  # add your critical sensors
-      to: "unavailable"
-      for:
-        hours: 1
-  action:
-    - service: """
-            + NOTIFY
-            + """
-      data:
-        title: "📡 Sensor Offline"
-        message: "{{ trigger.entity_id }} has been unavailable for over 1 hour." """,
+            "yaml": "automation:\n"
+            '  alias: "Habitus \u2014 Sensor unavailable watchdog"\n'
+            "  trigger:\n"
+            "    - platform: state\n"
+            "      entity_id:\n"
+            "        - sensor.habitus_anomaly_score  # add your critical sensors\n"
+            '      to: "unavailable"\n'
+            "      for:\n"
+            "        hours: 1\n"
+            "  action:\n"
+            f"    - service: {NOTIFY}\n"
+            "      data:\n"
+            '        title: "\U0001f4e1 Sensor Offline"\n'
+            '        message: "{{ trigger.entity_id }} has been unavailable '
+            'for over 1 hour."',
         }
     )
 
-    suggestions.append(
+    items.append(
         {
             "id": "daily_digest",
             "title": "Daily Energy Digest",
-            "description": "Receive a morning summary of yesterday's energy usage, anomalies detected, and today's solar forecast.",
+            "description": (
+                "Receive a morning summary of yesterday's energy usage, anomalies detected, "
+                "and today's solar forecast."
+            ),
             "confidence": 88,
             "category": "anomaly",
             "applicable": True,
             "yaml": f"""automation:
-  alias: "Habitus — Daily energy digest"
+  alias: "Habitus \u2014 Daily energy digest"
   trigger:
     - platform: time
       at: "08:00:00"
   action:
     - service: {NOTIFY}
       data:
-        title: "📊 Daily Energy Digest"
+        title: "\U0001f4ca Daily Energy Digest"
         message: >
           Good morning! Habitus report:
-          Anomaly score: {{{{ states('sensor.habitus_anomaly_score') }}}}/100
-          Tracking {{{{ states('sensor.habitus_entity_count') }}}} sensors
-          Model trained on {{{{ states('sensor.habitus_training_days') }}}} days of history.""",
+          Anomaly score: {{{{{{ states('sensor.habitus_anomaly_score') }}}}}}/100
+          Tracking {{{{{{ states('sensor.habitus_entity_count') }}}}}} sensors
+          Model trained on {{{{{{ states('sensor.habitus_training_days') }}}}}} days of history.""",
         }
     )
+    return items
 
-    # ── DATA-DRIVEN PATTERNS (TASK-001) ───────────────────────────────────────
+
+def _pattern_driven_suggestions(
+    patterns: dict[str, Any], *, has_bilge: bool, has_shore: bool, has_battery: bool
+) -> list[dict[str, Any]]:
+    """Generate data-driven suggestions from discovered patterns."""
+    items: list[dict[str, Any]] = []
+
     morning_p = patterns.get("morning_lights_pattern", {})
     morning_ratio = morning_p.get("lights_on_ratio", 0.0)
     morning_conf = morning_p.get("confidence", int(morning_ratio * 100))
-    suggestions.append(
+    items.append(
         {
             "id": "morning_lights",
-            "title": "Morning Lights Routine (06:30–07:15 weekdays)",
+            "title": "Morning Lights Routine (06:30\u201307:15 weekdays)",
             "description": (
                 f"Lights active in {morning_ratio:.0%} of observed weekday mornings "
-                f"(06:00–08:00 window). Habitus suggests automating this routine."
+                f"(06:00\u201308:00 window). Habitus suggests automating this routine."
             ),
             "confidence": morning_conf,
             "category": "routine",
             "applicable": morning_ratio > 0.3,
             "yaml": f"""automation:
-  alias: "Habitus — Morning lights"
+  alias: "Habitus \u2014 Morning lights"
   description: "Observed in {morning_ratio:.0%} of weekday mornings"
   trigger:
     - platform: time
@@ -580,10 +650,10 @@ def generate_suggestions(
     tariff_ratio = tariff_p.get("high_power_ratio", 0.0)
     tariff_mean = tariff_p.get("mean_power_w", 0.0)
     tariff_conf = tariff_p.get("confidence", int(tariff_ratio * 100))
-    suggestions.append(
+    items.append(
         {
             "id": "peak_tariff_alert",
-            "title": "Peak Tariff High Usage Alert (07:00–08:30 weekdays)",
+            "title": "Peak Tariff High Usage Alert (07:00\u201308:30 weekdays)",
             "description": (
                 f"Power exceeded 800W during peak tariff hours in {tariff_ratio:.0%} of weekday "
                 f"mornings. Mean peak load: {tariff_mean:.0f}W. Consider shifting loads earlier."
@@ -592,7 +662,7 @@ def generate_suggestions(
             "category": "energy",
             "applicable": tariff_ratio > 0.2,
             "yaml": f"""automation:
-  alias: "Habitus — Peak tariff alert"
+  alias: "Habitus \u2014 Peak tariff alert"
   trigger:
     - platform: numeric_state
       entity_id: sensor.mastervolt_total_load  # adjust entity
@@ -607,7 +677,7 @@ def generate_suggestions(
       data:
         title: "\u26a1 Peak Tariff \u2014 High Usage"
         message: >
-          Power is {{{{ states('sensor.mastervolt_total_load') }}}}W during peak tariff hours
+          Power is {{{{{{ states('sensor.mastervolt_total_load') }}}}}}W during peak tariff hours
           (07:00\u201308:30). Consider delaying high-load appliances.""",
         }
     )
@@ -616,14 +686,14 @@ def generate_suggestions(
     max_no_motion = vacancy_p.get("max_no_motion_hours", 0)
     extended = vacancy_p.get("extended_vacancy_detected", False)
     vacancy_conf = min(90, int(max_no_motion / 24 * 80)) if extended else 40
-    suggestions.append(
+    items.append(
         {
             "id": "vacancy_security",
             "title": "Extended Vacancy Security Alert (No Motion >24h)",
             "description": (
                 f"Longest unoccupied window detected: {max_no_motion}h. "
-                "Alert if no motion in living areas for over 24 hours — possible security or "
-                "sensor issue."
+                "Alert if no motion in living areas for over 24 hours \u2014 possible security "
+                "or sensor issue."
             ),
             "confidence": vacancy_conf,
             "category": "anomaly",
@@ -648,13 +718,14 @@ def generate_suggestions(
     bilge_mean = bilge_p.get("mean_c", 12.0)
     bilge_threshold = bilge_p.get("alert_threshold_c", round(bilge_mean + 3.0, 2))
     if has_bilge:
-        suggestions.append(
+        items.append(
             {
                 "id": "bilge_temp_anomaly",
                 "title": f"Bilge Temperature Anomaly (>{bilge_threshold:.1f}\u00b0C)",
                 "description": (
-                    f"Bilge temp baseline: {bilge_mean:.1f}\u00b0C. Alert when bilge rises 3\u00b0C "
-                    "above baseline — may indicate engine heat, poor ventilation, or fire risk."
+                    f"Bilge temp baseline: {bilge_mean:.1f}\u00b0C. Alert when bilge rises "
+                    "3\u00b0C above baseline \u2014 may indicate engine heat, poor ventilation, "
+                    "or fire risk."
                 ),
                 "confidence": 92,
                 "category": "boat",
@@ -676,47 +747,53 @@ def generate_suggestions(
         )
 
     if has_shore and has_battery:
-        suggestions.append(
+        items.append(
             {
                 "id": "shore_power_battery",
                 "title": "Shore Power Loss with Low Battery Alert",
                 "description": (
-                    "Shore power entities and battery monitoring detected. Fires when shore power "
-                    "drops near zero while battery SOC is below 40% — critical combined alert."
+                    "Shore power entities and battery monitoring detected. Fires when shore "
+                    "power drops near zero while battery SOC is below 40% \u2014 critical "
+                    "combined alert."
                 ),
                 "confidence": 95,
                 "category": "boat",
                 "applicable": True,
-                "yaml": """automation:
-  alias: "Habitus \u2014 Shore power lost with low battery"
-  trigger:
-    - platform: numeric_state
-      entity_id: sensor.shore_power_smart_meter_electric_consumption_w  # adjust entity
-      below: 10
-      for:
-        minutes: 2
-  condition:
-    - condition: numeric_state
-      entity_id: sensor.house_battery_soc  # adjust entity
-      below: 40
-  action:
-    - service: """
-                + NOTIFY
-                + """
-      data:
-        title: "\U0001f50c\U0001f50b Shore Power Lost \u2014 Battery Low"
-        message: >
-          Shore power disconnected and battery SOC is below 40%.
-          Connect shore power or start generator immediately.""",
+                "yaml": "automation:\n"
+                '  alias: "Habitus \u2014 Shore power lost with low battery"\n'
+                "  trigger:\n"
+                "    - platform: numeric_state\n"
+                "      entity_id: sensor.shore_power_smart_meter_electric_consumption_w"
+                "  # adjust entity\n"
+                "      below: 10\n"
+                "      for:\n"
+                "        minutes: 2\n"
+                "  condition:\n"
+                "    - condition: numeric_state\n"
+                "      entity_id: sensor.house_battery_soc  # adjust entity\n"
+                "      below: 40\n"
+                "  action:\n"
+                f"    - service: {NOTIFY}\n"
+                "      data:\n"
+                '        title: "\U0001f50c\U0001f50b Shore Power Lost '
+                '\u2014 Battery Low"\n'
+                "        message: >\n"
+                "          Shore power disconnected and battery SOC is below 40%.\n"
+                "          Connect shore power or start generator immediately.",
             }
         )
+    return items
 
-    # ── LOVELACE ──────────────────────────────────────────────────────────────
-    suggestions.append(
+
+def _lovelace_suggestions() -> list[dict[str, Any]]:
+    """Generate Lovelace card YAML suggestion."""
+    return [
         {
             "id": "lovelace_card",
             "title": "Lovelace Insights Card",
-            "description": "Ready-to-paste Lovelace YAML for a Habitus insights card on any dashboard.",
+            "description": (
+                "Ready-to-paste Lovelace YAML for a Habitus insights card on any dashboard."
+            ),
             "confidence": 100,
             "category": "lovelace",
             "applicable": True,
@@ -747,10 +824,66 @@ cards:
         entity: sensor.habitus_entity_count
         name: Sensors""",
         }
-    )
+    ]
 
+
+def generate_suggestions(
+    patterns: dict[str, Any], features: pd.DataFrame, stat_ids: list[str]
+) -> list[dict[str, Any]]:
+    """Generate automation suggestions based on discovered patterns and entity inventory.
+
+    Delegates to category-specific helpers and collects all suggestions into
+    a single list with ``generated_at`` timestamps.
+
+    Args:
+        patterns: Pattern dict produced by :func:`discover_patterns`.
+        features: Hourly feature matrix from ``build_features``.
+        stat_ids: Entity IDs tracked by this installation.
+
+    Returns:
+        List of suggestion dicts, each with ``id``, ``title``, ``description``,
+        ``confidence``, ``category``, ``applicable``, and ``yaml`` keys.
+    """
+    routine = patterns.get("daily_routine", {})
+    peak_h = routine.get("peak_usage_hour", 18)
+    peak_w = routine.get("peak_usage_watts", 500)
+    night_w = routine.get("night_baseline_watts", 100)
+
+    has_bilge = _has(stat_ids, "bilge")
+    has_battery = _has(stat_ids, "battery", "soc")
+    has_shore = _has(stat_ids, "shore", "mains", "grid")
+    has_solar = _has(stat_ids, "solar", "pv", "mppt", "epever", "scm")
+    has_inverter = _has(stat_ids, "inverter", "mastervolt", "load")
+
+    suggestions: list[dict[str, Any]] = []
+    suggestions.extend(_routine_suggestions(routine, night_w))
+    suggestions.extend(
+        _energy_suggestions(peak_h, peak_w, night_w, has_solar=has_solar, has_inverter=has_inverter)
+    )
+    suggestions.extend(
+        _boat_suggestions(
+            peak_w,
+            has_bilge=has_bilge,
+            has_battery=has_battery,
+            has_shore=has_shore,
+            has_solar=has_solar,
+            has_inverter=has_inverter,
+        )
+    )
+    suggestions.extend(_anomaly_suggestions())
+    suggestions.extend(
+        _pattern_driven_suggestions(
+            patterns,
+            has_bilge=has_bilge,
+            has_shore=has_shore,
+            has_battery=has_battery,
+        )
+    )
+    suggestions.extend(_lovelace_suggestions())
+
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
     for s in suggestions:
-        s["generated_at"] = datetime.datetime.now(datetime.UTC).isoformat()
+        s["generated_at"] = now_iso
 
     return suggestions
 

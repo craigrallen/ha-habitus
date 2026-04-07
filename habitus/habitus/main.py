@@ -10,8 +10,8 @@ import datetime
 import json
 import logging
 import os
-import pickle
 
+import joblib
 import numpy as np
 import pandas as pd
 import requests  # type: ignore[import-untyped]
@@ -485,10 +485,8 @@ def train_model(features: pd.DataFrame, training_days: int = 0) -> tuple:
 
 def save_artifacts(model, scaler, features):
     os.makedirs(DATA_DIR, exist_ok=True)
-    with open(MODEL_PATH, "wb") as f:
-        pickle.dump(model, f)
-    with open(SCALER_PATH, "wb") as f:
-        pickle.dump(scaler, f)
+    joblib.dump(model, MODEL_PATH)
+    joblib.dump(scaler, SCALER_PATH)
     baseline = {}
     for (h, d), g in features.groupby(["hour_of_day", "day_of_week"]):
         baseline[f"{h}_{d}"] = {
@@ -1020,8 +1018,7 @@ async def run(days_history: int, mode: str = "full") -> None:
         df_new = await fetch_stats(stat_ids, fetch_from, now_iso)
         if df_new.empty or len(df_new) < 24:
             log.info("Not enough new data — scoring with existing model")
-            with open(MODEL_PATH, "rb") as f:
-                model = pickle.load(f)
+            model = joblib.load(MODEL_PATH)
             anomaly_score = seasonal.score_with_best_model(
                 np.array(
                     [
