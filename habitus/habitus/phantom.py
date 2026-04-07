@@ -234,19 +234,21 @@ async def _run_async() -> dict:
 
 
 def save(result: dict) -> None:
+    """Persist phantom load analysis results to disk."""
     try:
         from .utils import atomic_write as _atomic_write  # noqa: PLC0415
         _atomic_write(PHANTOM_PATH, result)
-    except Exception as e:
+    except OSError as e:
         log.warning("Could not save phantom data: %s", e)
 
 
 def load() -> dict[str, Any]:
+    """Load phantom load analysis results from disk."""
     try:
         with open(PHANTOM_PATH) as f:
             data: dict[str, Any] = json.load(f)
             return data
-    except Exception:
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
         return {}
 
 

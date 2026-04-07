@@ -4,9 +4,9 @@ import datetime
 import json
 import logging
 import os
-import pickle
 from typing import Any
 
+import joblib
 import pandas as pd
 
 log = logging.getLogger("habitus")
@@ -125,7 +125,7 @@ def train_seasonal_models(features: pd.DataFrame) -> list[str]:
         try:
             with open(meta_path) as _mf:
                 existing_hours = json.load(_mf).get("hours", 0)
-        except Exception:
+        except (FileNotFoundError, json.JSONDecodeError, KeyError):
             pass
 
         if len(subset) >= existing_hours:
@@ -135,10 +135,8 @@ def train_seasonal_models(features: pd.DataFrame) -> list[str]:
             Xs = scaler.fit_transform(X)
             model = IsolationForest(contamination=0.05, random_state=42, n_jobs=-1)
             model.fit(Xs)
-            with open(mpath, "wb") as f:
-                pickle.dump(model, f)
-            with open(spath, "wb") as f:
-                pickle.dump(scaler, f)
+            joblib.dump(model, mpath)
+            joblib.dump(scaler, spath)
             with open(meta_path, "w") as _mf:
                 json.dump({"hours": len(subset), "days": len(subset) // 24}, _mf, default=str)
             bundle_models[season] = model
@@ -150,11 +148,9 @@ def train_seasonal_models(features: pd.DataFrame) -> list[str]:
                 f"({existing_hours}h > {len(subset)}h new)"
             )
             try:
-                with open(mpath, "rb") as f:
-                    bundle_models[season] = pickle.load(f)
-                with open(spath, "rb") as f:
-                    bundle_scalers[season] = pickle.load(f)
-            except Exception:
+                bundle_models[season] = joblib.load(mpath)
+                bundle_scalers[season] = joblib.load(spath)
+            except (FileNotFoundError, ValueError, EOFError):
                 pass
         saved.append(season)
 
@@ -176,8 +172,7 @@ def _save_seasonal_bundle(models: dict[str, Any], scalers: dict[str, Any]) -> No
     """
     bundle: dict[str, Any] = {"models": models, "scalers": scalers}
     path = os.path.join(DATA_DIR, "seasonal_models.pkl")
-    with open(path, "wb") as f:
-        pickle.dump(bundle, f)
+    joblib.dump(bundle, path)
     log.info(f"Seasonal bundle saved ({len(models)} seasons) → {path}")
 
 
@@ -191,8 +186,7 @@ def load_seasonal_bundle() -> tuple[dict[str, Any], dict[str, Any]]:
     path = os.path.join(DATA_DIR, "seasonal_models.pkl")
     if not os.path.exists(path):
         return {}, {}
-    with open(path, "rb") as f:
-        bundle: dict[str, Any] = pickle.load(f)
+    bundle: dict[str, Any] = joblib.load(path)
     return bundle.get("models", {}), bundle.get("scalers", {})
 
 
@@ -217,16 +211,12 @@ def score_with_best_model(X_raw: Any) -> tuple[int, str]:
     fallback_m = os.path.join(DATA_DIR, "model.pkl")
     try:
         if os.path.exists(mpath):
-            with open(mpath, "rb") as f:
-                model = pickle.load(f)
-            with open(spath, "rb") as f:
-                scaler = pickle.load(f)
+            model = joblib.load(mpath)
+            scaler = joblib.load(spath)
             used = season
         else:
-            with open(fallback_m, "rb") as f:
-                model = pickle.load(f)
-            with open(fallback_s, "rb") as f:
-                scaler = pickle.load(f)
+            model = joblib.load(fallback_m)
+            scaler = joblib.load(fallback_s)
             used = "main"
         Xs = scaler.transform(X_raw[:, : len(scaler.mean_)])
         raw = model.score_samples(Xs)[0]
@@ -242,7 +232,7 @@ def score_with_best_model(X_raw: Any) -> tuple[int, str]:
         curved = normalized ** (1.5 / sensitivity)   # softer curve at low sensitivity
         score = int(max(0, min(100, curved * 100)))
         return score, used
-    except Exception as e:
+    except (FileNotFoundError, ValueError, EOFError, OSError) as e:
         log.error(f"Scoring error: {e}")
         return 0, "error"
 

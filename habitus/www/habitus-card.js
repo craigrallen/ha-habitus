@@ -4,7 +4,28 @@
  * Self-contained, no external dependencies
  */
 
-const HABITUS_INGRESS = '/api/hassio_ingress/57582523_habitus';
+// Detect ingress path dynamically from the card's own script URL or fall back to discovery
+const HABITUS_INGRESS = (() => {
+  // Try to find our own script tag to extract the ingress path
+  const scripts = document.querySelectorAll('script[src*="habitus-card"]');
+  for (const s of scripts) {
+    const m = s.src.match(/\/api\/hassio_ingress\/[^/]+/);
+    if (m) return m[0];
+  }
+  // Fall back: search all link/script tags for any hassio_ingress path containing "habitus"
+  for (const el of document.querySelectorAll('script[src*="hassio_ingress"], link[href*="hassio_ingress"]')) {
+    const url = el.src || el.href || '';
+    if (url.includes('habitus')) {
+      const m2 = url.match(/\/api\/hassio_ingress\/[^/]+/);
+      if (m2) return m2[0];
+    }
+  }
+  // Last resort: use the panel URL if we're inside an ingress iframe
+  if (window.location.pathname.includes('/api/hassio_ingress/')) {
+    return window.location.pathname.replace(/\/+$/, '');
+  }
+  return '/api/hassio_ingress/local_habitus';
+})();
 const HABITUS_COLORS = {
   bg: '#0f1117', card: '#1a1d27', card2: '#242736',
   accent: '#6c8ebf', green: '#4caf50', amber: '#ffb300',
