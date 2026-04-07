@@ -283,6 +283,74 @@ def api_insights():
     return jsonify(_ins.compute_insights())
 
 
+@app.route("/api/ha_automations")
+@app.route("/ingress/api/ha_automations")
+def api_ha_automations():
+    """Return list of automation entity IDs + aliases currently in HA."""
+    import requests as req  # type: ignore[import-untyped]
+
+    ha_url = os.environ.get("HA_URL", "http://supervisor/core")
+    token = os.environ.get("SUPERVISOR_TOKEN", "")
+    try:
+        r = req.get(
+            f"{ha_url}/api/states",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=8,
+        )
+        autos = []
+        for s in r.json():
+            if s["entity_id"].startswith("automation."):
+                autos.append(
+                    {
+                        "entity_id": s["entity_id"],
+                        "alias": s.get("attributes", {}).get("friendly_name", ""),
+                        "state": s.get("state", "off"),
+                    }
+                )
+        return jsonify({"automations": autos})
+    except Exception as e:
+        return jsonify({"automations": [], "error": str(e)})
+
+
+# ── Anomaly Feedback ─────────────────────────────────────────────────────────
+
+
+@app.route("/api/feedback", methods=["POST"])
+@app.route("/ingress/api/feedback", methods=["POST"])
+def api_feedback():
+    """Record user feedback on an anomaly (dismiss or confirm)."""
+    from . import feedback as _fb  # noqa: PLC0415
+
+    data = request.get_json() or {}
+    entry = _fb.record_feedback(
+        anomaly_id=data.get("anomaly_id", ""),
+        action=data.get("action", "dismissed"),
+        entity_id=data.get("entity_id", ""),
+        score=float(data.get("score", 0)),
+        details=data.get("details", ""),
+    )
+    return jsonify({"ok": True, "entry": entry})
+
+
+@app.route("/api/feedback/stats")
+@app.route("/ingress/api/feedback/stats")
+def api_feedback_stats():
+    """Return feedback statistics for model tuning."""
+    from . import feedback as _fb  # noqa: PLC0415
+
+    return jsonify(_fb.get_feedback_stats())
+
+
+@app.route("/api/feedback/reset", methods=["POST"])
+@app.route("/ingress/api/feedback/reset", methods=["POST"])
+def api_feedback_reset():
+    """Reset all anomaly feedback to defaults."""
+    feedback_path = os.path.join(DATA_DIR, "anomaly_feedback.json")
+    if os.path.exists(feedback_path):
+        os.remove(feedback_path)
+    return jsonify({"ok": True, "message": "All feedback reset"})
+
+
 # ── New Feature Endpoints ────────────────────────────────────────────────────
 
 
