@@ -207,6 +207,11 @@ def api_settings():
         if "power_entity" in data:
             settings["power_entity"] = data["power_entity"]
             os.environ["HABITUS_POWER_ENTITY"] = data["power_entity"]
+        # 3-phase power entity selectors
+        for phase_key in ("power_entity_phase1", "power_entity_phase2", "power_entity_phase3"):
+            if phase_key in data:
+                settings[phase_key] = data[phase_key]
+                os.environ[f"HABITUS_{phase_key.upper()}"] = data[phase_key]
         state["user_settings"] = settings
         try:
             with open(state_path, "w") as f:
