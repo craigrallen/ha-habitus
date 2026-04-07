@@ -4,6 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Habitus</title>
+<script>
+// Detect the ingress base path so relative fetch() calls resolve correctly.
+// HA serves add-ons at /api/hassio_ingress/<slug>/ — we need that as our base.
+(function(){
+  var base = document.createElement('base');
+  var loc  = window.location.pathname.replace(/\/+$/, '') + '/';
+  base.href = loc;
+  document.head.appendChild(base);
+})();
+</script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
@@ -445,6 +455,28 @@ pre.raw {
 .about-link:hover { border-color: var(--border2); color: var(--text); }
 .about-link .al-icon { font-size: 1.1rem; }
 .divider { height: 1px; background: var(--border); margin: 16px 0; }
+/* ── Bottom Mobile Nav ── */
+.bnav {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  padding: 6px 0 max(6px, env(safe-area-inset-bottom));
+  z-index: 100;
+}
+.bnav button {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  background: none; border: none; color: var(--text3);
+  font-size: 0.62rem; font-family: inherit; cursor: pointer;
+  padding: 4px 6px; transition: color .15s;
+}
+.bnav button .bn-icon { font-size: 1.2rem; }
+.bnav button.active { color: var(--accent); }
+.bnav button:hover { color: var(--text); }
+body { padding-bottom: 72px; }
+
 .warn-box {
   background: rgba(255,181,71,.06);
   border: 1px solid rgba(255,181,71,.2);
@@ -727,7 +759,12 @@ function gotoTab(id, btn) {
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.querySelectorAll('nav button').forEach(b=>b.classList.remove('active'));
   document.getElementById('tab-'+id).classList.add('active');
-  btn.classList.add('active');
+  if(btn) btn.classList.add('active');
+  // Sync bottom nav highlight
+  var bnMap = {overview:0,breakdown:1,automations:2,energy:3,insights:4,settings:5};
+  var bnBtns = document.querySelectorAll('.bnav button');
+  bnBtns.forEach(b=>b.classList.remove('active'));
+  if(bnMap[id]!==undefined && bnBtns[bnMap[id]]) bnBtns[bnMap[id]].classList.add('active');
 }
 
 function toast(msg, type='ts') {
@@ -1254,6 +1291,31 @@ function toggleTheme() {
 })();
 
 </script>
+  <div class="bnav" id="bnav">
+    <button class="active" onclick="bnGo('overview',this)"><span class="bn-icon">🏠</span>Home</button>
+    <button onclick="bnGo('breakdown',this)"><span class="bn-icon">🚨</span>Alerts</button>
+    <button onclick="bnGo('automations',this)"><span class="bn-icon">💡</span>Ideas</button>
+    <button onclick="bnGo('energy',this)"><span class="bn-icon">⚡</span>Energy</button>
+    <button onclick="bnGo('insights',this)"><span class="bn-icon">📊</span>Health</button>
+    <button onclick="bnGo('settings',this)"><span class="bn-icon">⚙️</span>Setup</button>
+  </div>
+  <script>
+  function bnGo(id, btn) {
+    // Switch main tab
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    document.getElementById('tab-'+id).classList.add('active');
+    // Highlight top nav
+    document.querySelectorAll('nav button').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('nav button').forEach(b=>{
+      if(b.textContent.toLowerCase().includes(id==='overview'?'overview':id==='breakdown'?'anomaly':id==='automations'?'automations':id==='energy'?'energy':id==='insights'?'insights':id==='settings'?'settings':'_'))
+        b.classList.add('active');
+    });
+    // Highlight bottom nav
+    document.querySelectorAll('.bnav button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    window.scrollTo(0,0);
+  }
+  </script>
   <div id="train-banner" class="train-banner">
     <div class="spin"></div>
     <span id="train-banner-text">Training in background…</span>
