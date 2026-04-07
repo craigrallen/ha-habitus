@@ -2505,33 +2505,40 @@ async def run(days_history: int, mode: str = "full") -> None:
 
                 log.info("Running sequence mining (PrefixSpan)...")
                 try:
+                    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
                     area_data3 = ha_areas._load_cache()
                     e2a3 = area_data3.get("entity_to_area", {})
-                    sequence_miner.mine_sequences(e2a3, days=min(days_history, 30))
+                    with ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(sequence_miner.mine_sequences, e2a3, days=min(days_history, 30))
+                        future.result(timeout=120)
+                except FuturesTimeout:
+                    log.warning("Sequence mining exceeded 120s timeout — skipping")
                 except Exception as e:
                     log.warning("Sequence mining failed: %s", e)
 
                 log.info("Running Markov chain next-action model...")
                 try:
+                    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
                     area_data4 = ha_areas._load_cache()
                     e2a4 = area_data4.get("entity_to_area", {})
-                    markov_chain.build_markov_model(e2a4, days=min(days_history, 30))
+                    with ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(markov_chain.build_markov_model, e2a4, days=min(days_history, 30))
+                        future.result(timeout=120)
+                except FuturesTimeout:
+                    log.warning("Markov chain exceeded 120s timeout — skipping")
                 except Exception as e:
                     log.warning("Markov chain failed: %s", e)
 
                 log.info("Running HMM activity state model...")
                 try:
-                    import signal
-                    def timeout_handler(signum, frame):
-                        raise TimeoutError("HMM training exceeded 60s timeout")
-                    signal.signal(signal.SIGALRM, timeout_handler)
-                    signal.alarm(60)  # 60-second timeout
-                    try:
-                        area_data5 = ha_areas._load_cache()
-                        e2a5 = area_data5.get("entity_to_area", {})
-                        activity_hmm.train_activity_model(e2a5, days=min(days_history, 30))
-                    finally:
-                        signal.alarm(0)  # Cancel alarm
+                    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+                    area_data5 = ha_areas._load_cache()
+                    e2a5 = area_data5.get("entity_to_area", {})
+                    with ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(activity_hmm.train_activity_model, e2a5, days=min(days_history, 30))
+                        future.result(timeout=60)  # 60-second hard timeout
+                except FuturesTimeout:
+                    log.warning("HMM training exceeded 60s timeout — skipping")
                 except Exception as e:
                     log.warning("HMM activity model failed: %s", e)
 
@@ -2794,30 +2801,37 @@ async def run(days_history: int, mode: str = "full") -> None:
 
             log.info("Running sequence mining (PrefixSpan)...")
             try:
+                from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
                 e2a_sm = ha_areas._load_cache().get("entity_to_area", {})
-                sequence_miner.mine_sequences(e2a_sm, days=min(days_history, 30))
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(sequence_miner.mine_sequences, e2a_sm, days=min(days_history, 30))
+                    future.result(timeout=120)
+            except FuturesTimeout:
+                log.warning("Sequence mining exceeded 120s timeout — skipping")
             except Exception as e:
                 log.warning("Sequence mining failed: %s", e)
 
             log.info("Running Markov chain next-action model...")
             try:
+                from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
                 e2a_mk = ha_areas._load_cache().get("entity_to_area", {})
-                markov_chain.build_markov_model(e2a_mk, days=min(days_history, 30))
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(markov_chain.build_markov_model, e2a_mk, days=min(days_history, 30))
+                    future.result(timeout=120)
+            except FuturesTimeout:
+                log.warning("Markov chain exceeded 120s timeout — skipping")
             except Exception as e:
                 log.warning("Markov chain failed: %s", e)
 
             log.info("Running HMM activity state model...")
             try:
-                import signal
-                def timeout_handler(signum, frame):
-                    raise TimeoutError("HMM training exceeded 60s timeout")
-                signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(60)  # 60-second timeout
-                try:
-                    e2a_hm = ha_areas._load_cache().get("entity_to_area", {})
-                    activity_hmm.train_activity_model(e2a_hm, days=min(days_history, 30))
-                finally:
-                    signal.alarm(0)  # Cancel alarm
+                from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+                e2a_hm = ha_areas._load_cache().get("entity_to_area", {})
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(activity_hmm.train_activity_model, e2a_hm, days=min(days_history, 30))
+                    future.result(timeout=60)  # 60-second hard timeout
+            except FuturesTimeout:
+                log.warning("HMM training exceeded 60s timeout — skipping")
             except Exception as e:
                 log.warning("HMM activity model failed: %s", e)
 
