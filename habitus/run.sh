@@ -72,6 +72,9 @@ fi
 # HABITUS_VERSION already exported above
 export HABITUS_MAX_POWER_KW=$(bashio::config "max_power_kw" 2>/dev/null || echo "25")
 export HABITUS_POWER_ENTITY=$(bashio::config "power_entity" 2>/dev/null || echo "")
+export HABITUS_POWER_ENTITY_PHASE1=$(bashio::config "power_entity_phase1" 2>/dev/null || echo "")
+export HABITUS_POWER_ENTITY_PHASE2=$(bashio::config "power_entity_phase2" 2>/dev/null || echo "")
+export HABITUS_POWER_ENTITY_PHASE3=$(bashio::config "power_entity_phase3" 2>/dev/null || echo "")
 export HABITUS_KWH_PRICE=$(bashio::config "kwh_price" 2>/dev/null || echo "0.30")
 export HABITUS_CURRENCY=$(bashio::config "currency" 2>/dev/null || echo "kr")
 export HABITUS_FETCH_ROW_BUDGET=$(bashio::config "fetch_row_budget" 2>/dev/null || echo "1000000")

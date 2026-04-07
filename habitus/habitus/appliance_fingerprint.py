@@ -38,26 +38,138 @@ FINGERPRINTS_PATH = os.path.join(DATA_DIR, "appliance_fingerprints.json")
 
 # Known appliance power signatures (watts) — used as hints for classification
 KNOWN_SIGNATURES: dict[str, dict[str, Any]] = {
-    "oven": {"min_w": 1800, "max_w": 3500, "min_duration_min": 10, "max_duration_min": 120, "icon": "🔥", "shape": "steady"},
-    "hob_element": {"min_w": 1000, "max_w": 2500, "min_duration_min": 3, "max_duration_min": 60, "icon": "🍳", "shape": "cycling"},
-    "kettle": {"min_w": 1500, "max_w": 2400, "min_duration_min": 1, "max_duration_min": 6, "icon": "☕", "shape": "steady"},
-    "washing_machine": {"min_w": 300, "max_w": 2200, "min_duration_min": 30, "max_duration_min": 180, "icon": "👕", "shape": "phased"},
-    "dishwasher": {"min_w": 1000, "max_w": 2000, "min_duration_min": 45, "max_duration_min": 180, "icon": "🍽️", "shape": "phased"},
-    "hair_dryer": {"min_w": 800, "max_w": 2200, "min_duration_min": 2, "max_duration_min": 20, "icon": "💇", "shape": "steady"},
-    "toaster": {"min_w": 700, "max_w": 1400, "min_duration_min": 1, "max_duration_min": 5, "icon": "🍞", "shape": "steady"},
-    "microwave": {"min_w": 700, "max_w": 1500, "min_duration_min": 0.5, "max_duration_min": 15, "icon": "📡", "shape": "steady"},
-    "water_heater": {"min_w": 1800, "max_w": 3500, "min_duration_min": 10, "max_duration_min": 120, "icon": "🚿", "shape": "cycling"},
-    "space_heater": {"min_w": 500, "max_w": 2500, "min_duration_min": 15, "max_duration_min": 480, "icon": "🌡️", "shape": "cycling"},
-    "vacuum": {"min_w": 400, "max_w": 1800, "min_duration_min": 5, "max_duration_min": 60, "icon": "🧹", "shape": "steady"},
-    "iron": {"min_w": 1000, "max_w": 2500, "min_duration_min": 5, "max_duration_min": 60, "icon": "👔", "shape": "cycling"},
+    "oven": {
+        "min_w": 1800,
+        "max_w": 3500,
+        "min_duration_min": 10,
+        "max_duration_min": 120,
+        "icon": "🔥",
+        "shape": "steady",
+    },
+    "hob_element": {
+        "min_w": 1000,
+        "max_w": 2500,
+        "min_duration_min": 3,
+        "max_duration_min": 60,
+        "icon": "🍳",
+        "shape": "cycling",
+    },
+    "kettle": {
+        "min_w": 1500,
+        "max_w": 2400,
+        "min_duration_min": 1,
+        "max_duration_min": 6,
+        "icon": "☕",
+        "shape": "steady",
+    },
+    "washing_machine": {
+        "min_w": 300,
+        "max_w": 2200,
+        "min_duration_min": 30,
+        "max_duration_min": 180,
+        "icon": "👕",
+        "shape": "phased",
+    },
+    "dishwasher": {
+        "min_w": 1000,
+        "max_w": 2000,
+        "min_duration_min": 45,
+        "max_duration_min": 180,
+        "icon": "🍽️",
+        "shape": "phased",
+    },
+    "hair_dryer": {
+        "min_w": 800,
+        "max_w": 2200,
+        "min_duration_min": 2,
+        "max_duration_min": 20,
+        "icon": "💇",
+        "shape": "steady",
+    },
+    "toaster": {
+        "min_w": 700,
+        "max_w": 1400,
+        "min_duration_min": 1,
+        "max_duration_min": 5,
+        "icon": "🍞",
+        "shape": "steady",
+    },
+    "microwave": {
+        "min_w": 700,
+        "max_w": 1500,
+        "min_duration_min": 0.5,
+        "max_duration_min": 15,
+        "icon": "📡",
+        "shape": "steady",
+    },
+    "water_heater": {
+        "min_w": 1800,
+        "max_w": 3500,
+        "min_duration_min": 10,
+        "max_duration_min": 120,
+        "icon": "🚿",
+        "shape": "cycling",
+    },
+    "space_heater": {
+        "min_w": 500,
+        "max_w": 2500,
+        "min_duration_min": 15,
+        "max_duration_min": 480,
+        "icon": "🌡️",
+        "shape": "cycling",
+    },
+    "vacuum": {
+        "min_w": 400,
+        "max_w": 1800,
+        "min_duration_min": 5,
+        "max_duration_min": 60,
+        "icon": "🧹",
+        "shape": "steady",
+    },
+    "iron": {
+        "min_w": 1000,
+        "max_w": 2500,
+        "min_duration_min": 5,
+        "max_duration_min": 60,
+        "icon": "👔",
+        "shape": "cycling",
+    },
     # Heat pump: high inrush spike → gradually decreasing as target temp approached
-    "heat_pump": {"min_w": 800, "max_w": 4000, "min_duration_min": 15, "max_duration_min": 480, "icon": "♨️", "shape": "decaying"},
+    "heat_pump": {
+        "min_w": 800,
+        "max_w": 4000,
+        "min_duration_min": 15,
+        "max_duration_min": 480,
+        "icon": "♨️",
+        "shape": "decaying",
+    },
     # Electric radiator: fixed wattage cycling (thermostat on/off/on/off)
-    "electric_radiator": {"min_w": 500, "max_w": 2000, "min_duration_min": 10, "max_duration_min": 480, "icon": "🔲", "shape": "cycling"},
+    "electric_radiator": {
+        "min_w": 500,
+        "max_w": 2000,
+        "min_duration_min": 10,
+        "max_duration_min": 480,
+        "icon": "🔲",
+        "shape": "cycling",
+    },
     # Underfloor heating: low power, very long duration
-    "underfloor_heating": {"min_w": 200, "max_w": 1500, "min_duration_min": 30, "max_duration_min": 720, "icon": "🏠", "shape": "steady"},
+    "underfloor_heating": {
+        "min_w": 200,
+        "max_w": 1500,
+        "min_duration_min": 30,
+        "max_duration_min": 720,
+        "icon": "🏠",
+        "shape": "steady",
+    },
     # Immersion heater: high power, medium duration, steady
-    "immersion_heater": {"min_w": 2000, "max_w": 3500, "min_duration_min": 20, "max_duration_min": 180, "icon": "🔥", "shape": "steady"},
+    "immersion_heater": {
+        "min_w": 2000,
+        "max_w": 3500,
+        "min_duration_min": 20,
+        "max_duration_min": 180,
+        "icon": "🔥",
+        "shape": "steady",
+    },
 }
 
 # Power shape types:
@@ -140,14 +252,16 @@ def detect_power_steps(entity_id: str, days: int = 30) -> list[dict[str, Any]]:
 
         delta = w_curr - w_prev
         if abs(delta) >= MIN_STEP_WATTS:
-            steps.append({
-                "timestamp": ts_curr,
-                "time": datetime.datetime.fromtimestamp(ts_curr, tz=datetime.UTC).isoformat(),
-                "delta_w": round(delta, 1),
-                "from_w": round(w_prev, 1),
-                "to_w": round(w_curr, 1),
-                "direction": "up" if delta > 0 else "down",
-            })
+            steps.append(
+                {
+                    "timestamp": ts_curr,
+                    "time": datetime.datetime.fromtimestamp(ts_curr, tz=datetime.UTC).isoformat(),
+                    "delta_w": round(delta, 1),
+                    "from_w": round(w_prev, 1),
+                    "to_w": round(w_curr, 1),
+                    "direction": "up" if delta > 0 else "down",
+                }
+            )
 
     return steps
 
@@ -189,16 +303,20 @@ def pair_steps_into_events(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
         if best_match:
             duration_min = (best_match["timestamp"] - up["timestamp"]) / 60
-            events.append({
-                "start": up["time"],
-                "end": best_match["time"],
-                "start_ts": up["timestamp"],
-                "end_ts": best_match["timestamp"],
-                "power_w": round(magnitude, 0),
-                "duration_min": round(duration_min, 1),
-                "hour": datetime.datetime.fromtimestamp(up["timestamp"], tz=datetime.UTC).hour,
-                "day_of_week": datetime.datetime.fromtimestamp(up["timestamp"], tz=datetime.UTC).weekday(),
-            })
+            events.append(
+                {
+                    "start": up["time"],
+                    "end": best_match["time"],
+                    "start_ts": up["timestamp"],
+                    "end_ts": best_match["timestamp"],
+                    "power_w": round(magnitude, 0),
+                    "duration_min": round(duration_min, 1),
+                    "hour": datetime.datetime.fromtimestamp(up["timestamp"], tz=datetime.UTC).hour,
+                    "day_of_week": datetime.datetime.fromtimestamp(
+                        up["timestamp"], tz=datetime.UTC
+                    ).weekday(),
+                }
+            )
 
     return events
 
@@ -257,12 +375,17 @@ def classify_event(event: dict[str, Any]) -> dict[str, Any]:
 
     matches = []
     for name, sig in KNOWN_SIGNATURES.items():
-        if sig["min_w"] <= power <= sig["max_w"] and sig["min_duration_min"] <= duration <= sig["max_duration_min"]:
+        if (
+            sig["min_w"] <= power <= sig["max_w"]
+            and sig["min_duration_min"] <= duration <= sig["max_duration_min"]
+        ):
             # Score: how central is this event within the signature range?
             power_center = (sig["min_w"] + sig["max_w"]) / 2
             dur_center = (sig["min_duration_min"] + sig["max_duration_min"]) / 2
             power_score = 1 - abs(power - power_center) / (sig["max_w"] - sig["min_w"])
-            dur_score = 1 - abs(duration - dur_center) / (sig["max_duration_min"] - sig["min_duration_min"])
+            dur_score = 1 - abs(duration - dur_center) / (
+                sig["max_duration_min"] - sig["min_duration_min"]
+            )
             # Shape bonus: if power shape matches the signature's expected shape, boost score
             shape_bonus = 0.2 if shape == sig.get("shape") else 0.0
             score = (power_score + dur_score) / 2 + shape_bonus
@@ -273,7 +396,9 @@ def classify_event(event: dict[str, Any]) -> dict[str, Any]:
         event["appliance"] = matches[0][0]
         event["confidence"] = round(matches[0][1] * 100)
         event["icon"] = matches[0][2]
-        event["alternatives"] = [{"name": m[0], "confidence": round(m[1] * 100)} for m in matches[1:3]]
+        event["alternatives"] = [
+            {"name": m[0], "confidence": round(m[1] * 100)} for m in matches[1:3]
+        ]
     else:
         event["appliance"] = "unknown"
         event["confidence"] = 0
@@ -325,7 +450,9 @@ def cluster_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
             for e in cluster_events_list:
                 if "appliance" in e:
                     appliance_votes[e["appliance"]] += 1
-            top_appliance = max(appliance_votes, key=appliance_votes.get) if appliance_votes else "unknown"
+            top_appliance = (
+                max(appliance_votes, key=appliance_votes.get) if appliance_votes else "unknown"
+            )
             icon = KNOWN_SIGNATURES.get(top_appliance, {}).get("icon", "❓")
 
             # Most active hours
@@ -334,20 +461,27 @@ def cluster_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 hour_counts[h] += 1
             peak_hours = sorted(hour_counts, key=hour_counts.get, reverse=True)[:3]
 
-            clusters.append({
-                "appliance": top_appliance,
-                "icon": icon,
-                "avg_power_w": round(float(np.mean(powers))),
-                "min_power_w": round(float(np.min(powers))),
-                "max_power_w": round(float(np.max(powers))),
-                "avg_duration_min": round(float(np.mean(durations)), 1),
-                "event_count": len(cluster_events_list),
-                "peak_hours": peak_hours,
-                "daily_avg": round(len(cluster_events_list) / 30, 1),
-                "est_monthly_kwh": round(
-                    float(np.mean(powers)) * float(np.mean(durations)) / 60 * len(cluster_events_list) / 1000, 1
-                ),
-            })
+            clusters.append(
+                {
+                    "appliance": top_appliance,
+                    "icon": icon,
+                    "avg_power_w": round(float(np.mean(powers))),
+                    "min_power_w": round(float(np.min(powers))),
+                    "max_power_w": round(float(np.max(powers))),
+                    "avg_duration_min": round(float(np.mean(durations)), 1),
+                    "event_count": len(cluster_events_list),
+                    "peak_hours": peak_hours,
+                    "daily_avg": round(len(cluster_events_list) / 30, 1),
+                    "est_monthly_kwh": round(
+                        float(np.mean(powers))
+                        * float(np.mean(durations))
+                        / 60
+                        * len(cluster_events_list)
+                        / 1000,
+                        1,
+                    ),
+                }
+            )
 
     clusters.sort(key=lambda c: -c["event_count"])
     return clusters
@@ -380,8 +514,7 @@ def run_fingerprinting(power_entities: list[str] | None = None, days: int = 30) 
         # Annotate events with power shape from raw readings
         for evt in events:
             readings_in_event = [
-                w for ts, w in raw_readings
-                if evt["start_ts"] <= ts <= evt["end_ts"]
+                w for ts, w in raw_readings if evt["start_ts"] <= ts <= evt["end_ts"]
             ]
             if len(readings_in_event) >= 3:
                 evt["power_shape"] = detect_power_shape(readings_in_event)
@@ -415,7 +548,9 @@ def run_fingerprinting(power_entities: list[str] | None = None, days: int = 30) 
         json.dump(result, f, indent=2, default=str)
     log.info(
         "Appliance fingerprinting: %d events from %d sensors, %d identified (%d%%)",
-        total_events, len(power_entities), known_events,
+        total_events,
+        len(power_entities),
+        known_events,
         result["identification_rate"],
     )
 
@@ -436,18 +571,24 @@ def _get_raw_readings(entity_id: str, days: int = 30) -> list[tuple[float, float
         )
         has_meta = cursor.fetchone() is not None
         if has_meta:
-            rows = conn.execute("""
+            rows = conn.execute(
+                """
                 SELECT s.state, s.last_changed_ts FROM states s
                 JOIN states_meta sm ON s.metadata_id = sm.metadata_id
                 WHERE sm.entity_id = ? AND s.last_changed_ts > ?
                 ORDER BY s.last_changed_ts
-            """, (entity_id, cutoff_ts)).fetchall()
+            """,
+                (entity_id, cutoff_ts),
+            ).fetchall()
         else:
-            rows = conn.execute("""
+            rows = conn.execute(
+                """
                 SELECT state, last_changed_ts FROM states
                 WHERE entity_id = ? AND last_changed_ts > ?
                 ORDER BY last_changed_ts
-            """, (entity_id, cutoff_ts)).fetchall()
+            """,
+                (entity_id, cutoff_ts),
+            ).fetchall()
         conn.close()
         result = []
         for state_val, ts in rows:

@@ -7,6 +7,7 @@ Flags automations as:
 - over_triggering: triggered >50x in last 7 days
 - healthy: triggered recently and not over-triggering
 """
+
 from __future__ import annotations
 
 import datetime
@@ -24,14 +25,15 @@ DATA_DIR = os.environ.get("DATA_DIR", "/data")
 def _get_data_dir() -> str:
     return os.environ.get("DATA_DIR", DATA_DIR)
 
+
 HEALTH_PATH = os.path.join(DATA_DIR, "automation_health.json")
 HA_AUTOMATIONS_PATH = os.path.join(DATA_DIR, "ha_automations.json")
 
 HA_URL = os.environ.get("HA_URL", "http://supervisor/core")
 HA_TOKEN = os.environ.get("SUPERVISOR_TOKEN", os.environ.get("HABITUS_HA_TOKEN", ""))
 
-DEAD_DAYS = 30          # not triggered in >30 days → dead
-STALE_DAYS = 7          # not triggered in >7 days → stale
+DEAD_DAYS = 30  # not triggered in >30 days → dead
+STALE_DAYS = 7  # not triggered in >7 days → stale
 OVER_TRIGGER_COUNT = 50  # >50 triggers in 7 days → over-triggering
 
 
@@ -44,11 +46,7 @@ def _fetch_automation_states() -> dict[str, dict[str, Any]]:
     try:
         r = requests.get(f"{HA_URL}/api/states", headers=_ha_headers(), timeout=10)
         if r.status_code == 200:
-            return {
-                s["entity_id"]: s
-                for s in r.json()
-                if s["entity_id"].startswith("automation.")
-            }
+            return {s["entity_id"]: s for s in r.json() if s["entity_id"].startswith("automation.")}
     except Exception as e:
         log.warning("Failed to fetch HA automation states: %s", e)
     return {}
@@ -61,7 +59,10 @@ def _fetch_automation_history(entity_id: str, days: int = 7) -> list[dict[str, A
         start = end - datetime.timedelta(days=days)
         start_str = start.strftime("%Y-%m-%dT%H:%M:%S+00:00")
         url = f"{HA_URL}/api/history/period/{start_str}"
-        params = {"filter_entity_id": entity_id, "end_time": end.strftime("%Y-%m-%dT%H:%M:%S+00:00")}
+        params = {
+            "filter_entity_id": entity_id,
+            "end_time": end.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+        }
         r = requests.get(url, headers=_ha_headers(), params=params, timeout=15)
         if r.status_code == 200:
             data = r.json()
@@ -76,7 +77,9 @@ def _load_ha_automations() -> list[dict[str, Any]]:
     """Load HA automations from cache file."""
     try:
         if os.path.exists(os.path.join(os.environ.get("DATA_DIR", "/data"), "ha_automations.json")):
-            with open(os.path.join(os.environ.get("DATA_DIR", "/data"), "ha_automations.json")) as f:
+            with open(
+                os.path.join(os.environ.get("DATA_DIR", "/data"), "ha_automations.json")
+            ) as f:
                 data = json.load(f)
                 if isinstance(data, list):
                     return data
@@ -134,7 +137,7 @@ def classify_automation(
     triggers = automation.get("trigger", [])
     if isinstance(triggers, dict):
         triggers = [triggers]
-    for trig in (triggers or []):
+    for trig in triggers or []:
         eid = trig.get("entity_id")
         if eid and isinstance(eid, str) and eid not in all_entity_ids:
             trigger_entities_exist = False
@@ -149,10 +152,14 @@ def classify_automation(
         recommendation = "This automation has never been triggered. Check its trigger conditions."
     elif days_since_trigger is not None and days_since_trigger > DEAD_DAYS:
         status = "dead"
-        recommendation = f"Not triggered in {days_since_trigger:.0f} days. Consider disabling or reviewing."
+        recommendation = (
+            f"Not triggered in {days_since_trigger:.0f} days. Consider disabling or reviewing."
+        )
     elif days_since_trigger is not None and days_since_trigger > STALE_DAYS:
         status = "stale"
-        recommendation = f"Not triggered in {days_since_trigger:.0f} days. Monitor or review trigger conditions."
+        recommendation = (
+            f"Not triggered in {days_since_trigger:.0f} days. Monitor or review trigger conditions."
+        )
     elif trigger_count_7d > OVER_TRIGGER_COUNT:
         status = "over_triggering"
         recommendation = f"Triggered {trigger_count_7d}x in the last 7 days. Add conditions or debounce to reduce noise."
@@ -165,7 +172,9 @@ def classify_automation(
         "entity_id": entity_id,
         "status": status,
         "last_triggered": last_triggered,
-        "days_since_trigger": round(days_since_trigger, 1) if days_since_trigger is not None else None,
+        "days_since_trigger": (
+            round(days_since_trigger, 1) if days_since_trigger is not None else None
+        ),
         "trigger_count_7d": trigger_count_7d,
         "trigger_entities_exist": trigger_entities_exist,
         "recommendation": recommendation,
@@ -202,7 +211,7 @@ def run_health_check(
         state_data = states.get(entity_id_key)
         if state_data is None:
             # Try to find by friendly_name
-            for eid, s in states.items():
+            for _eid, s in states.items():
                 fn = s.get("attributes", {}).get("friendly_name", "")
                 if fn.lower() == alias.lower():
                     state_data = s
@@ -230,7 +239,10 @@ def run_health_check(
 def save_health(report: dict[str, Any]) -> None:
     """Save health report to cache file."""
     from .utils import atomic_write as _atomic_write  # noqa: PLC0415
-    _atomic_write(os.path.join(os.environ.get("DATA_DIR", "/data"), "automation_health.json"), report)
+
+    _atomic_write(
+        os.path.join(os.environ.get("DATA_DIR", "/data"), "automation_health.json"), report
+    )
     log.info(
         "Automation health: %d total — %s",
         report["total"],
@@ -241,8 +253,12 @@ def save_health(report: dict[str, Any]) -> None:
 def load_health() -> dict[str, Any]:
     """Load cached health report."""
     try:
-        if os.path.exists(os.path.join(os.environ.get("DATA_DIR", "/data"), "automation_health.json")):
-            with open(os.path.join(os.environ.get("DATA_DIR", "/data"), "automation_health.json")) as f:
+        if os.path.exists(
+            os.path.join(os.environ.get("DATA_DIR", "/data"), "automation_health.json")
+        ):
+            with open(
+                os.path.join(os.environ.get("DATA_DIR", "/data"), "automation_health.json")
+            ) as f:
                 return json.load(f)
     except Exception:
         pass

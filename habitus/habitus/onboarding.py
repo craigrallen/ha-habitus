@@ -8,6 +8,7 @@ Handles multi-step onboarding flow:
 5. Initial training
 6. Mark complete
 """
+
 from __future__ import annotations
 
 import datetime
@@ -22,6 +23,7 @@ DATA_DIR = os.environ.get("DATA_DIR", "/data")
 
 def _get_data_dir() -> str:
     return os.environ.get("DATA_DIR", DATA_DIR)
+
 
 ONBOARDING_PATH = os.path.join(DATA_DIR, "onboarding_complete.json")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
@@ -39,7 +41,9 @@ STEP_NAMES = [
 
 def is_complete() -> bool:
     """Check if onboarding has been completed."""
-    return os.path.exists(os.path.join(os.environ.get("DATA_DIR", "/data"), "onboarding_complete.json"))
+    return os.path.exists(
+        os.path.join(os.environ.get("DATA_DIR", "/data"), "onboarding_complete.json")
+    )
 
 
 def get_status() -> dict[str, Any]:
@@ -50,7 +54,9 @@ def get_status() -> dict[str, Any]:
     """
     if is_complete():
         try:
-            with open(os.path.join(os.environ.get("DATA_DIR", "/data"), "onboarding_complete.json")) as f:
+            with open(
+                os.path.join(os.environ.get("DATA_DIR", "/data"), "onboarding_complete.json")
+            ) as f:
                 data = json.load(f)
         except Exception:
             data = {}
@@ -95,7 +101,12 @@ def complete_onboarding(
     os.makedirs(os.environ.get("DATA_DIR", "/data"), exist_ok=True)
 
     # Save energy tariff and preferences to settings
-    if tariff is not None or tariff_peak is not None or tariff_offpeak is not None or notification_prefs is not None:
+    if (
+        tariff is not None
+        or tariff_peak is not None
+        or tariff_offpeak is not None
+        or notification_prefs is not None
+    ):
         settings = _load_settings()
         if tariff is not None:
             settings["energy_tariff"] = tariff
@@ -114,7 +125,9 @@ def complete_onboarding(
         "steps_completed": TOTAL_STEPS if not skipped else 0,
     }
 
-    with open(os.path.join(os.environ.get("DATA_DIR", "/data"), "onboarding_complete.json"), "w") as f:
+    with open(
+        os.path.join(os.environ.get("DATA_DIR", "/data"), "onboarding_complete.json"), "w"
+    ) as f:
         json.dump(record, f, indent=2)
 
     log.info("Onboarding complete (skipped=%s)", skipped)

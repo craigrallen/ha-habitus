@@ -128,7 +128,10 @@ def _fetch_min_window_days() -> int:
 
 # ── Startup validation ─────────────────────────────────────────────────────────
 
-def _ha_get(url: str, *, token: str = "", timeout: float = 30.0, retries: int = 3) -> "requests.Response":
+
+def _ha_get(
+    url: str, *, token: str = "", timeout: float = 30.0, retries: int = 3
+) -> "requests.Response":
     """GET *url* from HA with exponential backoff on transient errors.
 
     Retries up to *retries* times with delays 1s → 2s → 4s before raising.
@@ -158,7 +161,10 @@ def _ha_get(url: str, *, token: str = "", timeout: float = 30.0, retries: int = 
             delay = delays[min(attempt, len(delays) - 1)]
             log.warning(
                 "HA API call failed (attempt %d/%d) — retrying in %ds: %s",
-                attempt + 1, retries, delay, last_exc,
+                attempt + 1,
+                retries,
+                delay,
+                last_exc,
             )
             _t.sleep(delay)
 
@@ -248,14 +254,12 @@ def log_perf_guardrail(
         entities=entities,
         warn_ms=warn_ms,
     )
-    msg = (
-        "Perf[{}]: {}ms · rows={} · entities={} · rows/s={:.1f}".format(
-            summary["stage"],
-            summary["elapsed_ms"],
-            summary["rows"],
-            summary["entities"],
-            summary["rows_per_sec"],
-        )
+    msg = "Perf[{}]: {}ms · rows={} · entities={} · rows/s={:.1f}".format(
+        summary["stage"],
+        summary["elapsed_ms"],
+        summary["rows"],
+        summary["entities"],
+        summary["rows_per_sec"],
     )
     if summary["warn_exceeded"]:
         log.warning("%s (guardrail %dms exceeded)", msg, summary["warn_ms"])  # noqa: G004
@@ -283,10 +287,10 @@ def contamination_for_days(days: int) -> float:
     if days < 14:
         return 0.005  # very conservative: ~0.5%
     if days < 30:
-        return 0.01   # conservative: ~1%
+        return 0.01  # conservative: ~1%
     if days < 90:
         return 0.015  # moderate: ~1.5%
-    return 0.02       # established: ~2% expected anomaly rate
+    return 0.02  # established: ~2% expected anomaly rate
 
 
 def contamination_tier_name(days: int) -> str:
@@ -454,12 +458,14 @@ def load_state():
 
 def save_state(state):
     from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+
     _atomic_write(STATE_PATH, state)
 
 
 def set_progress(phase, done=0, total=0, rows=0, elapsed=0.0, eta=0.0):
     try:
         from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+
         pct = round(done / total * 100) if total else 100
         # Preserve started_at from an existing run so staleness detection works correctly.
         # Only set it on the very first call of a run (when file doesn't exist yet or
@@ -472,17 +478,20 @@ def set_progress(phase, done=0, total=0, rows=0, elapsed=0.0, eta=0.0):
                     started_at = _prev.get("started_at")
         if started_at is None:
             started_at = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00")
-        _atomic_write(PROGRESS_PATH, {
-            "running": True,
-            "phase": phase,
-            "done": done,
-            "total": total,
-            "pct": pct,
-            "rows": rows,
-            "elapsed_min": round(elapsed / 60, 1),
-            "eta_min": round(eta / 60, 1),
-            "started_at": started_at,
-        })
+        _atomic_write(
+            PROGRESS_PATH,
+            {
+                "running": True,
+                "phase": phase,
+                "done": done,
+                "total": total,
+                "pct": pct,
+                "rows": rows,
+                "elapsed_min": round(elapsed / 60, 1),
+                "eta_min": round(eta / 60, 1),
+                "started_at": started_at,
+            },
+        )
     except Exception:
         pass
 
@@ -496,12 +505,18 @@ def write_fetch_failed(reason: str = "fetch returned 0 rows") -> None:
     """Write a fetch_failed status to progress.json so the UI surfaces the error."""
     try:
         from .utils import atomic_write as _atomic_write  # noqa: PLC0415
-        _atomic_write(PROGRESS_PATH, {
-            "running": False,
-            "phase": "fetch_failed",
-            "reason": reason,
-            "failed_at": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00"),
-        })
+
+        _atomic_write(
+            PROGRESS_PATH,
+            {
+                "running": False,
+                "phase": "fetch_failed",
+                "reason": reason,
+                "failed_at": datetime.datetime.now(datetime.UTC).strftime(
+                    "%Y-%m-%dT%H:%M:%S+00:00"
+                ),
+            },
+        )
     except Exception:
         pass
 
@@ -684,8 +699,29 @@ def _state_to_numeric(state: object) -> float | None:
         return float(s)
     except Exception:
         pass
-    on_states = {"on", "open", "opening", "home", "playing", "heat", "cool", "auto", "true", "armed"}
-    off_states = {"off", "closed", "closing", "not_home", "idle", "standby", "false", "disarmed", "clear"}
+    on_states = {
+        "on",
+        "open",
+        "opening",
+        "home",
+        "playing",
+        "heat",
+        "cool",
+        "auto",
+        "true",
+        "armed",
+    }
+    off_states = {
+        "off",
+        "closed",
+        "closing",
+        "not_home",
+        "idle",
+        "standby",
+        "false",
+        "disarmed",
+        "clear",
+    }
     if s in on_states:
         return 1.0
     if s in off_states:
@@ -714,7 +750,7 @@ def fetch_recent_raw_history(entity_ids: list[str], start_iso: str, end_iso: str
             batch = max(1, _env_int("HABITUS_SQL_BATCH", 40))
             cur = conn.cursor()
             for i in range(0, len(entity_ids), batch):
-                chunk = entity_ids[i:i + batch]
+                chunk = entity_ids[i : i + batch]
                 if not chunk:
                     continue
                 ph = ",".join(["?"] * len(chunk))
@@ -738,7 +774,7 @@ def fetch_recent_raw_history(entity_ids: list[str], start_iso: str, end_iso: str
             missing = [e for e in entity_ids if e not in seen]
             if missing:
                 for i in range(0, len(missing), batch):
-                    chunk = missing[i:i + batch]
+                    chunk = missing[i : i + batch]
                     ph = ",".join(["?"] * len(chunk))
                     q_latest = f"""
                         SELECT m.entity_id, s.last_updated_ts AS ts, s.state
@@ -778,7 +814,11 @@ def fetch_recent_raw_history(entity_ids: list[str], start_iso: str, end_iso: str
             out = df.groupby(["entity_id", "hour"], as_index=False)["mean"].mean()
             out = out.rename(columns={"hour": "ts"})
             out["sum"] = None
-            log.info("Fetched raw short-term history for %d non-stat entities (%d hourly rows)", len(entity_ids), len(out))
+            log.info(
+                "Fetched raw short-term history for %d non-stat entities (%d hourly rows)",
+                len(entity_ids),
+                len(out),
+            )
             return out[["entity_id", "ts", "mean", "sum"]]
 
     # Fallback to API (dev only)
@@ -840,7 +880,11 @@ def fetch_recent_raw_history(entity_ids: list[str], start_iso: str, end_iso: str
     out = df.groupby(["entity_id", "hour"], as_index=False)["mean"].mean()
     out = out.rename(columns={"hour": "ts"})
     out["sum"] = None
-    log.info("Fetched raw short-term history for %d non-stat entities (%d hourly rows)", len(entity_ids), len(out))
+    log.info(
+        "Fetched raw short-term history for %d non-stat entities (%d hourly rows)",
+        len(entity_ids),
+        len(out),
+    )
     return out[["entity_id", "ts", "mean", "sum"]]
 
 
@@ -968,7 +1012,12 @@ def fetch_stats_sqlite(entity_ids, start_iso, end_iso=None):
         )
     df = pd.DataFrame(rows, columns=["entity_id", "ts", "mean", "sum"])
     df["ts"] = pd.to_datetime(df["ts"], unit="s", utc=True)
-    log.info("Fetched %d rows from SQLite | %s → %s", len(df), df["ts"].min().date(), df["ts"].max().date())
+    log.info(
+        "Fetched %d rows from SQLite | %s → %s",
+        len(df),
+        df["ts"].min().date(),
+        df["ts"].max().date(),
+    )
     log_perf_guardrail(
         "fetch_sqlite",
         _t.time() - t0,
@@ -1022,7 +1071,7 @@ async def fetch_stats(entity_ids, start_iso, end_iso=None):
 
     t0 = _t.time()
     for i in range(0, total, batch_size):
-        batch = entity_ids[i:i + batch_size]
+        batch = entity_ids[i : i + batch_size]
         ok = False
 
         for attempt in range(1, max_retries + 1):
@@ -1133,6 +1182,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     hours["day_of_week"] = hours["hour"].dt.dayofweek
     hours["is_weekend"] = (hours["day_of_week"] >= 5).astype(int)
     hours["month"] = hours["hour"].dt.month
+
     def _env_float(name: str, default: float) -> float:
         raw = os.environ.get(name)
         if raw in (None, ""):
@@ -1143,7 +1193,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         return default
 
     _max_w = _env_float("HABITUS_MAX_POWER_KW", 25.0) * 1000.0
-    
+
     # Read power entity from user_settings (run_state.json) first, fallback to proxy, then env var
     _power_entity = ""
     _power_proxy = ""
@@ -1157,20 +1207,26 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
             _power_proxy = _us["power_proxy"]
     except Exception:
         pass
-    
+
     # If primary power sensors have insufficient history, prefer proxy sensors (which may have years)
     if not _power_entity and _power_proxy:
         _power_entity = _power_proxy
-        log.info("No primary power_entity configured — using proxy sensors as primary: %s", _power_entity)
+        log.info(
+            "No primary power_entity configured — using proxy sensors as primary: %s", _power_entity
+        )
     elif not _power_entity:
         _power_entity = os.environ.get("HABITUS_POWER_ENTITY", "").strip()
-    
+
     _energy_grid = os.environ.get("HABITUS_ENERGY_GRID", "").strip()
-    _energy_rates = [e.strip() for e in os.environ.get("HABITUS_ENERGY_RATES", "").split(",") if e.strip()]
+    _energy_rates = [
+        e.strip() for e in os.environ.get("HABITUS_ENERGY_RATES", "").split(",") if e.strip()
+    ]
 
     grid_kwh_w = pd.Series(dtype=float, name="grid_kwh_w")  # init before branches
     # Support comma-separated multi-phase sensors (e.g. L1,L2,L3 — summed)
-    _power_entities = [e.strip() for e in _power_entity.split(",") if e.strip()] if _power_entity else []
+    _power_entities = (
+        [e.strip() for e in _power_entity.split(",") if e.strip()] if _power_entity else []
+    )
     # Power proxy sensors — used when primary sensors have insufficient history
     # e.g. shore_power + battery_output_w covers all operating modes
     # Read from state.json user_settings first (survives restarts), fallback to env
@@ -1185,7 +1241,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         pass
     if not _power_proxy:
         _power_proxy = os.environ.get("HABITUS_POWER_PROXY", "").strip()
-    _proxy_entities = [e.strip() for e in _power_proxy.split(",") if e.strip()] if _power_proxy else []
+    _proxy_entities = (
+        [e.strip() for e in _power_proxy.split(",") if e.strip()] if _power_proxy else []
+    )
     _phase_series: list[pd.Series] = []  # per-phase columns collected for later join
     _phase_count = 1
     _power_from_local_db = False
@@ -1195,6 +1253,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         # independently and merge by hour — no dilution from 3 years of empty rows
         try:
             from . import collector as _collector  # noqa: PLC0415
+
             db = _collector.get_db()
             db_stats = db.get_stats()
             if db_stats["total_rows"] > 100:
@@ -1202,37 +1261,47 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                 _now_ts = _t.time()
                 _oldest_ts = db_stats.get("oldest_ts", _now_ts - 86400)
                 local_df = db.fetch_range(_power_entities, _oldest_ts, _now_ts, resolution="1h")
-                
+
                 if not local_df.empty and len(local_df) > 10:
                     # Build total_power_w directly from local DB
-                    local_df["hour"] = pd.to_datetime(local_df["timestamp"], unit="s", utc=True).dt.floor("h")
-                    local_df["v"] = pd.to_numeric(local_df["value"], errors="coerce").clip(lower=0, upper=_max_w)
+                    local_df["hour"] = pd.to_datetime(
+                        local_df["timestamp"], unit="s", utc=True
+                    ).dt.floor("h")
+                    local_df["v"] = pd.to_numeric(local_df["value"], errors="coerce").clip(
+                        lower=0, upper=_max_w
+                    )
                     local_total_power = local_df.groupby("hour")["v"].sum().rename("total_power_w")
-                    
+
                     # Build per-phase series from local DB
                     for _ph_i, _ph_eid in enumerate(_power_entities):
                         _ph_data = local_df[local_df["entity_id"] == _ph_eid]
                         if not _ph_data.empty:
-                            _ph_series = _ph_data.groupby("hour")["v"].mean().rename(f"phase_L{_ph_i + 1}_w")
+                            _ph_series = (
+                                _ph_data.groupby("hour")["v"].mean().rename(f"phase_L{_ph_i + 1}_w")
+                            )
                             _phase_series.append(_ph_series)
-                    
+
                     _phase_count = len(_power_entities)
-                    
+
                     # CRITICAL: Only train on hours with actual power data to avoid zero-dilution
                     # Build a new hours DataFrame from the local power data index directly
                     hours_with_power = pd.DataFrame({"hour": local_total_power.index})
                     hours_with_power["hour_of_day"] = hours_with_power["hour"].dt.hour
                     hours_with_power["day_of_week"] = hours_with_power["hour"].dt.dayofweek
-                    hours_with_power["is_weekend"] = (hours_with_power["day_of_week"] >= 5).astype(int)
+                    hours_with_power["is_weekend"] = (hours_with_power["day_of_week"] >= 5).astype(
+                        int
+                    )
                     hours_with_power["month"] = hours_with_power["hour"].dt.month
-                    
+
                     # Replace hours DataFrame with power-only subset
                     hours = hours_with_power.copy()
-                    
+
                     # Add power data directly
-                    hours = hours.merge(local_total_power, left_on="hour", right_index=True, how="left")
+                    hours = hours.merge(
+                        local_total_power, left_on="hour", right_index=True, how="left"
+                    )
                     hours["total_power_w"] = hours["total_power_w"].fillna(0)
-                    
+
                     log.info(
                         f"Local DB training window: {hours['hour'].min()} → {hours['hour'].max()} "
                         f"({len(hours)} hours with power data)"
@@ -1242,63 +1311,89 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                         f"max={local_total_power.max():.0f}W, "
                         f"min={local_total_power.min():.0f}W"
                     )
-                    
+
                     _power_from_local_db = True
-                    
+
                     # Backfill historical gaps with proxy calculation (shore + battery + solar)
                     # This provides estimated power consumption before inverter sensors existed
                     if _proxy_entities and len(_proxy_entities) >= 2:
                         try:
-                            log.info(f"Attempting proxy backfill with {len(_proxy_entities)} sensors: {','.join(_proxy_entities[:3])}...")
+                            log.info(
+                                f"Attempting proxy backfill with {len(_proxy_entities)} sensors: {','.join(_proxy_entities[:3])}..."
+                            )
                             # Compute proxy time range from configured training window
                             _state_proxy = load_state() or {}
                             _us_proxy = _state_proxy.get("user_settings", {})
-                            _proxy_days = int(_us_proxy.get("days_history", os.environ.get("HABITUS_DAYS", "90")))
+                            _proxy_days = int(
+                                _us_proxy.get("days_history", os.environ.get("HABITUS_DAYS", "90"))
+                            )
                             _proxy_to = pd.Timestamp.now(tz="UTC")
                             _proxy_from = _proxy_to - pd.Timedelta(days=_proxy_days)
-                            log.info(f"Proxy fetch range: {_proxy_from} → {_proxy_to} ({_proxy_days}d)")
-                            
+                            log.info(
+                                f"Proxy fetch range: {_proxy_from} → {_proxy_to} ({_proxy_days}d)"
+                            )
+
                             # Fetch proxy sensors from HA statistics (full training window)
                             # Uses fetch_stats_sqlite which resolves DB path internally
                             proxy_stats = fetch_stats_sqlite(
-                                _proxy_entities,
-                                _proxy_from.isoformat(),
-                                _proxy_to.isoformat()
+                                _proxy_entities, _proxy_from.isoformat(), _proxy_to.isoformat()
                             )
-                            
-                            log.info(f"Proxy stats fetched: {len(proxy_stats)} rows, columns: {list(proxy_stats.columns) if not proxy_stats.empty else 'empty'}")
+
+                            log.info(
+                                f"Proxy stats fetched: {len(proxy_stats)} rows, columns: {list(proxy_stats.columns) if not proxy_stats.empty else 'empty'}"
+                            )
                             if proxy_stats.empty:
-                                log.warning("Proxy stats empty — check if sensors have HA statistics data")
-                            
+                                log.warning(
+                                    "Proxy stats empty — check if sensors have HA statistics data"
+                                )
+
                             if not proxy_stats.empty and len(proxy_stats) > 100:
                                 # Calculate estimated power from proxy sensors
                                 # fetch_stats_sqlite returns 'mean' column, rename to 'v'
-                                proxy_stats["hour"] = pd.to_datetime(proxy_stats["ts"], utc=True).dt.floor("h")
-                                proxy_stats["v"] = pd.to_numeric(proxy_stats["mean"], errors="coerce").clip(lower=0, upper=_max_w)
-                                
+                                proxy_stats["hour"] = pd.to_datetime(
+                                    proxy_stats["ts"], utc=True
+                                ).dt.floor("h")
+                                proxy_stats["v"] = pd.to_numeric(
+                                    proxy_stats["mean"], errors="coerce"
+                                ).clip(lower=0, upper=_max_w)
+
                                 # Sum all proxy sensors per hour (shore + battery + solar = total consumption estimate)
-                                proxy_power = proxy_stats.groupby("hour")["v"].sum().rename("proxy_power_w")
-                                
+                                proxy_power = (
+                                    proxy_stats.groupby("hour")["v"].sum().rename("proxy_power_w")
+                                )
+
                                 # Find hours where primary (inverter) has no data
                                 existing_hours = set(local_total_power.index)
                                 proxy_hours = set(proxy_power.index) - existing_hours
-                                
+
                                 if len(proxy_hours) > 100:
                                     # Build DataFrame for proxy-only hours
                                     proxy_df = pd.DataFrame({"hour": sorted(proxy_hours)})
                                     proxy_df["hour_of_day"] = proxy_df["hour"].dt.hour
                                     proxy_df["day_of_week"] = proxy_df["hour"].dt.dayofweek
-                                    proxy_df["is_weekend"] = (proxy_df["day_of_week"] >= 5).astype(int)
+                                    proxy_df["is_weekend"] = (proxy_df["day_of_week"] >= 5).astype(
+                                        int
+                                    )
                                     proxy_df["month"] = proxy_df["hour"].dt.month
-                                    proxy_df = proxy_df.merge(proxy_power, left_on="hour", right_index=True, how="left")
-                                    proxy_df.rename(columns={"proxy_power_w": "total_power_w"}, inplace=True)
-                                    
+                                    proxy_df = proxy_df.merge(
+                                        proxy_power, left_on="hour", right_index=True, how="left"
+                                    )
+                                    proxy_df.rename(
+                                        columns={"proxy_power_w": "total_power_w"}, inplace=True
+                                    )
+
                                     # Append proxy hours to training dataset
-                                    hours = pd.concat([hours, proxy_df], ignore_index=True).sort_values("hour").reset_index(drop=True)
-                                    
+                                    hours = (
+                                        pd.concat([hours, proxy_df], ignore_index=True)
+                                        .sort_values("hour")
+                                        .reset_index(drop=True)
+                                    )
+
                                     proxy_mean = proxy_df["total_power_w"].mean()
-                                    proxy_span_days = (proxy_df["hour"].max() - proxy_df["hour"].min()).days
-                                    
+                                    proxy_span_days = (
+                                        proxy_df["hour"].max() - proxy_df["hour"].min()
+                                    ).days
+
                                     log.info(
                                         f"Backfilled {len(proxy_hours)} hours with proxy power estimate "
                                         f"(mean={proxy_mean:.0f}W, span={proxy_span_days}d)"
@@ -1309,12 +1404,16 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                                     )
                         except Exception as proxy_err:
                             import traceback
-                            log.warning(f"Proxy backfill failed: {proxy_err}\n{traceback.format_exc()}")
-                    
+
+                            log.warning(
+                                f"Proxy backfill failed: {proxy_err}\n{traceback.format_exc()}"
+                            )
+
         except Exception as e:
             import traceback
+
             log.warning(f"Local DB power fetch failed: {e}\n{traceback.format_exc()}")
-        
+
         # Sum across all specified phases / sensors
         # Skip if we already built power features from local DB
         if not _power_from_local_db:
@@ -1322,7 +1421,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
             power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(lower=0, upper=_max_w)
             total_power = power.groupby("hour")["v"].sum().rename("total_power_w")
             if len(_power_entities) > 1:
-                log.info("Multi-phase power: summing %d sensors → total_power_w", len(_power_entities))
+                log.info(
+                    "Multi-phase power: summing %d sensors → total_power_w", len(_power_entities)
+                )
                 # Build individual per-phase columns alongside the summed total
                 for _ph_i, _ph_eid in enumerate(_power_entities):
                     _ph_df = df[df["entity_id"] == _ph_eid].copy()
@@ -1415,7 +1516,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         features = features.join(leak_series, how="left")
 
     # Gas meters (m³) — convert cumulative readings to hourly consumption
-    gas_entities = [e.strip() for e in os.environ.get("HABITUS_GAS_ENTITIES", "").split(",") if e.strip()]
+    gas_entities = [
+        e.strip() for e in os.environ.get("HABITUS_GAS_ENTITIES", "").split(",") if e.strip()
+    ]
     if gas_entities:
         gas = df[df["entity_id"].isin(gas_entities)].copy()
         if not gas.empty:
@@ -1437,7 +1540,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Zero-dominant power features corrupt the model (anything non-zero → score=100).
     # Drop power columns when >95% of rows are zero — training uses behavioral
     # features only, which are unaffected.
-    _power_cols = ["total_power_w", "grid_kwh_w"] + [c for c in out.columns if c.startswith("power_l") and c.endswith("_w")]
+    _power_cols = ["total_power_w", "grid_kwh_w"] + [
+        c for c in out.columns if c.startswith("power_l") and c.endswith("_w")
+    ]
     for _pc in _power_cols:
         if _pc in out.columns:
             _nonzero_pct = (out[_pc] > 0.5).mean()
@@ -1449,20 +1554,29 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                 if _pc == "total_power_w" and _proxy_entities:
                     _proxy_df = df[df["entity_id"].isin(_proxy_entities)].copy()
                     if not _proxy_df.empty:
-                        _proxy_df["v"] = pd.to_numeric(_proxy_df["mean"], errors="coerce").clip(lower=0, upper=_max_w)
+                        _proxy_df["v"] = pd.to_numeric(_proxy_df["mean"], errors="coerce").clip(
+                            lower=0, upper=_max_w
+                        )
                         _proxy_total = _proxy_df.groupby("hour")["v"].sum()
                         _proxy_nonzero = (_proxy_total > 0.5).mean()
                         if _proxy_nonzero >= 0.05:
                             # Merge proxy into out — fill zeros in primary with proxy values
-                            _proxy_aligned = out.set_index("hour")["total_power_w"].copy() if "hour" in out.columns else out["total_power_w"].copy()
+                            _proxy_aligned = (
+                                out.set_index("hour")["total_power_w"].copy()
+                                if "hour" in out.columns
+                                else out["total_power_w"].copy()
+                            )
                             _proxy_s = _proxy_total.reindex(_proxy_aligned.index, fill_value=0.0)
                             # Where primary is 0, use proxy
                             _merged = _proxy_aligned.where(_proxy_aligned > 0.5, _proxy_s)
-                            out["total_power_w"] = _merged.values if hasattr(_merged, "values") else _merged
+                            out["total_power_w"] = (
+                                _merged.values if hasattr(_merged, "values") else _merged
+                            )
                             log.info(
                                 "Power proxy fallback: '%s' sensors fill total_power_w "
                                 "(%.1f%% non-zero → %.1f%% after proxy merge)",
-                                ",".join(_proxy_entities), _nonzero_pct * 100,
+                                ",".join(_proxy_entities),
+                                _nonzero_pct * 100,
                                 (out["total_power_w"] > 0.5).mean() * 100,
                             )
                             _proxy_filled = True
@@ -1470,7 +1584,8 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                     log.warning(
                         "Power feature '%s' is %.1f%% non-zero — insufficient history. "
                         "Dropping from model (behavioral-only mode).",
-                        _pc, _nonzero_pct * 100,
+                        _pc,
+                        _nonzero_pct * 100,
                     )
                     out[_pc] = 0.0  # zero it out so it has no discriminative value
 
@@ -1896,6 +2011,7 @@ def publish_dashboard_entities(
 
 # ── Post-train analysis pipeline ──────────────────────────────────────────────
 
+
 def _run_post_analysis(
     state: dict,
     stat_ids: list[str],
@@ -1913,15 +2029,29 @@ def _run_post_analysis(
     set_progress("post_analysis", 0, 9, 0, 0, 0)
 
     _steps = [
-        ("routine_builder",     lambda: _routine_builder.run()),
-        ("battery_watchdog",    lambda: _battery_watchdog.save_battery_status(_battery_watchdog.run_battery_check())),
-        ("integration_health",  lambda: _integration_health.save_integration_health(_integration_health.run_integration_health_check())),
-        ("changelog",           lambda: _changelog.run_diff_and_log()),
-        ("conflict_detector",   lambda: conflict_detector.save_conflicts(conflict_detector.detect_conflicts())),
-        ("automation_health",   lambda: _automation_health.save_health(_automation_health.run_health_check())),
-        ("guest_mode",          lambda: _guest_mode.run()),
-        ("seasonal_adapter",    lambda: _seasonal_adapter.run()),
-        ("device_library",      lambda: _dl.save_library(_dl.build_library_from_features(raw_df))),
+        ("routine_builder", lambda: _routine_builder.run()),
+        (
+            "battery_watchdog",
+            lambda: _battery_watchdog.save_battery_status(_battery_watchdog.run_battery_check()),
+        ),
+        (
+            "integration_health",
+            lambda: _integration_health.save_integration_health(
+                _integration_health.run_integration_health_check()
+            ),
+        ),
+        ("changelog", lambda: _changelog.run_diff_and_log()),
+        (
+            "conflict_detector",
+            lambda: conflict_detector.save_conflicts(conflict_detector.detect_conflicts()),
+        ),
+        (
+            "automation_health",
+            lambda: _automation_health.save_health(_automation_health.run_health_check()),
+        ),
+        ("guest_mode", lambda: _guest_mode.run()),
+        ("seasonal_adapter", lambda: _seasonal_adapter.run()),
+        ("device_library", lambda: _dl.save_library(_dl.build_library_from_features(raw_df))),
     ]
 
     for i, (name, fn) in enumerate(_steps, 1):
@@ -1970,6 +2100,7 @@ async def run(days_history: int, mode: str = "full") -> None:
     # Mark it stale_aborted so the UI reflects this, then proceed with a fresh run.
     _STALE_THRESHOLD_S = 15 * 60  # 15 minutes
     import time as _time  # noqa: PLC0415
+
     if os.path.exists(PROGRESS_PATH):
         _file_age_s = _time.time() - os.path.getmtime(PROGRESS_PATH)
         with contextlib.suppress(Exception):
@@ -1996,11 +2127,15 @@ async def run(days_history: int, mode: str = "full") -> None:
                     )
                     # Overwrite with a clean stale marker
                     from .utils import atomic_write as _aw  # noqa: PLC0415
-                    _aw(PROGRESS_PATH, {
-                        "running": False,
-                        "phase": "stale_aborted",
-                        "stale_cleared_at": now_iso,
-                    })
+
+                    _aw(
+                        PROGRESS_PATH,
+                        {
+                            "running": False,
+                            "phase": "stale_aborted",
+                            "stale_cleared_at": now_iso,
+                        },
+                    )
 
     # Adaptive contamination — force retrain when training age crosses a tier boundary
     _stored_days = state.get("training_days", 0)
@@ -2111,13 +2246,19 @@ async def run(days_history: int, mode: str = "full") -> None:
             except Exception:
                 pass
         if "notify_on_anomaly" in _saved:
-            os.environ["HABITUS_NOTIFY_ON"] = "true" if bool(_saved.get("notify_on_anomaly")) else "false"
-            log.info("Loaded saved notify setting from settings: %s", os.environ["HABITUS_NOTIFY_ON"])
+            os.environ["HABITUS_NOTIFY_ON"] = (
+                "true" if bool(_saved.get("notify_on_anomaly")) else "false"
+            )
+            log.info(
+                "Loaded saved notify setting from settings: %s", os.environ["HABITUS_NOTIFY_ON"]
+            )
         if "anomaly_sensitivity" in _saved:
             try:
                 sens = float(_saved["anomaly_sensitivity"])
                 os.environ["HABITUS_ANOMALY_SENSITIVITY"] = str(max(0.3, min(3.0, sens)))
-                log.info("Loaded anomaly sensitivity: %s", os.environ["HABITUS_ANOMALY_SENSITIVITY"])
+                log.info(
+                    "Loaded anomaly sensitivity: %s", os.environ["HABITUS_ANOMALY_SENSITIVITY"]
+                )
             except (TypeError, ValueError):
                 pass
         if _saved.get("power_proxy") and not os.environ.get("HABITUS_POWER_PROXY"):
@@ -2151,7 +2292,7 @@ async def run(days_history: int, mode: str = "full") -> None:
             # Prevents overwriting user's saved settings on every restart
             _state_check = load_state() or {}
             _user_has_power_entity = bool(_state_check.get("user_settings", {}).get("power_entity"))
-            
+
             if not _user_has_power_entity:
                 # Prefer a real-time watt sensor over kWh delta — look for _w companion
                 # e.g. sensor.foo_electric_consumption_kwh → sensor.foo_electric_consumption_w
@@ -2187,11 +2328,11 @@ async def run(days_history: int, mode: str = "full") -> None:
     # BUT: do not overwrite user_settings — only save auto-detected values if user hasn't configured
     _resolved_power = os.environ.get("HABITUS_POWER_ENTITY", "").strip()
     _resolved_grid = os.environ.get("HABITUS_ENERGY_GRID", "").strip()
-    
+
     # Check if user has explicitly configured power_entity in settings
     _saved = load_state() or {}
     _user_configured_power = _saved.get("user_settings", {}).get("power_entity")
-    
+
     if _resolved_power and not _user_configured_power:
         # Auto-detected power entity (no user override) — save to state
         state["power_entity"] = _resolved_power
@@ -2210,21 +2351,21 @@ async def run(days_history: int, mode: str = "full") -> None:
         state["power_entity"] = _user_configured_power
         _user_entities = [e.strip() for e in _user_configured_power.split(",") if e.strip()]
         if len(_user_entities) > 1:
-            state["power_phases"] = {
-                f"L{i + 1}": eid for i, eid in enumerate(_user_entities)
-            }
+            state["power_phases"] = {f"L{i + 1}": eid for i, eid in enumerate(_user_entities)}
             state["phase_count"] = len(_user_entities)
         else:
             state.pop("power_phases", None)
             state["phase_count"] = 1
-    
+
     if _resolved_grid:
         state["energy_grid_entity"] = _resolved_grid
     if _resolved_power or _resolved_grid or _user_configured_power:
         save_state(state)
-        log.info("Power entity persisted to state: power=%s grid=%s", 
-                 _user_configured_power or _resolved_power or "—", 
-                 _resolved_grid or "—")
+        log.info(
+            "Power entity persisted to state: power=%s grid=%s",
+            _user_configured_power or _resolved_power or "—",
+            _resolved_grid or "—",
+        )
 
     stat_ids, total_stat_ids = await get_stat_ids()
     behavioral_entity_ids = await get_behavioral_entity_ids()
@@ -2234,7 +2375,9 @@ async def run(days_history: int, mode: str = "full") -> None:
 
     if not stat_ids and not non_stat_ids:
         log.error("No behavioral sensors found — aborting training with fetch_failed status")
-        write_fetch_failed("no_entities: get_stat_ids and get_behavioral_entity_ids both returned empty")
+        write_fetch_failed(
+            "no_entities: get_stat_ids and get_behavioral_entity_ids both returned empty"
+        )
         return
 
     total_entities = get_ha_entity_count()
@@ -2252,7 +2395,9 @@ async def run(days_history: int, mode: str = "full") -> None:
     _can_incremental = False
     if _data_to and os.path.exists(MODEL_PATH):
         try:
-            _dt_to = datetime.datetime.fromisoformat(_data_to.replace("+00:00", "")).replace(tzinfo=datetime.UTC)
+            _dt_to = datetime.datetime.fromisoformat(_data_to.replace("+00:00", "")).replace(
+                tzinfo=datetime.UTC
+            )
             _age_days = (now - _dt_to).days
             # If data_to is stale (>7 days old), treat as fresh start
             if _age_days <= 7:
@@ -2295,11 +2440,15 @@ async def run(days_history: int, mode: str = "full") -> None:
             full_from = saved if saved > cap_iso else cap_iso
             log.info(f"Retraining {days_history}d window {full_from} → {now_iso}")
             set_progress("fetching", 0, len(stat_ids), 0, 0, 0)
-            df_stats = await fetch_stats(stat_ids, full_from, now_iso) if stat_ids else pd.DataFrame()
+            df_stats = (
+                await fetch_stats(stat_ids, full_from, now_iso) if stat_ids else pd.DataFrame()
+            )
 
             raw_max_days = max(1, _env_int("HABITUS_RAW_MAX_DAYS", 3650))
             raw_days = min(days_history, raw_max_days)
-            raw_from = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=raw_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            raw_from = (
+                datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=raw_days)
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
             raw_to = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
             raw_entity_limit = max(1, _env_int("HABITUS_RAW_MAX_ENTITIES", 300))
             if len(non_stat_ids) > raw_entity_limit:
@@ -2310,7 +2459,11 @@ async def run(days_history: int, mode: str = "full") -> None:
                 )
                 df_raw = pd.DataFrame()
             else:
-                log.info("Fetching raw history for %d non-stat entities (%dd)", len(non_stat_ids), raw_days)
+                log.info(
+                    "Fetching raw history for %d non-stat entities (%dd)",
+                    len(non_stat_ids),
+                    raw_days,
+                )
                 df_raw = fetch_recent_raw_history(non_stat_ids, raw_from, raw_to)
                 log.info("Raw history fetch complete (%d rows)", len(df_raw))
 
@@ -2366,6 +2519,7 @@ async def run(days_history: int, mode: str = "full") -> None:
                 log.info("Feature matrix built: %d rows", len(features))
             except Exception as e:
                 import traceback
+
                 log.error("CRASH in build_features: %s", e)
                 traceback.print_exc()
                 raise
@@ -2474,6 +2628,7 @@ async def run(days_history: int, mode: str = "full") -> None:
                 log.info("Running scene analysis...")
                 try:
                     from . import scene_analysis as _scene_analysis
+
                     sa_results = _scene_analysis.analyse_scenes(discovered_scenes=scenes)
                     _scene_analysis.save_analysis(sa_results)
                     log.info("Scene analysis: %d improvement suggestions", len(sa_results))
@@ -2505,11 +2660,15 @@ async def run(days_history: int, mode: str = "full") -> None:
 
                 log.info("Running sequence mining (PrefixSpan)...")
                 try:
-                    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+                    from concurrent.futures import ThreadPoolExecutor
+                    from concurrent.futures import TimeoutError as FuturesTimeout
+
                     area_data3 = ha_areas._load_cache()
                     e2a3 = area_data3.get("entity_to_area", {})
                     with ThreadPoolExecutor(max_workers=1) as executor:
-                        future = executor.submit(sequence_miner.mine_sequences, e2a3, days=min(days_history, 30))
+                        future = executor.submit(
+                            sequence_miner.mine_sequences, e2a3, days=min(days_history, 30)
+                        )
                         future.result(timeout=120)
                 except FuturesTimeout:
                     log.warning("Sequence mining exceeded 120s timeout — skipping")
@@ -2518,11 +2677,15 @@ async def run(days_history: int, mode: str = "full") -> None:
 
                 log.info("Running Markov chain next-action model...")
                 try:
-                    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+                    from concurrent.futures import ThreadPoolExecutor
+                    from concurrent.futures import TimeoutError as FuturesTimeout
+
                     area_data4 = ha_areas._load_cache()
                     e2a4 = area_data4.get("entity_to_area", {})
                     with ThreadPoolExecutor(max_workers=1) as executor:
-                        future = executor.submit(markov_chain.build_markov_model, e2a4, days=min(days_history, 30))
+                        future = executor.submit(
+                            markov_chain.build_markov_model, e2a4, days=min(days_history, 30)
+                        )
                         future.result(timeout=120)
                 except FuturesTimeout:
                     log.warning("Markov chain exceeded 120s timeout — skipping")
@@ -2531,11 +2694,15 @@ async def run(days_history: int, mode: str = "full") -> None:
 
                 log.info("Running HMM activity state model...")
                 try:
-                    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+                    from concurrent.futures import ThreadPoolExecutor
+                    from concurrent.futures import TimeoutError as FuturesTimeout
+
                     area_data5 = ha_areas._load_cache()
                     e2a5 = area_data5.get("entity_to_area", {})
                     with ThreadPoolExecutor(max_workers=1) as executor:
-                        future = executor.submit(activity_hmm.train_activity_model, e2a5, days=min(days_history, 30))
+                        future = executor.submit(
+                            activity_hmm.train_activity_model, e2a5, days=min(days_history, 30)
+                        )
                         future.result(timeout=60)  # 60-second hard timeout
                 except FuturesTimeout:
                     log.warning("HMM training exceeded 60s timeout — skipping")
@@ -2600,7 +2767,9 @@ async def run(days_history: int, mode: str = "full") -> None:
 
         raw_max_days = max(1, _env_int("HABITUS_RAW_MAX_DAYS", 3650))
         raw_days = min(days_history, raw_max_days)
-        raw_from = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=raw_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        raw_from = (
+            datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=raw_days)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
         raw_to = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         raw_entity_limit = max(1, _env_int("HABITUS_RAW_MAX_ENTITIES", 300))
         if len(non_stat_ids) > raw_entity_limit:
@@ -2611,7 +2780,9 @@ async def run(days_history: int, mode: str = "full") -> None:
             )
             df_raw = pd.DataFrame()
         else:
-            log.info("Fetching raw history for %d non-stat entities (%dd)", len(non_stat_ids), raw_days)
+            log.info(
+                "Fetching raw history for %d non-stat entities (%dd)", len(non_stat_ids), raw_days
+            )
             df_raw = fetch_recent_raw_history(non_stat_ids, raw_from, raw_to)
             log.info("Raw history fetch complete (%d rows)", len(df_raw))
 
@@ -2734,12 +2905,13 @@ async def run(days_history: int, mode: str = "full") -> None:
         try:
             # Timeout after 20 seconds to prevent add-on restart
             auto_scores = await asyncio.wait_for(
-                automation_score.score_all(HA_URL, HA_TOKEN),
-                timeout=20.0
+                automation_score.score_all(HA_URL, HA_TOKEN), timeout=20.0
             )
             automation_score.save(auto_scores)
         except TimeoutError:
-            log.warning("Automation scoring timed out after 20s — skipping to allow training to complete")
+            log.warning(
+                "Automation scoring timed out after 20s — skipping to allow training to complete"
+            )
             auto_scores = []
         except Exception as e:
             log.warning("Automation scoring failed: %s", e)
@@ -2770,6 +2942,7 @@ async def run(days_history: int, mode: str = "full") -> None:
             log.info("Running scene analysis...")
             try:
                 from . import scene_analysis as _scene_analysis
+
                 sa_results = _scene_analysis.analyse_scenes(discovered_scenes=scenes)
                 _scene_analysis.save_analysis(sa_results)
                 log.info("Scene analysis: %d improvement suggestions", len(sa_results))
@@ -2801,10 +2974,14 @@ async def run(days_history: int, mode: str = "full") -> None:
 
             log.info("Running sequence mining (PrefixSpan)...")
             try:
-                from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+                from concurrent.futures import ThreadPoolExecutor
+                from concurrent.futures import TimeoutError as FuturesTimeout
+
                 e2a_sm = ha_areas._load_cache().get("entity_to_area", {})
                 with ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(sequence_miner.mine_sequences, e2a_sm, days=min(days_history, 30))
+                    future = executor.submit(
+                        sequence_miner.mine_sequences, e2a_sm, days=min(days_history, 30)
+                    )
                     future.result(timeout=120)
             except FuturesTimeout:
                 log.warning("Sequence mining exceeded 120s timeout — skipping")
@@ -2813,10 +2990,14 @@ async def run(days_history: int, mode: str = "full") -> None:
 
             log.info("Running Markov chain next-action model...")
             try:
-                from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+                from concurrent.futures import ThreadPoolExecutor
+                from concurrent.futures import TimeoutError as FuturesTimeout
+
                 e2a_mk = ha_areas._load_cache().get("entity_to_area", {})
                 with ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(markov_chain.build_markov_model, e2a_mk, days=min(days_history, 30))
+                    future = executor.submit(
+                        markov_chain.build_markov_model, e2a_mk, days=min(days_history, 30)
+                    )
                     future.result(timeout=120)
             except FuturesTimeout:
                 log.warning("Markov chain exceeded 120s timeout — skipping")
@@ -2825,10 +3006,14 @@ async def run(days_history: int, mode: str = "full") -> None:
 
             log.info("Running HMM activity state model...")
             try:
-                from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+                from concurrent.futures import ThreadPoolExecutor
+                from concurrent.futures import TimeoutError as FuturesTimeout
+
                 e2a_hm = ha_areas._load_cache().get("entity_to_area", {})
                 with ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(activity_hmm.train_activity_model, e2a_hm, days=min(days_history, 30))
+                    future = executor.submit(
+                        activity_hmm.train_activity_model, e2a_hm, days=min(days_history, 30)
+                    )
                     future.result(timeout=60)  # 60-second hard timeout
             except FuturesTimeout:
                 log.warning("HMM training exceeded 60s timeout — skipping")
@@ -2913,6 +3098,7 @@ async def run(days_history: int, mode: str = "full") -> None:
     # Record anomalies to history for trend analysis
     try:
         from . import anomaly_history
+
         anomaly_history.record_anomalies(derived_anomaly_score, entity_anomalies)
     except Exception as e:
         log.warning(f"Anomaly history recording failed: {e}")

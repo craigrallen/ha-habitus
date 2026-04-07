@@ -37,8 +37,9 @@ def _save_feedback(data: dict):
         json.dump(data, f, indent=2, default=str)
 
 
-def record_feedback(anomaly_id: str, action: str, entity_id: str = "",
-                    score: float = 0, details: str = "") -> dict:
+def record_feedback(
+    anomaly_id: str, action: str, entity_id: str = "", score: float = 0, details: str = ""
+) -> dict:
     """Record user feedback on an anomaly.
 
     action: "confirmed" | "dismissed" | "false_positive"
@@ -67,7 +68,9 @@ def record_feedback(anomaly_id: str, action: str, entity_id: str = "",
         data["entries"] = data["entries"][-500:]
 
     _save_feedback(data)
-    log.info("Anomaly feedback: %s → %s (entity=%s, score=%.1f)", anomaly_id, action, entity_id, score)
+    log.info(
+        "Anomaly feedback: %s → %s (entity=%s, score=%.1f)", anomaly_id, action, entity_id, score
+    )
     return entry
 
 
@@ -89,8 +92,10 @@ def get_feedback_stats() -> dict:
 
     # Entities that are mostly false positives → widen their normal band
     false_positive_entities = [
-        eid for eid, stats in entity_stats.items()
-        if stats["dismissed"] > 3 and stats["dismissed"] / (stats["confirmed"] + stats["dismissed"]) > 0.8
+        eid
+        for eid, stats in entity_stats.items()
+        if stats["dismissed"] > 3
+        and stats["dismissed"] / (stats["confirmed"] + stats["dismissed"]) > 0.8
     ]
 
     return {
@@ -122,12 +127,14 @@ def get_anonymous_export() -> dict | None:
     for e in data.get("entries", []):
         eid = e.get("entity_id", "")
         domain = eid.split(".")[0] if "." in eid else "unknown"
-        anonymised.append({
-            "domain": domain,
-            "score": e.get("score", 0),
-            "action": e.get("action", ""),
-            "hour": None,  # Could extract from timestamp if needed
-        })
+        anonymised.append(
+            {
+                "domain": domain,
+                "score": e.get("score", 0),
+                "action": e.get("action", ""),
+                "hour": None,  # Could extract from timestamp if needed
+            }
+        )
 
     return {
         "version": "1.0",

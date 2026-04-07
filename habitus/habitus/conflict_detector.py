@@ -16,7 +16,6 @@ import datetime
 import json
 import logging
 import os
-import sqlite3
 from typing import Any
 
 import requests
@@ -83,7 +82,9 @@ def _get_outdoor_temp(states: dict[str, dict]) -> float | None:
         if not eid.startswith("sensor."):
             continue
         eid_lower = eid.lower()
-        if ("outdoor" in eid_lower or "outside" in eid_lower or "weather" in eid_lower) and "temp" in eid_lower:
+        if (
+            "outdoor" in eid_lower or "outside" in eid_lower or "weather" in eid_lower
+        ) and "temp" in eid_lower:
             try:
                 return float(s["state"])
             except (ValueError, TypeError):
@@ -104,11 +105,7 @@ def _get_outdoor_temp(states: dict[str, dict]) -> float | None:
 
 def _get_person_states(states: dict[str, dict]) -> dict[str, str]:
     """Get all person entity states (home/not_home/etc)."""
-    return {
-        eid: s["state"]
-        for eid, s in states.items()
-        if eid.startswith("person.")
-    }
+    return {eid: s["state"] for eid, s in states.items() if eid.startswith("person.")}
 
 
 def detect_conflicts(states: dict[str, dict] | None = None) -> list[dict[str, Any]]:
@@ -133,11 +130,10 @@ def detect_conflicts(states: dict[str, dict] | None = None) -> list[dict[str, An
     active_cooling = []
     lights_on = []
     media_on = []
-    switches_on = []
 
     for eid, s in states.items():
         state_val = s.get("state", "")
-        eid_lower = eid.lower()
+        eid.lower()
 
         if eid.startswith("binary_sensor.") and _is_open(state_val):
             if _matches_keywords(eid, WINDOW_KEYWORDS):
@@ -146,7 +142,9 @@ def detect_conflicts(states: dict[str, dict] | None = None) -> list[dict[str, An
                 open_doors.append(eid)
 
         if eid.startswith("climate.") and _is_on(state_val):
-            if state_val.lower() in ("heat", "heating", "auto") or _matches_keywords(eid, HEATING_KEYWORDS):
+            if state_val.lower() in ("heat", "heating", "auto") or _matches_keywords(
+                eid, HEATING_KEYWORDS
+            ):
                 active_heating.append(eid)
             if state_val.lower() in ("cool", "cooling") or _matches_keywords(eid, COOLING_KEYWORDS):
                 active_cooling.append(eid)
@@ -157,7 +155,11 @@ def detect_conflicts(states: dict[str, dict] | None = None) -> list[dict[str, An
         if eid.startswith("media_player.") and state_val.lower() in ("playing", "on", "paused"):
             media_on.append(eid)
 
-        if eid.startswith("switch.") and state_val.lower() == "on" and _matches_keywords(eid, HEATING_KEYWORDS):
+        if (
+            eid.startswith("switch.")
+            and state_val.lower() == "on"
+            and _matches_keywords(eid, HEATING_KEYWORDS)
+        ):
             active_heating.append(eid)
 
     outdoor_temp = _get_outdoor_temp(states)
@@ -175,17 +177,19 @@ def detect_conflicts(states: dict[str, dict] | None = None) -> list[dict[str, An
             action_entities=active_heating,
             action="turn_off",
         )
-        conflicts.append({
-            "id": "window_heating",
-            "severity": "high",
-            "icon": "🪟🔥",
-            "title": "Window open while heating is on",
-            "description": f"{', '.join(window_names)} open — but {', '.join(heater_names)} still heating. Wasting energy.",
-            "suggestion": "Turn off heating when windows are open, or close the windows.",
-            "entities": open_windows + active_heating,
-            "yaml": yaml,
-            "est_waste_w": 500,  # rough estimate
-        })
+        conflicts.append(
+            {
+                "id": "window_heating",
+                "severity": "high",
+                "icon": "🪟🔥",
+                "title": "Window open while heating is on",
+                "description": f"{', '.join(window_names)} open — but {', '.join(heater_names)} still heating. Wasting energy.",
+                "suggestion": "Turn off heating when windows are open, or close the windows.",
+                "entities": open_windows + active_heating,
+                "yaml": yaml,
+                "est_waste_w": 500,  # rough estimate
+            }
+        )
 
     # ── Rule 2: Window open + AC on ──
     if open_windows and active_cooling:
@@ -196,31 +200,35 @@ def detect_conflicts(states: dict[str, dict] | None = None) -> list[dict[str, An
             action_entities=active_cooling,
             action="turn_off",
         )
-        conflicts.append({
-            "id": "window_cooling",
-            "severity": "high",
-            "icon": "🪟❄️",
-            "title": "Window open while AC is running",
-            "description": "Cooling the outdoors! Window open with air conditioning active.",
-            "suggestion": "Turn off AC when windows are open.",
-            "entities": open_windows + active_cooling,
-            "yaml": yaml,
-            "est_waste_w": 800,
-        })
+        conflicts.append(
+            {
+                "id": "window_cooling",
+                "severity": "high",
+                "icon": "🪟❄️",
+                "title": "Window open while AC is running",
+                "description": "Cooling the outdoors! Window open with air conditioning active.",
+                "suggestion": "Turn off AC when windows are open.",
+                "entities": open_windows + active_cooling,
+                "yaml": yaml,
+                "est_waste_w": 800,
+            }
+        )
 
     # ── Rule 3: Heating + cooling simultaneously ──
     if active_heating and active_cooling:
-        conflicts.append({
-            "id": "heat_cool_fight",
-            "severity": "critical",
-            "icon": "🔥❄️",
-            "title": "Heating and cooling running simultaneously",
-            "description": "Heating and AC are fighting each other. Pick one!",
-            "suggestion": "Disable either heating or cooling.",
-            "entities": active_heating + active_cooling,
-            "yaml": "",
-            "est_waste_w": 1500,
-        })
+        conflicts.append(
+            {
+                "id": "heat_cool_fight",
+                "severity": "critical",
+                "icon": "🔥❄️",
+                "title": "Heating and cooling running simultaneously",
+                "description": "Heating and AC are fighting each other. Pick one!",
+                "suggestion": "Disable either heating or cooling.",
+                "entities": active_heating + active_cooling,
+                "yaml": "",
+                "est_waste_w": 1500,
+            }
+        )
 
     # ── Rule 4: Nobody home + lights/media on ──
     if persons and not anyone_home and (lights_on or media_on):
@@ -233,45 +241,51 @@ def detect_conflicts(states: dict[str, dict] | None = None) -> list[dict[str, An
             action_entities=wasted,
             action="turn_off",
         )
-        conflicts.append({
-            "id": "nobody_home_lights",
-            "severity": "medium",
-            "icon": "🏠💡",
-            "title": f"Nobody home but {len(wasted)} device(s) still on",
-            "description": f"Everyone is away but still running: {', '.join(wasted_names)}{'...' if len(wasted) > 5 else ''}",
-            "suggestion": "Create an 'away mode' automation to turn off non-essential devices.",
-            "entities": list(persons.keys()) + wasted,
-            "yaml": yaml,
-            "est_waste_w": len(wasted) * 30,
-        })
+        conflicts.append(
+            {
+                "id": "nobody_home_lights",
+                "severity": "medium",
+                "icon": "🏠💡",
+                "title": f"Nobody home but {len(wasted)} device(s) still on",
+                "description": f"Everyone is away but still running: {', '.join(wasted_names)}{'...' if len(wasted) > 5 else ''}",
+                "suggestion": "Create an 'away mode' automation to turn off non-essential devices.",
+                "entities": list(persons.keys()) + wasted,
+                "yaml": yaml,
+                "est_waste_w": len(wasted) * 30,
+            }
+        )
 
     # ── Rule 5: Warm outside + heating on ──
     if outdoor_temp is not None and outdoor_temp > WARM_THRESHOLD_C and active_heating:
-        conflicts.append({
-            "id": "warm_outside_heating",
-            "severity": "medium",
-            "icon": "☀️🔥",
-            "title": f"It's {outdoor_temp:.0f}°C outside — heating still on",
-            "description": f"Outdoor temperature is {outdoor_temp:.1f}°C (above {WARM_THRESHOLD_C}°C) but heating is active.",
-            "suggestion": "Turn off heating or lower the setpoint. Open a window instead!",
-            "entities": active_heating,
-            "yaml": "",
-            "est_waste_w": 400,
-        })
+        conflicts.append(
+            {
+                "id": "warm_outside_heating",
+                "severity": "medium",
+                "icon": "☀️🔥",
+                "title": f"It's {outdoor_temp:.0f}°C outside — heating still on",
+                "description": f"Outdoor temperature is {outdoor_temp:.1f}°C (above {WARM_THRESHOLD_C}°C) but heating is active.",
+                "suggestion": "Turn off heating or lower the setpoint. Open a window instead!",
+                "entities": active_heating,
+                "yaml": "",
+                "est_waste_w": 400,
+            }
+        )
 
     # ── Rule 6: Cold outside + windows open ──
     if outdoor_temp is not None and outdoor_temp < COLD_THRESHOLD_C and open_windows:
-        conflicts.append({
-            "id": "cold_outside_windows",
-            "severity": "low",
-            "icon": "🥶🪟",
-            "title": f"It's {outdoor_temp:.0f}°C outside — windows still open",
-            "description": f"Outdoor temperature is {outdoor_temp:.1f}°C but windows are open. Losing heat.",
-            "suggestion": "Close windows to conserve heat.",
-            "entities": open_windows,
-            "yaml": "",
-            "est_waste_w": 200,
-        })
+        conflicts.append(
+            {
+                "id": "cold_outside_windows",
+                "severity": "low",
+                "icon": "🥶🪟",
+                "title": f"It's {outdoor_temp:.0f}°C outside — windows still open",
+                "description": f"Outdoor temperature is {outdoor_temp:.1f}°C but windows are open. Losing heat.",
+                "suggestion": "Close windows to conserve heat.",
+                "entities": open_windows,
+                "yaml": "",
+                "est_waste_w": 200,
+            }
+        )
 
     # ── Rule 7: Door open >10 min with climate active ──
     if open_doors and (active_heating or active_cooling):
@@ -281,21 +295,25 @@ def detect_conflicts(states: dict[str, dict] | None = None) -> list[dict[str, An
             last_changed = s.get("last_changed", "")
             if last_changed:
                 try:
-                    changed_dt = datetime.datetime.fromisoformat(last_changed.replace("Z", "+00:00"))
+                    changed_dt = datetime.datetime.fromisoformat(
+                        last_changed.replace("Z", "+00:00")
+                    )
                     open_minutes = (now - changed_dt).total_seconds() / 60
                     if open_minutes > 10:
                         door_name = door_eid.split(".")[-1].replace("_", " ").title()
-                        conflicts.append({
-                            "id": f"door_open_long_{door_eid.split('.')[-1]}",
-                            "severity": "medium",
-                            "icon": "🚪🌡️",
-                            "title": f"{door_name} open for {int(open_minutes)} minutes",
-                            "description": f"{door_name} has been open {int(open_minutes)} min while climate control is active.",
-                            "suggestion": f"Close {door_name} or pause climate control.",
-                            "entities": [door_eid] + active_heating + active_cooling,
-                            "yaml": "",
-                            "est_waste_w": 300,
-                        })
+                        conflicts.append(
+                            {
+                                "id": f"door_open_long_{door_eid.split('.')[-1]}",
+                                "severity": "medium",
+                                "icon": "🚪🌡️",
+                                "title": f"{door_name} open for {int(open_minutes)} minutes",
+                                "description": f"{door_name} has been open {int(open_minutes)} min while climate control is active.",
+                                "suggestion": f"Close {door_name} or pause climate control.",
+                                "entities": [door_eid] + active_heating + active_cooling,
+                                "yaml": "",
+                                "est_waste_w": 300,
+                            }
+                        )
                 except (ValueError, TypeError):
                     pass
 
@@ -338,15 +356,22 @@ def _build_conflict_yaml(
 def save_conflicts(conflicts: list[dict[str, Any]]) -> None:
     """Save detected conflicts."""
     from .utils import atomic_write as _atomic_write  # noqa: PLC0415
-    _atomic_write(CONFLICTS_PATH, {
-        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
-        "count": len(conflicts),
-        "total_est_waste_w": sum(c.get("est_waste_w", 0) for c in conflicts),
-        "conflicts": conflicts,
-    })
+
+    _atomic_write(
+        CONFLICTS_PATH,
+        {
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+            "count": len(conflicts),
+            "total_est_waste_w": sum(c.get("est_waste_w", 0) for c in conflicts),
+            "conflicts": conflicts,
+        },
+    )
     if conflicts:
-        log.info("Conflict detector: %d active conflict(s), ~%dW estimated waste",
-                 len(conflicts), sum(c.get("est_waste_w", 0) for c in conflicts))
+        log.info(
+            "Conflict detector: %d active conflict(s), ~%dW estimated waste",
+            len(conflicts),
+            sum(c.get("est_waste_w", 0) for c in conflicts),
+        )
 
 
 def load_conflicts() -> dict[str, Any]:

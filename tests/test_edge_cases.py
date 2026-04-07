@@ -170,22 +170,22 @@ class TestBoundaryConditions:
         """contamination_for_days at day 0 should return minimum."""
         from habitus.habitus.main import contamination_for_days
 
-        assert contamination_for_days(0) == 0.005
+        assert contamination_for_days(0) == 0.002
 
     def test_contamination_boundary_at_7(self):
         """contamination_for_days at exactly 7 days should step up."""
         from habitus.habitus.main import contamination_for_days
 
-        assert contamination_for_days(6) == 0.005
-        assert contamination_for_days(7) == 0.01
+        assert contamination_for_days(6) == 0.002
+        assert contamination_for_days(7) == 0.005
 
     def test_contamination_boundary_at_90(self):
         """contamination_for_days at 90+ days should return maximum."""
         from habitus.habitus.main import contamination_for_days
 
-        assert contamination_for_days(89) == 0.04
-        assert contamination_for_days(90) == 0.05
-        assert contamination_for_days(365) == 0.05
+        assert contamination_for_days(89) == 0.015
+        assert contamination_for_days(90) == 0.02
+        assert contamination_for_days(365) == 0.02
 
     def test_current_season_all_months(self):
         """current_season should return valid season for all months."""

@@ -17,8 +17,16 @@ log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 MARKOV_PATH = os.path.join(DATA_DIR, "markov_model.json")
 
-ACTION_DOMAINS = ("light", "switch", "media_player", "climate", "fan", "cover",
-                  "binary_sensor", "input_boolean")
+ACTION_DOMAINS = (
+    "light",
+    "switch",
+    "media_player",
+    "climate",
+    "fan",
+    "cover",
+    "binary_sensor",
+    "input_boolean",
+)
 # Max time between events to count as a transition (seconds)
 MAX_TRANSITION_SEC = 300  # 5 minutes
 # Minimum transitions to include in model
@@ -43,7 +51,8 @@ def build_markov_model(entity_to_area: dict[str, str], days: int = 30) -> dict[s
 
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        rows = conn.execute(f"""
+        rows = conn.execute(
+            f"""
             SELECT sm.entity_id, s.state, s.last_changed_ts
             FROM states s
             JOIN states_meta sm ON s.metadata_id = sm.metadata_id
@@ -52,7 +61,9 @@ def build_markov_model(entity_to_area: dict[str, str], days: int = 30) -> dict[s
             AND s.state IN ('on', 'off', 'heat', 'cool', 'auto', 'playing', 'paused',
                             'home', 'not_home', 'open', 'closed')
             ORDER BY s.last_changed_ts
-        """, (cutoff_ts,)).fetchall()
+        """,
+            (cutoff_ts,),
+        ).fetchall()
         conn.close()
     except Exception as e:
         log.warning("markov: DB query failed: %s", e)
@@ -71,7 +82,9 @@ def build_markov_model(entity_to_area: dict[str, str], days: int = 30) -> dict[s
     for eid, state, ts in rows:
         event = f"{eid}:{state}"
 
-        if prev_event and (ts - prev_ts) <= MAX_TRANSITION_SEC and event != prev_event:  # Skip self-transitions
+        if (
+            prev_event and (ts - prev_ts) <= MAX_TRANSITION_SEC and event != prev_event
+        ):  # Skip self-transitions
             transition_counts[prev_event][event] += 1
             state_counts[prev_event] += 1
 
@@ -112,20 +125,29 @@ def build_markov_model(entity_to_area: dict[str, str], days: int = 30) -> dict[s
             top_targets.append(entry)
 
             # Surface as a prediction
-            if prob >= 0.5 and to_eid.split(".")[0] in ("light", "switch", "media_player", "climate", "fan", "cover"):
-                predictions.append({
-                    "trigger": {
-                        "entity_id": from_eid,
-                        "name": from_name,
-                        "state": from_state,
-                        "room": from_room,
-                    },
-                    "prediction": entry,
-                    "probability": round(prob, 3),
-                    "total_observations": total,
-                    "description": f"After {from_name} → {from_state}, you usually {to_name} → {to_state} ({prob:.0%})",
-                    "suggestion": f"You just turned {from_state} {from_name} — want me to set {to_name} to {to_state}?",
-                })
+            if prob >= 0.5 and to_eid.split(".")[0] in (
+                "light",
+                "switch",
+                "media_player",
+                "climate",
+                "fan",
+                "cover",
+            ):
+                predictions.append(
+                    {
+                        "trigger": {
+                            "entity_id": from_eid,
+                            "name": from_name,
+                            "state": from_state,
+                            "room": from_room,
+                        },
+                        "prediction": entry,
+                        "probability": round(prob, 3),
+                        "total_observations": total,
+                        "description": f"After {from_name} → {from_state}, you usually {to_name} → {to_state} ({prob:.0%})",
+                        "suggestion": f"You just turned {from_state} {from_name} — want me to set {to_name} to {to_state}?",
+                    }
+                )
 
         if top_targets:
             transitions[from_event] = top_targets
@@ -142,8 +164,13 @@ def build_markov_model(entity_to_area: dict[str, str], days: int = 30) -> dict[s
     }
 
     from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+
     _atomic_write(MARKOV_PATH, result)
 
-    log.info("markov: %d transition states, %d actionable predictions from %d events",
-             len(transitions), len(predictions), len(rows))
+    log.info(
+        "markov: %d transition states, %d actionable predictions from %d events",
+        len(transitions),
+        len(predictions),
+        len(rows),
+    )
     return result

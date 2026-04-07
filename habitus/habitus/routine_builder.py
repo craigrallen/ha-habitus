@@ -6,6 +6,7 @@ Minimum frequency: occurred on 5+ separate days.
 Clusters sequences by time-of-day: morning, evening, night, arrival, departure.
 Generates HA script/automation YAML for each detected routine.
 """
+
 from __future__ import annotations
 
 import datetime
@@ -22,14 +23,15 @@ DATA_DIR = os.environ.get("DATA_DIR", "/data")
 def _get_data_dir() -> str:
     return os.environ.get("DATA_DIR", DATA_DIR)
 
+
 ROUTINES_PATH = os.path.join(DATA_DIR, "routines.json")
 EVENTS_PATH = os.path.join(DATA_DIR, "events.json")
 
 # Sequence mining config
-MAX_STEP_GAP_MINUTES = 10    # max time gap between consecutive steps
-MIN_SEQUENCE_LENGTH = 3      # minimum steps in a routine
-MIN_FREQUENCY_DAYS = 5       # must occur on at least 5 separate days
-MAX_SEQUENCE_LENGTH = 8      # cap to avoid noise
+MAX_STEP_GAP_MINUTES = 10  # max time gap between consecutive steps
+MIN_SEQUENCE_LENGTH = 3  # minimum steps in a routine
+MIN_FREQUENCY_DAYS = 5  # must occur on at least 5 separate days
+MAX_SEQUENCE_LENGTH = 8  # cap to avoid noise
 
 # Time clusters (hour ranges, inclusive)
 TIME_CLUSTERS = {
@@ -143,7 +145,7 @@ def mine_sequences(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         # Avoid duplicate sub-sequences
         skip = False
         for existing_key in seen_keys:
-            if len(existing_key) > len(seq_key) and existing_key[:len(seq_key)] == seq_key:
+            if len(existing_key) > len(seq_key) and existing_key[: len(seq_key)] == seq_key:
                 skip = True
                 break
         if skip:
@@ -164,13 +166,15 @@ def mine_sequences(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
         confidence = min(0.95, 0.5 + (len(unique_days) - MIN_FREQUENCY_DAYS) * 0.05)
 
-        detected.append({
-            "steps": steps,
-            "frequency_days": len(unique_days),
-            "time_cluster": time_cluster,
-            "avg_hour": round(avg_hour, 1),
-            "confidence": round(confidence, 2),
-        })
+        detected.append(
+            {
+                "steps": steps,
+                "frequency_days": len(unique_days),
+                "time_cluster": time_cluster,
+                "avg_hour": round(avg_hour, 1),
+                "confidence": round(confidence, 2),
+            }
+        )
 
     # Sort by frequency descending
     detected.sort(key=lambda r: r["frequency_days"], reverse=True)
@@ -249,10 +253,12 @@ def run(events: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     routines = []
     for seq in sequences:
         yaml_str = generate_routine_yaml(seq)
-        routines.append({
-            **seq,
-            "generated_yaml": yaml_str,
-        })
+        routines.append(
+            {
+                **seq,
+                "generated_yaml": yaml_str,
+            }
+        )
 
     result = {
         "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
@@ -261,6 +267,7 @@ def run(events: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     }
 
     from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+
     _atomic_write(os.path.join(os.environ.get("DATA_DIR", "/data"), "routines.json"), result)
 
     log.info("Routine builder: %d routines detected", len(routines))

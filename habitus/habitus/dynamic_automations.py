@@ -12,12 +12,12 @@ import json
 import logging
 import os
 import sqlite3
-from collections import Counter, defaultdict
+from collections import defaultdict
 from typing import Any
 
-from .ha_db import resolve_ha_db_path
-
 import numpy as np
+
+from .ha_db import resolve_ha_db_path
 
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
@@ -44,7 +44,8 @@ def _get_routine_timings(entity_to_area: dict[str, str], days: int = 30) -> dict
 
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        rows = conn.execute("""
+        rows = conn.execute(
+            """
             SELECT sm.entity_id, s.state, s.last_changed_ts
             FROM states s
             JOIN states_meta sm ON s.metadata_id = sm.metadata_id
@@ -56,7 +57,9 @@ def _get_routine_timings(entity_to_area: dict[str, str], days: int = 30) -> dict
                  OR sm.entity_id LIKE 'person.%')
             AND s.state IN ('on', 'off', 'home', 'not_home', 'playing')
             ORDER BY s.last_changed_ts
-        """, (cutoff_ts,)).fetchall()
+        """,
+            (cutoff_ts,),
+        ).fetchall()
         conn.close()
     except Exception as e:
         log.warning("dynamic: DB query failed: %s", e)
@@ -135,6 +138,7 @@ def _get_calendar_events() -> list[dict]:
     Returns upcoming events that could affect automations.
     """
     import requests
+
     ha_url = os.environ.get("HA_URL", "http://supervisor/core")
     token = os.environ.get("SUPERVISOR_TOKEN", os.environ.get("HABITUS_HA_TOKEN", ""))
 
@@ -176,12 +180,18 @@ def _get_calendar_events() -> list[dict]:
                 )
                 if r.status_code == 200:
                     for evt in r.json():
-                        events.append({
-                            "calendar": cal_id,
-                            "summary": evt.get("summary", ""),
-                            "start": evt.get("start", {}).get("dateTime", evt.get("start", {}).get("date", "")),
-                            "end": evt.get("end", {}).get("dateTime", evt.get("end", {}).get("date", "")),
-                        })
+                        events.append(
+                            {
+                                "calendar": cal_id,
+                                "summary": evt.get("summary", ""),
+                                "start": evt.get("start", {}).get(
+                                    "dateTime", evt.get("start", {}).get("date", "")
+                                ),
+                                "end": evt.get("end", {}).get(
+                                    "dateTime", evt.get("end", {}).get("date", "")
+                                ),
+                            }
+                        )
             except Exception:
                 continue
 
@@ -243,19 +253,23 @@ def run_dynamic_analysis(entity_to_area: dict[str, str], days: int = 30) -> dict
             try:
                 start_dt = datetime.datetime.fromisoformat(start_str.replace("Z", "+00:00"))
                 if start_dt.hour < 8:
-                    calendar_insights.append({
-                        "event": evt["summary"],
-                        "time": start_str,
-                        "suggestion": f"Early event '{evt['summary']}' — consider shifting morning routine earlier",
-                        "type": "early_start",
-                    })
+                    calendar_insights.append(
+                        {
+                            "event": evt["summary"],
+                            "time": start_str,
+                            "suggestion": f"Early event '{evt['summary']}' — consider shifting morning routine earlier",
+                            "type": "early_start",
+                        }
+                    )
                 elif start_dt.hour >= 20:
-                    calendar_insights.append({
-                        "event": evt["summary"],
-                        "time": start_str,
-                        "suggestion": f"Late event '{evt['summary']}' — evening routine may shift",
-                        "type": "late_event",
-                    })
+                    calendar_insights.append(
+                        {
+                            "event": evt["summary"],
+                            "time": start_str,
+                            "suggestion": f"Late event '{evt['summary']}' — evening routine may shift",
+                            "type": "late_event",
+                        }
+                    )
             except (ValueError, TypeError):
                 continue
 
@@ -269,7 +283,12 @@ def run_dynamic_analysis(entity_to_area: dict[str, str], days: int = 30) -> dict
     }
 
     from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+
     _atomic_write(DYNAMIC_PATH, result)
 
-    log.info("dynamic: %d timing drifts detected, %d calendar insights", len(drifts), len(calendar_insights))
+    log.info(
+        "dynamic: %d timing drifts detected, %d calendar insights",
+        len(drifts),
+        len(calendar_insights),
+    )
     return result

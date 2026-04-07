@@ -75,39 +75,53 @@ def _get_room_entry_events(entity_to_area: dict[str, str], days: int = DEFAULT_D
             entries = []
             for eid, area in trigger_entities.items():
                 if has_meta:
-                    rows = conn.execute("""
+                    rows = conn.execute(
+                        """
                         SELECT s.state, s.last_changed_ts
                         FROM states s
                         JOIN states_meta sm ON s.metadata_id = sm.metadata_id
                         WHERE sm.entity_id = ? AND s.last_changed_ts > ? AND s.state = 'on'
                         ORDER BY s.last_changed_ts
-                    """, (eid, cutoff_ts)).fetchall()
+                    """,
+                        (eid, cutoff_ts),
+                    ).fetchall()
                 else:
-                    rows = conn.execute("""
+                    rows = conn.execute(
+                        """
                         SELECT state, last_changed_ts
                         FROM states WHERE entity_id = ? AND last_changed_ts > ? AND state = 'on'
                         ORDER BY last_changed_ts
-                    """, (eid, cutoff_ts)).fetchall()
+                    """,
+                        (eid, cutoff_ts),
+                    ).fetchall()
 
                 for _, ts in rows:
                     dt = datetime.datetime.fromtimestamp(ts, tz=datetime.UTC)
-                    entries.append({
-                        "room": area,
-                        "timestamp": ts,
-                        "hour": dt.hour,
-                        "day_of_week": dt.weekday(),
-                        "is_weekend": dt.weekday() >= 5,
-                        "trigger_entity": eid,
-                    })
+                    entries.append(
+                        {
+                            "room": area,
+                            "timestamp": ts,
+                            "hour": dt.hour,
+                            "day_of_week": dt.weekday(),
+                            "is_weekend": dt.weekday() >= 5,
+                            "trigger_entity": eid,
+                        }
+                    )
         entries.sort(key=lambda e: e["timestamp"])
-        log.info("Found %d room entry events across %d trigger sensors", len(entries), len(trigger_entities))
+        log.info(
+            "Found %d room entry events across %d trigger sensors",
+            len(entries),
+            len(trigger_entities),
+        )
         return entries
     except Exception as e:
         log.warning("Failed to get room entry events: %s", e)
         return []
 
 
-def _get_actions_after_entry(entry_ts: float, room: str, entity_to_area: dict[str, str]) -> list[dict]:
+def _get_actions_after_entry(
+    entry_ts: float, room: str, entity_to_area: dict[str, str]
+) -> list[dict]:
     """Find entity state changes that happened within ACTION_WINDOW_MIN after a room entry.
 
     Only includes entities in the same room (or unassigned entities matching room keywords).
@@ -128,7 +142,8 @@ def _get_actions_after_entry(entry_ts: float, room: str, entity_to_area: dict[st
             has_meta = table_exists(conn, "states_meta")
 
             if has_meta:
-                rows = conn.execute("""
+                rows = conn.execute(
+                    """
                     SELECT sm.entity_id, s.state, s.last_changed_ts
                     FROM states s
                     JOIN states_meta sm ON s.metadata_id = sm.metadata_id
@@ -142,9 +157,12 @@ def _get_actions_after_entry(entry_ts: float, room: str, entity_to_area: dict[st
                         OR sm.entity_id LIKE 'cover.%'
                     )
                     ORDER BY s.last_changed_ts
-                """, (entry_ts, window_end)).fetchall()
+                """,
+                    (entry_ts, window_end),
+                ).fetchall()
             else:
-                rows = conn.execute("""
+                rows = conn.execute(
+                    """
                     SELECT entity_id, state, last_changed_ts
                     FROM states
                     WHERE last_changed_ts > ? AND last_changed_ts <= ?
@@ -157,17 +175,21 @@ def _get_actions_after_entry(entry_ts: float, room: str, entity_to_area: dict[st
                         OR entity_id LIKE 'cover.%'
                     )
                     ORDER BY last_changed_ts
-                """, (entry_ts, window_end)).fetchall()
+                """,
+                    (entry_ts, window_end),
+                ).fetchall()
 
         actions = []
         for eid, state, ts in rows:
             # Only include entities in the same room
             if eid in room_entities and state in ("on", "off", "heat", "cool", "auto", "playing"):
-                actions.append({
-                    "entity_id": eid,
-                    "state": state,
-                    "delay_sec": round(ts - entry_ts),
-                })
+                actions.append(
+                    {
+                        "entity_id": eid,
+                        "state": state,
+                        "delay_sec": round(ts - entry_ts),
+                    }
+                )
         return actions
     except Exception as e:
         log.warning("Failed to get post-entry actions: %s", e)
@@ -226,25 +248,31 @@ def build_room_model(entity_to_area: dict[str, str], days: int = DEFAULT_DAYS) -
             probability = count / n_entries
             if probability >= MIN_CONFIDENCE:
                 eid_name = eid.split(".")[-1].replace("_", " ").title()
-                top_actions.append({
-                    "entity_id": eid,
-                    "name": eid_name,
-                    "state": state,
-                    "probability": round(probability, 2),
-                    "occurrences": count,
-                    "total_entries": n_entries,
-                })
+                top_actions.append(
+                    {
+                        "entity_id": eid,
+                        "name": eid_name,
+                        "state": state,
+                        "probability": round(probability, 2),
+                        "occurrences": count,
+                        "total_entries": n_entries,
+                    }
+                )
 
         if top_actions:
-            rooms_model[room].append({
-                "time_window": f"{hour_start:02d}:00–{hour_end:02d}:00",
-                "hour_start": hour_start,
-                "hour_end": hour_end,
-                "day_type": day_type,
-                "entry_count": n_entries,
-                "predicted_actions": top_actions,
-                "description": _build_prediction_description(room, top_actions, hour_start, day_type),
-            })
+            rooms_model[room].append(
+                {
+                    "time_window": f"{hour_start:02d}:00–{hour_end:02d}:00",
+                    "hour_start": hour_start,
+                    "hour_end": hour_end,
+                    "day_type": day_type,
+                    "entry_count": n_entries,
+                    "predicted_actions": top_actions,
+                    "description": _build_prediction_description(
+                        room, top_actions, hour_start, day_type
+                    ),
+                }
+            )
 
     return {
         "rooms": dict(rooms_model),
@@ -256,16 +284,29 @@ def build_room_model(entity_to_area: dict[str, str], days: int = DEFAULT_DAYS) -
 def _build_prediction_description(room: str, actions: list[dict], hour: int, day_type: str) -> str:
     """Build human-readable prediction description."""
     time_labels = {
-        0: "late night", 2: "early morning", 4: "dawn", 6: "morning",
-        8: "mid-morning", 10: "late morning", 12: "midday", 14: "afternoon",
-        16: "late afternoon", 18: "evening", 20: "late evening", 22: "night",
+        0: "late night",
+        2: "early morning",
+        4: "dawn",
+        6: "morning",
+        8: "mid-morning",
+        10: "late morning",
+        12: "midday",
+        14: "afternoon",
+        16: "late afternoon",
+        18: "evening",
+        20: "late evening",
+        22: "night",
     }
     time_label = time_labels.get(hour, "")
     action_strs = [f"{a['name']} → {a['state']} ({a['probability']:.0%})" for a in actions[:3]]
-    return f"When you enter {room} on {day_type} {time_label}s, you usually: {', '.join(action_strs)}"
+    return (
+        f"When you enter {room} on {day_type} {time_label}s, you usually: {', '.join(action_strs)}"
+    )
 
 
-def generate_prediction_automations(model: dict[str, Any], entity_to_area: dict[str, str]) -> list[dict]:
+def generate_prediction_automations(
+    model: dict[str, Any], entity_to_area: dict[str, str]
+) -> list[dict]:
     """Generate HA automations that predict user needs on room entry.
 
     Each automation:
@@ -279,9 +320,11 @@ def generate_prediction_automations(model: dict[str, Any], entity_to_area: dict[
     for room, predictions in model.get("rooms", {}).items():
         # Find motion sensors for this room
         triggers = [
-            eid for eid, area in entity_to_area.items()
-            if area == room and eid.startswith("binary_sensor.") and
-            any(kw in eid.lower() for kw in ("motion", "occupancy", "presence", "pir"))
+            eid
+            for eid, area in entity_to_area.items()
+            if area == room
+            and eid.startswith("binary_sensor.")
+            and any(kw in eid.lower() for kw in ("motion", "occupancy", "presence", "pir"))
         ]
         if not triggers:
             continue
@@ -348,19 +391,21 @@ def generate_prediction_automations(model: dict[str, Any], entity_to_area: dict[
 """
 
             avg_confidence = sum(a["probability"] for a in actions) / len(actions)
-            automations.append({
-                "id": f"predict_{safe_room}_{time_slot}_{day_type}",
-                "room": room,
-                "time_window": pred["time_window"],
-                "day_type": day_type,
-                "actions": actions,
-                "description": pred["description"],
-                "confidence": round(avg_confidence * 100),
-                "entry_count": pred["entry_count"],
-                "yaml": yaml,
-                "action_yaml": action_yaml.strip(),
-                "category": "predictive",
-            })
+            automations.append(
+                {
+                    "id": f"predict_{safe_room}_{time_slot}_{day_type}",
+                    "room": room,
+                    "time_window": pred["time_window"],
+                    "day_type": day_type,
+                    "actions": actions,
+                    "description": pred["description"],
+                    "confidence": round(avg_confidence * 100),
+                    "entry_count": pred["entry_count"],
+                    "yaml": yaml,
+                    "action_yaml": action_yaml.strip(),
+                    "category": "predictive",
+                }
+            )
 
     automations.sort(key=lambda a: -a["confidence"])
     return automations
@@ -381,13 +426,18 @@ def run_room_prediction(entity_to_area: dict[str, str], days: int = DEFAULT_DAYS
 
     try:
         from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+
         _atomic_write(PREDICTIONS_PATH, result)
     except Exception as e:
         log.warning("room_predictor: could not save predictions: %s", e)
 
     if automations:
-        log.info("Room predictor: %d predictions across %d rooms from %d entry events",
-                 len(automations), len(model.get("rooms", {})), model.get("total_entries", 0))
+        log.info(
+            "Room predictor: %d predictions across %d rooms from %d entry events",
+            len(automations),
+            len(model.get("rooms", {})),
+            model.get("total_entries", 0),
+        )
     return result
 
 

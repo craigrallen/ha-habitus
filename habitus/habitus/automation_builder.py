@@ -49,14 +49,16 @@ def fetch_ha_automations() -> list[dict[str, Any]]:
             if not entity["entity_id"].startswith("automation."):
                 continue
             attrs = entity.get("attributes", {})
-            automations.append({
-                "entity_id": entity["entity_id"],
-                "state": entity["state"],
-                "alias": attrs.get("friendly_name", entity["entity_id"]),
-                "last_triggered": attrs.get("last_triggered"),
-                "current_state": entity["state"],
-                "id": attrs.get("id", entity["entity_id"].split(".", 1)[1]),
-            })
+            automations.append(
+                {
+                    "entity_id": entity["entity_id"],
+                    "state": entity["state"],
+                    "alias": attrs.get("friendly_name", entity["entity_id"]),
+                    "last_triggered": attrs.get("last_triggered"),
+                    "current_state": entity["state"],
+                    "id": attrs.get("id", entity["entity_id"].split(".", 1)[1]),
+                }
+            )
         log.info("Fetched %d HA automations", len(automations))
         return automations
     except Exception as e:
@@ -68,11 +70,16 @@ def save_ha_automations(automations: list[dict[str, Any]]) -> None:
     """Cache fetched HA automations to disk."""
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(HA_AUTOMATIONS_PATH, "w") as f:
-        json.dump({
-            "automations": automations,
-            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
-            "count": len(automations),
-        }, f, indent=2, default=str)
+        json.dump(
+            {
+                "automations": automations,
+                "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+                "count": len(automations),
+            },
+            f,
+            indent=2,
+            default=str,
+        )
 
 
 def load_ha_automations() -> list[dict[str, Any]]:
@@ -110,9 +117,9 @@ def build_scene_yaml(scene: dict[str, Any]) -> str:
     for eid, state in scene.get("entity_states", {}).items():
         domain = eid.split(".")[0]
         if domain == "light":
-            entities_block += f"      {eid}:\n        state: \"{state}\"\n"
+            entities_block += f'      {eid}:\n        state: "{state}"\n'
         else:
-            entities_block += f"      {eid}:\n        state: \"{state}\"\n"
+            entities_block += f'      {eid}:\n        state: "{state}"\n'
 
     safe_name = scene["name"].lower().replace(" ", "_").replace("&", "and")
     return f"""scene:
@@ -127,7 +134,7 @@ def build_scene_automation_yaml(scene: dict[str, Any]) -> str:
     time_pattern = scene.get("time_pattern", {})
     peak_hour = time_pattern.get("peak_hour", 18)
     days = time_pattern.get("days", "daily")
-    safe_name = scene["name"].lower().replace(" ", "_").replace("&", "and")
+    scene["name"].lower().replace(" ", "_").replace("&", "and")
 
     # Build trigger
     trigger = f"""    - platform: time
@@ -292,13 +299,38 @@ def generate_smart_suggestions(
     # If a scene contains binary_sensor (motion/presence) co-occurring with
     # lights/switches/media, generate a motion-triggered automation
     for scene in scenes:
-        trigger_entities = [e for e in scene.get("entities", [])
-                          if (e.startswith("binary_sensor.") and
-                          any(kw in e.lower() for kw in ("motion", "occupancy", "presence", "pir", "door", "window", "contact", "opening")))
-                          or (e.startswith("climate.") and
-                          any(kw in e.lower() for kw in ("heater", "radiator", "thermostat", "heating", "hvac")))]
-        action_entities = [e for e in scene.get("entities", [])
-                         if not e.startswith(("binary_sensor.", "person.", "device_tracker."))]
+        trigger_entities = [
+            e
+            for e in scene.get("entities", [])
+            if (
+                e.startswith("binary_sensor.")
+                and any(
+                    kw in e.lower()
+                    for kw in (
+                        "motion",
+                        "occupancy",
+                        "presence",
+                        "pir",
+                        "door",
+                        "window",
+                        "contact",
+                        "opening",
+                    )
+                )
+            )
+            or (
+                e.startswith("climate.")
+                and any(
+                    kw in e.lower()
+                    for kw in ("heater", "radiator", "thermostat", "heating", "hvac")
+                )
+            )
+        ]
+        action_entities = [
+            e
+            for e in scene.get("entities", [])
+            if not e.startswith(("binary_sensor.", "person.", "device_tracker."))
+        ]
         if trigger_entities and action_entities:
             tp = scene.get("time_pattern", {})
             for trigger in trigger_entities:
@@ -313,31 +345,41 @@ def generate_smart_suggestions(
                     hour_end=tp.get("peak_hour", 22) + 2 if tp.get("peak_hour") else None,
                 )
                 overlap = _entities_overlap(action_entities, ha_automations)
-                suggestions.append({
-                    "id": f"smart_motion_{scene['id']}_{trigger.split('.')[-1]}",
-                    "title": f"When {trigger_name}: activate {scene['name']}",
-                    "description": f"Motion/presence trigger → lights and devices you typically use together",
-                    "confidence": min(scene.get("confidence", 50) + 10, 100),
-                    "category": "motion",
-                    "applicable": True,
-                    "entities": action_entities,
-                    "trigger": trigger,
-                    "time_pattern": tp,
-                    "yaml": yaml,
-                    "overlap_automation": overlap,
-                    "source": "scene_detector",
-                })
+                suggestions.append(
+                    {
+                        "id": f"smart_motion_{scene['id']}_{trigger.split('.')[-1]}",
+                        "title": f"When {trigger_name}: activate {scene['name']}",
+                        "description": "Motion/presence trigger → lights and devices you typically use together",
+                        "confidence": min(scene.get("confidence", 50) + 10, 100),
+                        "category": "motion",
+                        "applicable": True,
+                        "entities": action_entities,
+                        "trigger": trigger,
+                        "time_pattern": tp,
+                        "yaml": yaml,
+                        "overlap_automation": overlap,
+                        "source": "scene_detector",
+                    }
+                )
 
     # ── Heater/climate as presence indicator ──
     # When someone adjusts a heater/thermostat, it implies they're in that room.
     # Suggest: "When bedroom heater turns on → turn on bedroom lights"
     for scene in scenes:
-        climate_triggers = [e for e in scene.get("entities", [])
-                           if e.startswith("climate.") and
-                           any(kw in e.lower() for kw in ("heater", "radiator", "thermostat", "heating", "hvac"))]
-        action_entities = [e for e in scene.get("entities", [])
-                         if e.startswith(("light.", "switch.", "media_player.", "fan."))
-                         and e not in climate_triggers]
+        climate_triggers = [
+            e
+            for e in scene.get("entities", [])
+            if e.startswith("climate.")
+            and any(
+                kw in e.lower() for kw in ("heater", "radiator", "thermostat", "heating", "hvac")
+            )
+        ]
+        action_entities = [
+            e
+            for e in scene.get("entities", [])
+            if e.startswith(("light.", "switch.", "media_player.", "fan."))
+            and e not in climate_triggers
+        ]
         if climate_triggers and action_entities:
             tp = scene.get("time_pattern", {})
             for clim in climate_triggers:
@@ -352,28 +394,36 @@ def generate_smart_suggestions(
                     hour_end=tp.get("peak_hour", 23) + 1 if tp.get("peak_hour") else None,
                 )
                 overlap = _entities_overlap(action_entities, ha_automations)
-                suggestions.append({
-                    "id": f"smart_climate_{scene['id']}_{clim.split('.')[-1]}",
-                    "title": f"When {clim_name} activates: set up {scene['name']}",
-                    "description": f"Heater/thermostat change implies presence — auto-activate room scene",
-                    "confidence": min(scene.get("confidence", 50) + 5, 100),
-                    "category": "presence",
-                    "applicable": True,
-                    "entities": action_entities,
-                    "trigger": clim,
-                    "time_pattern": tp,
-                    "yaml": yaml,
-                    "overlap_automation": overlap,
-                    "source": "scene_detector",
-                })
+                suggestions.append(
+                    {
+                        "id": f"smart_climate_{scene['id']}_{clim.split('.')[-1]}",
+                        "title": f"When {clim_name} activates: set up {scene['name']}",
+                        "description": "Heater/thermostat change implies presence — auto-activate room scene",
+                        "confidence": min(scene.get("confidence", 50) + 5, 100),
+                        "category": "presence",
+                        "applicable": True,
+                        "entities": action_entities,
+                        "trigger": clim,
+                        "time_pattern": tp,
+                        "yaml": yaml,
+                        "overlap_automation": overlap,
+                        "source": "scene_detector",
+                    }
+                )
 
     # ── Door/window-triggered suggestions ──
     for scene in scenes:
-        door_entities = [e for e in scene.get("entities", [])
-                        if e.startswith("binary_sensor.") and
-                        any(kw in e.lower() for kw in ("door", "window", "contact", "opening"))]
-        action_entities = [e for e in scene.get("entities", [])
-                         if not e.startswith(("binary_sensor.", "person.", "device_tracker."))]
+        door_entities = [
+            e
+            for e in scene.get("entities", [])
+            if e.startswith("binary_sensor.")
+            and any(kw in e.lower() for kw in ("door", "window", "contact", "opening"))
+        ]
+        action_entities = [
+            e
+            for e in scene.get("entities", [])
+            if not e.startswith(("binary_sensor.", "person.", "device_tracker."))
+        ]
         if door_entities and action_entities:
             tp = scene.get("time_pattern", {})
             for door in door_entities:
@@ -388,31 +438,36 @@ def generate_smart_suggestions(
                     hour_end=tp.get("peak_hour", 22) + 2 if tp.get("peak_hour") else None,
                 )
                 overlap = _entities_overlap(action_entities, ha_automations)
-                suggestions.append({
-                    "id": f"smart_door_{scene['id']}_{door.split('.')[-1]}",
-                    "title": f"When {door_name} opens: activate {scene['name']}",
-                    "description": f"Door/window trigger → lights and devices you typically use after opening",
-                    "confidence": min(scene.get("confidence", 50) + 5, 100),
-                    "category": "door",
-                    "applicable": True,
-                    "entities": action_entities,
-                    "trigger": door,
-                    "time_pattern": tp,
-                    "yaml": yaml,
-                    "overlap_automation": overlap,
-                    "source": "scene_detector",
-                })
+                suggestions.append(
+                    {
+                        "id": f"smart_door_{scene['id']}_{door.split('.')[-1]}",
+                        "title": f"When {door_name} opens: activate {scene['name']}",
+                        "description": "Door/window trigger → lights and devices you typically use after opening",
+                        "confidence": min(scene.get("confidence", 50) + 5, 100),
+                        "category": "door",
+                        "applicable": True,
+                        "entities": action_entities,
+                        "trigger": door,
+                        "time_pattern": tp,
+                        "yaml": yaml,
+                        "overlap_automation": overlap,
+                        "source": "scene_detector",
+                    }
+                )
 
     # ── Person home/away suggestions ──
     # Find person entities that co-occur with many lights being turned off/on
-    person_entities = [e for s in scenes for e in s.get("entities", [])
-                      if e.startswith("person.")]
+    person_entities = [e for s in scenes for e in s.get("entities", []) if e.startswith("person.")]
     if person_entities:
         # Collect all action entities across all scenes
-        all_action_entities = list({
-            e for s in scenes for e in s.get("entities", [])
-            if e.startswith(("light.", "switch.", "media_player.", "fan.", "climate."))
-        })
+        all_action_entities = list(
+            {
+                e
+                for s in scenes
+                for e in s.get("entities", [])
+                if e.startswith(("light.", "switch.", "media_player.", "fan.", "climate."))
+            }
+        )
         if all_action_entities:
             for person in set(person_entities):
                 person_name = person.split(".")[1].replace("_", " ").title()
@@ -425,24 +480,31 @@ def generate_smart_suggestions(
                     trigger_state="not_home",
                     action="turn_off",
                 )
-                suggestions.append({
-                    "id": f"smart_presence_leave_{person.split('.')[-1]}",
-                    "title": f"When {person_name} leaves home: turn everything off",
-                    "description": f"Automatically turn off lights and devices when everyone leaves",
-                    "confidence": 70,
-                    "category": "presence",
-                    "applicable": True,
-                    "entities": all_action_entities,
-                    "trigger": person,
-                    "yaml": leave_yaml,
-                    "overlap_automation": _entities_overlap(all_action_entities, ha_automations),
-                    "source": "scene_detector",
-                })
+                suggestions.append(
+                    {
+                        "id": f"smart_presence_leave_{person.split('.')[-1]}",
+                        "title": f"When {person_name} leaves home: turn everything off",
+                        "description": "Automatically turn off lights and devices when everyone leaves",
+                        "confidence": 70,
+                        "category": "presence",
+                        "applicable": True,
+                        "entities": all_action_entities,
+                        "trigger": person,
+                        "yaml": leave_yaml,
+                        "overlap_automation": _entities_overlap(
+                            all_action_entities, ha_automations
+                        ),
+                        "source": "scene_detector",
+                    }
+                )
                 # "Arriving home" automation — turn on most-used scene
                 if scenes:
                     top_scene = scenes[0]
-                    arrive_entities = [e for e in top_scene.get("entities", [])
-                                      if not e.startswith(("binary_sensor.", "person.", "device_tracker."))]
+                    arrive_entities = [
+                        e
+                        for e in top_scene.get("entities", [])
+                        if not e.startswith(("binary_sensor.", "person.", "device_tracker."))
+                    ]
                     if arrive_entities:
                         arrive_yaml = build_presence_automation_yaml(
                             alias=f"Habitus — {person_name} Arrives → Welcome",
@@ -452,19 +514,23 @@ def generate_smart_suggestions(
                             trigger_state="home",
                             action="turn_on",
                         )
-                        suggestions.append({
-                            "id": f"smart_presence_arrive_{person.split('.')[-1]}",
-                            "title": f"When {person_name} arrives home: welcome scene",
-                            "description": f"Turn on {top_scene['name']} when {person_name} comes home",
-                            "confidence": 65,
-                            "category": "presence",
-                            "applicable": True,
-                            "entities": arrive_entities,
-                            "trigger": person,
-                            "yaml": arrive_yaml,
-                            "overlap_automation": _entities_overlap(arrive_entities, ha_automations),
-                            "source": "scene_detector",
-                        })
+                        suggestions.append(
+                            {
+                                "id": f"smart_presence_arrive_{person.split('.')[-1]}",
+                                "title": f"When {person_name} arrives home: welcome scene",
+                                "description": f"Turn on {top_scene['name']} when {person_name} comes home",
+                                "confidence": 65,
+                                "category": "presence",
+                                "applicable": True,
+                                "entities": arrive_entities,
+                                "trigger": person,
+                                "yaml": arrive_yaml,
+                                "overlap_automation": _entities_overlap(
+                                    arrive_entities, ha_automations
+                                ),
+                                "source": "scene_detector",
+                            }
+                        )
 
     # ── Pattern-based suggestions (from existing suggestions, re-tagged) ──
     if existing_suggestions:
@@ -488,13 +554,18 @@ def save_smart_suggestions(suggestions: list[dict[str, Any]]) -> None:
     """Save merged smart suggestions."""
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(SMART_SUGGESTIONS_PATH, "w") as f:
-        json.dump({
-            "suggestions": suggestions,
-            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
-            "count": len(suggestions),
-            "scene_count": sum(1 for s in suggestions if s.get("source") == "scene_detector"),
-            "pattern_count": sum(1 for s in suggestions if s.get("source") == "patterns"),
-        }, f, indent=2, default=str)
+        json.dump(
+            {
+                "suggestions": suggestions,
+                "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+                "count": len(suggestions),
+                "scene_count": sum(1 for s in suggestions if s.get("source") == "scene_detector"),
+                "pattern_count": sum(1 for s in suggestions if s.get("source") == "patterns"),
+            },
+            f,
+            indent=2,
+            default=str,
+        )
     log.info("Saved %d smart suggestions to %s", len(suggestions), SMART_SUGGESTIONS_PATH)
 
 

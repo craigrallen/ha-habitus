@@ -10,16 +10,15 @@ Falls back to a simpler clustering approach if hmmlearn is unavailable.
 """
 
 import datetime
-import json
 import logging
 import os
 import sqlite3
 from collections import Counter, defaultdict
 from typing import Any
 
-from .ha_db import resolve_ha_db_path
-
 import numpy as np
+
+from .ha_db import resolve_ha_db_path
 
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
@@ -31,7 +30,9 @@ N_STATES = 8
 WINDOW_MINUTES = 60
 
 
-def _build_observation_matrix(entity_to_area: dict[str, str], days: int = 30) -> tuple[np.ndarray, list[str]]:
+def _build_observation_matrix(
+    entity_to_area: dict[str, str], days: int = 30
+) -> tuple[np.ndarray, list[str]]:
     """Build observation matrix for HMM training.
 
     Each row = one hour window.
@@ -47,14 +48,17 @@ def _build_observation_matrix(entity_to_area: dict[str, str], days: int = 30) ->
 
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        rows = conn.execute("""
+        rows = conn.execute(
+            """
             SELECT sm.entity_id, s.state, s.last_changed_ts
             FROM states s
             JOIN states_meta sm ON s.metadata_id = sm.metadata_id
             WHERE s.last_changed_ts > ?
             AND s.state NOT IN ('unavailable', 'unknown', '')
             ORDER BY s.last_changed_ts
-        """, (cutoff_ts,)).fetchall()
+        """,
+            (cutoff_ts,),
+        ).fetchall()
         conn.close()
     except Exception as e:
         log.warning("activity_hmm: DB query failed: %s", e)
@@ -64,11 +68,18 @@ def _build_observation_matrix(entity_to_area: dict[str, str], days: int = 30) ->
         return np.array([]), []
 
     # Bin events into hourly windows
-    windows: dict[int, dict[str, int]] = defaultdict(lambda: {
-        "lights_on": 0, "switches_on": 0, "motion": 0,
-        "media": 0, "climate": 0, "doors": 0,
-        "people_home": 0, "total_changes": 0,
-    })
+    windows: dict[int, dict[str, int]] = defaultdict(
+        lambda: {
+            "lights_on": 0,
+            "switches_on": 0,
+            "motion": 0,
+            "media": 0,
+            "climate": 0,
+            "doors": 0,
+            "people_home": 0,
+            "total_changes": 0,
+        }
+    )
 
     for eid, state, ts in rows:
         window_key = int(ts // (WINDOW_MINUTES * 60))
@@ -81,13 +92,21 @@ def _build_observation_matrix(entity_to_area: dict[str, str], days: int = 30) ->
             w["lights_on"] += 1
         elif domain == "switch" and state == "on":
             w["switches_on"] += 1
-        elif domain == "binary_sensor" and state == "on" and any(k in eid_lower for k in ("motion", "pir", "occupancy")):
+        elif (
+            domain == "binary_sensor"
+            and state == "on"
+            and any(k in eid_lower for k in ("motion", "pir", "occupancy"))
+        ):
             w["motion"] += 1
         elif domain == "media_player" and state in ("playing", "on"):
             w["media"] += 1
         elif domain == "climate" and state in ("heat", "cool", "auto"):
             w["climate"] += 1
-        elif domain == "binary_sensor" and state == "on" and any(k in eid_lower for k in ("door", "window")):
+        elif (
+            domain == "binary_sensor"
+            and state == "on"
+            and any(k in eid_lower for k in ("door", "window"))
+        ):
             w["doors"] += 1
         elif domain == "person" and state == "home":
             w["people_home"] += 1
@@ -106,17 +125,19 @@ def _build_observation_matrix(entity_to_area: dict[str, str], days: int = 30) ->
         dt = datetime.datetime.fromtimestamp(ts, tz=datetime.UTC)
         hour = dt.hour
 
-        features.append([
-            min(w["lights_on"], 10),
-            min(w["switches_on"], 10),
-            min(w["motion"], 20),
-            min(w["media"], 5),
-            min(w["climate"], 5),
-            min(w["doors"], 10),
-            min(w["people_home"], 5),
-            min(w["total_changes"], 50),
-            hour,
-        ])
+        features.append(
+            [
+                min(w["lights_on"], 10),
+                min(w["switches_on"], 10),
+                min(w["motion"], 20),
+                min(w["media"], 5),
+                min(w["climate"], 5),
+                min(w["doors"], 10),
+                min(w["people_home"], 5),
+                min(w["total_changes"], 50),
+                hour,
+            ]
+        )
         timestamps.append(dt.isoformat())
 
     return np.array(features, dtype=np.float64), timestamps
@@ -171,8 +192,10 @@ def train_activity_model(entity_to_area: dict[str, str], days: int = 30) -> dict
 
     try:
         from hmmlearn.hmm import GaussianHMM
-        model = GaussianHMM(n_components=N_STATES, covariance_type="diag",
-                            n_iter=100, random_state=42)
+
+        model = GaussianHMM(
+            n_components=N_STATES, covariance_type="diag", n_iter=100, random_state=42
+        )
         model.fit(X_norm)
         state_sequence = model.predict(X_norm)
         use_hmm = True
@@ -180,6 +203,7 @@ def train_activity_model(entity_to_area: dict[str, str], days: int = 30) -> dict
     except ImportError:
         log.warning("hmmlearn not available, falling back to KMeans clustering")
         from sklearn.cluster import KMeans
+
         km = KMeans(n_clusters=N_STATES, random_state=42, n_init=10)
         state_sequence = km.fit_predict(X_norm)
         use_hmm = False
@@ -200,18 +224,20 @@ def train_activity_model(entity_to_area: dict[str, str], days: int = 30) -> dict
         hour_counts = Counter(int(h) for h in hours)
         peak_hours = [h for h, _ in hour_counts.most_common(3)]
 
-        states_info.append({
-            "id": int(s),
-            "label": label,
-            "count": count,
-            "percentage": pct,
-            "peak_hours": peak_hours,
-            "avg_lights": round(float(centroid[0]), 1),
-            "avg_motion": round(float(centroid[2]), 1),
-            "avg_media": round(float(centroid[3]), 1),
-            "avg_climate": round(float(centroid[4]), 1),
-            "avg_changes": round(float(centroid[7]), 1),
-        })
+        states_info.append(
+            {
+                "id": int(s),
+                "label": label,
+                "count": count,
+                "percentage": pct,
+                "peak_hours": peak_hours,
+                "avg_lights": round(float(centroid[0]), 1),
+                "avg_motion": round(float(centroid[2]), 1),
+                "avg_media": round(float(centroid[3]), 1),
+                "avg_climate": round(float(centroid[4]), 1),
+                "avg_changes": round(float(centroid[7]), 1),
+            }
+        )
 
     states_info.sort(key=lambda s: -s["count"])
 
@@ -257,6 +283,7 @@ def train_activity_model(entity_to_area: dict[str, str], days: int = 30) -> dict
     }
 
     from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+
     _atomic_write(HMM_PATH, result)
 
     log.info("activity_hmm: %d states discovered, current=%s", len(states_info), current_label)

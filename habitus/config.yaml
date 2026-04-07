@@ -27,6 +27,9 @@ options:
   overnight_train_time: "02:00"
   max_power_kw: 25
   power_entity: ""
+  power_entity_phase1: ""
+  power_entity_phase2: ""
+  power_entity_phase3: ""
   kwh_price: 3.0
   currency: "kr"
   fetch_row_budget: 1000000
@@ -41,6 +44,9 @@ schema:
   overnight_train_time: str
   max_power_kw: int?
   power_entity: str?
+  power_entity_phase1: str?
+  power_entity_phase2: str?
+  power_entity_phase3: str?
   kwh_price: float?
   currency: str?
   fetch_row_budget: int?

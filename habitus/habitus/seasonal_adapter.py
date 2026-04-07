@@ -4,6 +4,7 @@ Detects current season based on date and hemisphere.
 Compares current usage patterns vs same-season history.
 Generates season-specific suggestions with YAML.
 """
+
 from __future__ import annotations
 
 import datetime
@@ -18,6 +19,7 @@ DATA_DIR = os.environ.get("DATA_DIR", "/data")
 
 def _get_data_dir() -> str:
     return os.environ.get("DATA_DIR", DATA_DIR)
+
 
 SEASONAL_SUGGESTIONS_PATH = os.path.join(DATA_DIR, "seasonal_suggestions.json")
 BASELINE_PATH = os.path.join(DATA_DIR, "baseline.json")
@@ -67,12 +69,13 @@ def _generate_winter_suggestions(entities: list[str]) -> list[dict[str, Any]]:
     suggestions = []
 
     # Heating preheat
-    suggestions.append({
-        "title": "Pre-heat home before morning",
-        "seasonal_reason": "Winter mornings are cold — pre-heat saves comfort and energy vs reactive heating",
-        "confidence": 0.85,
-        "season": "winter",
-        "generated_yaml": """automation:
+    suggestions.append(
+        {
+            "title": "Pre-heat home before morning",
+            "seasonal_reason": "Winter mornings are cold — pre-heat saves comfort and energy vs reactive heating",
+            "confidence": 0.85,
+            "season": "winter",
+            "generated_yaml": """automation:
   alias: "Habitus Seasonal — Winter morning pre-heat"
   description: "Pre-heat home 30 minutes before typical wake time in winter"
   trigger:
@@ -93,15 +96,17 @@ def _generate_winter_suggestions(entities: list[str]) -> list[dict[str, Any]]:
         title: "🌡️ Habitus"
         message: "Pre-heating for cold morning (outdoor temp below 5°C)"
 """,
-    })
+        }
+    )
 
     # Early evening lighting
-    suggestions.append({
-        "title": "Activate evening lights earlier in winter",
-        "seasonal_reason": "Winter days are short — sunset is earlier, so lights should come on sooner",
-        "confidence": 0.80,
-        "season": "winter",
-        "generated_yaml": """automation:
+    suggestions.append(
+        {
+            "title": "Activate evening lights earlier in winter",
+            "seasonal_reason": "Winter days are short — sunset is earlier, so lights should come on sooner",
+            "confidence": 0.80,
+            "season": "winter",
+            "generated_yaml": """automation:
   alias: "Habitus Seasonal — Winter early evening lights"
   description: "Turn on main lights at sunset in winter (earlier than summer)"
   trigger:
@@ -119,15 +124,17 @@ def _generate_winter_suggestions(entities: list[str]) -> list[dict[str, Any]]:
         brightness_pct: 80
         color_temp: 350
 """,
-    })
+        }
+    )
 
     # Frost alert
-    suggestions.append({
-        "title": "Frost alert automation",
-        "seasonal_reason": "Protect pipes and plants from frost during winter nights",
-        "confidence": 0.75,
-        "season": "winter",
-        "generated_yaml": """automation:
+    suggestions.append(
+        {
+            "title": "Frost alert automation",
+            "seasonal_reason": "Protect pipes and plants from frost during winter nights",
+            "confidence": 0.75,
+            "season": "winter",
+            "generated_yaml": """automation:
   alias: "Habitus Seasonal — Frost alert"
   description: "Alert when outdoor temperature approaches freezing"
   trigger:
@@ -140,7 +147,8 @@ def _generate_winter_suggestions(entities: list[str]) -> list[dict[str, Any]]:
         title: "🥶 Frost Warning"
         message: "Outdoor temperature is near freezing. Check pipes and outdoor plants."
 """,
-    })
+        }
+    )
 
     return suggestions
 
@@ -150,12 +158,13 @@ def _generate_summer_suggestions(entities: list[str]) -> list[dict[str, Any]]:
     suggestions = []
 
     # Cooling/fan automation
-    suggestions.append({
-        "title": "Cooling automation for hot days",
-        "seasonal_reason": "Summer heat peaks in the afternoon — cool before it gets too warm",
-        "confidence": 0.82,
-        "season": "summer",
-        "generated_yaml": """automation:
+    suggestions.append(
+        {
+            "title": "Cooling automation for hot days",
+            "seasonal_reason": "Summer heat peaks in the afternoon — cool before it gets too warm",
+            "confidence": 0.82,
+            "season": "summer",
+            "generated_yaml": """automation:
   alias: "Habitus Seasonal — Summer cooling"
   description: "Activate cooling when indoor temperature exceeds threshold in summer"
   trigger:
@@ -173,15 +182,17 @@ def _generate_summer_suggestions(entities: list[str]) -> list[dict[str, Any]]:
         hvac_mode: cool
         temperature: 23
 """,
-    })
+        }
+    )
 
     # Solar peak shift
-    suggestions.append({
-        "title": "Shift high-power tasks to solar peak hours",
-        "seasonal_reason": "Summer solar production peaks midday — run appliances then to offset costs",
-        "confidence": 0.78,
-        "season": "summer",
-        "generated_yaml": """automation:
+    suggestions.append(
+        {
+            "title": "Shift high-power tasks to solar peak hours",
+            "seasonal_reason": "Summer solar production peaks midday — run appliances then to offset costs",
+            "confidence": 0.78,
+            "season": "summer",
+            "generated_yaml": """automation:
   alias: "Habitus Seasonal — Solar peak appliance scheduling"
   description: "Notify to run dishwasher/washer during peak solar hours"
   trigger:
@@ -196,15 +207,17 @@ def _generate_summer_suggestions(entities: list[str]) -> list[dict[str, Any]]:
         title: "☀️ Solar Peak"
         message: "Good time to run high-power appliances (solar production peak)"
 """,
-    })
+        }
+    )
 
     # Late evening lighting
-    suggestions.append({
-        "title": "Later evening light schedule in summer",
-        "seasonal_reason": "Summer evenings stay bright longer — delay automatic lights",
-        "confidence": 0.77,
-        "season": "summer",
-        "generated_yaml": """automation:
+    suggestions.append(
+        {
+            "title": "Later evening light schedule in summer",
+            "seasonal_reason": "Summer evenings stay bright longer — delay automatic lights",
+            "confidence": 0.77,
+            "season": "summer",
+            "generated_yaml": """automation:
   alias: "Habitus Seasonal — Summer late evening lights"
   description: "Only turn on main lights after true sunset in summer"
   trigger:
@@ -221,7 +234,8 @@ def _generate_summer_suggestions(entities: list[str]) -> list[dict[str, Any]]:
       data:
         brightness_pct: 60
 """,
-    })
+        }
+    )
 
     return suggestions
 
@@ -387,7 +401,10 @@ def run(
     result["timestamp"] = datetime.datetime.now(datetime.UTC).isoformat()
 
     from .utils import atomic_write as _atomic_write  # noqa: PLC0415
-    _atomic_write(os.path.join(os.environ.get("DATA_DIR", "/data"), "seasonal_suggestions.json"), result)
+
+    _atomic_write(
+        os.path.join(os.environ.get("DATA_DIR", "/data"), "seasonal_suggestions.json"), result
+    )
 
     log.info("Seasonal adapter: season=%s, %d suggestions", result["season"], result["total"])
     return result
@@ -396,8 +413,12 @@ def run(
 def load_seasonal_suggestions() -> dict[str, Any]:
     """Load cached seasonal suggestions."""
     try:
-        if os.path.exists(os.path.join(os.environ.get("DATA_DIR", "/data"), "seasonal_suggestions.json")):
-            with open(os.path.join(os.environ.get("DATA_DIR", "/data"), "seasonal_suggestions.json")) as f:
+        if os.path.exists(
+            os.path.join(os.environ.get("DATA_DIR", "/data"), "seasonal_suggestions.json")
+        ):
+            with open(
+                os.path.join(os.environ.get("DATA_DIR", "/data"), "seasonal_suggestions.json")
+            ) as f:
                 return json.load(f)
     except Exception:
         pass

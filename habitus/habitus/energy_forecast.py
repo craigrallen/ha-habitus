@@ -48,7 +48,16 @@ def _get_daily_energy_and_weather(days: int = 90) -> list[dict]:
 
         # Find energy entity (cumulative kWh meter)
         # Exclude per-device sensors and prefer grid/total meters
-        _ENERGY_EXCLUDE = ("production", "solar", "pv", "battery", "epever", "today", "this_month", "this_year")
+        _ENERGY_EXCLUDE = (
+            "production",
+            "solar",
+            "pv",
+            "battery",
+            "epever",
+            "today",
+            "this_month",
+            "this_year",
+        )
         energy_candidates = conn.execute("""
             SELECT DISTINCT sm.entity_id FROM states_meta sm
             JOIN states s ON s.metadata_id = sm.metadata_id
@@ -58,7 +67,8 @@ def _get_daily_energy_and_weather(days: int = 90) -> list[dict]:
             HAVING COUNT(*) > 10
         """).fetchall()
         energy_candidates = [
-            eid for (eid,) in energy_candidates
+            eid
+            for (eid,) in energy_candidates
             if not any(x in eid.lower() for x in _ENERGY_EXCLUDE)
         ]
 
@@ -76,8 +86,20 @@ def _get_daily_energy_and_weather(days: int = 90) -> list[dict]:
                 energy_eid = energy_candidates[0]
 
         # Find outdoor temperature sensor — prefer sensors with recent numeric values in plausible range
-        _TEMP_EXCLUDE = ("battery", "device", "cpu", "body", "skin", "withings", "car",
-                         "driver", "passenger", "phone", "charging", "xg_")
+        _TEMP_EXCLUDE = (
+            "battery",
+            "device",
+            "cpu",
+            "body",
+            "skin",
+            "withings",
+            "car",
+            "driver",
+            "passenger",
+            "phone",
+            "charging",
+            "xg_",
+        )
         temp_candidates = conn.execute("""
             SELECT sm.entity_id, s.state FROM states_meta sm
             JOIN states s ON s.metadata_id = sm.metadata_id
@@ -92,8 +114,17 @@ def _get_daily_energy_and_weather(days: int = 90) -> list[dict]:
             temp_eid = _cfg_temp
         else:
             temp_eid = None
-            _TEMP_PREFER = ("outside", "outdoor", "exterior", "bilge", "ambient", "air_temp",
-                            "weather", "nodeid", "outside_temp")
+            _TEMP_PREFER = (
+                "outside",
+                "outdoor",
+                "exterior",
+                "bilge",
+                "ambient",
+                "air_temp",
+                "weather",
+                "nodeid",
+                "outside_temp",
+            )
             seen = set()
             scored = []
             for eid, state in temp_candidates:
@@ -119,21 +150,27 @@ def _get_daily_energy_and_weather(days: int = 90) -> list[dict]:
         # Get energy readings from statistics table (long-term hourly data)
         # For energy sensors, use 'sum' which gives cumulative kWh
         try:
-            energy_rows = conn.execute("""
+            energy_rows = conn.execute(
+                """
                 SELECT st.sum, st.start_ts FROM statistics st
                 JOIN statistics_meta sm ON st.metadata_id = sm.metadata_id
                 WHERE sm.statistic_id = ? AND st.start_ts > ?
                 ORDER BY st.start_ts
-            """, (energy_eid, cutoff_ts)).fetchall()
+            """,
+                (energy_eid, cutoff_ts),
+            ).fetchall()
         except Exception as e:
             # Fallback to states table if statistics not available
             log.debug("statistics query failed, using states: %s", e)
-            energy_rows = conn.execute("""
+            energy_rows = conn.execute(
+                """
                 SELECT s.state, s.last_changed_ts FROM states s
                 JOIN states_meta sm ON s.metadata_id = sm.metadata_id
                 WHERE sm.entity_id = ? AND s.last_changed_ts > ?
                 ORDER BY s.last_changed_ts
-            """, (energy_eid, cutoff_ts)).fetchall()
+            """,
+                (energy_eid, cutoff_ts),
+            ).fetchall()
 
         # Get temperature readings
         # Try statistics first (long-term), fallback to states
@@ -142,12 +179,15 @@ def _get_daily_energy_and_weather(days: int = 90) -> list[dict]:
             if temp_eid.startswith("weather."):
                 # Weather entities: try statistics first, then states+attributes
                 try:
-                    _stats = conn.execute("""
+                    _stats = conn.execute(
+                        """
                         SELECT st.mean, st.start_ts FROM statistics st
                         JOIN statistics_meta sm ON st.metadata_id = sm.metadata_id
                         WHERE sm.statistic_id = ? AND st.start_ts > ?
                         ORDER BY st.start_ts
-                    """, (temp_eid, cutoff_ts)).fetchall()
+                    """,
+                        (temp_eid, cutoff_ts),
+                    ).fetchall()
                     if _stats:
                         temp_rows = [(str(v), ts) for v, ts in _stats if v is not None]
                 except Exception:
@@ -155,13 +195,16 @@ def _get_daily_energy_and_weather(days: int = 90) -> list[dict]:
                 # Fallback to states+attributes if no statistics
                 if not temp_rows:
                     try:
-                        _weather_rows = conn.execute("""
+                        _weather_rows = conn.execute(
+                            """
                             SELECT sa.shared_attrs, s.last_changed_ts FROM states s
                             JOIN states_meta sm ON s.metadata_id = sm.metadata_id
                             JOIN state_attributes sa ON s.attributes_id = sa.attributes_id
                             WHERE sm.entity_id = ? AND s.last_changed_ts > ?
                             ORDER BY s.last_changed_ts
-                        """, (temp_eid, cutoff_ts)).fetchall()
+                        """,
+                            (temp_eid, cutoff_ts),
+                        ).fetchall()
                         for attrs_json, ts in _weather_rows:
                             try:
                                 attrs = json.loads(attrs_json) if attrs_json else {}
@@ -175,24 +218,30 @@ def _get_daily_energy_and_weather(days: int = 90) -> list[dict]:
             else:
                 # Regular temp sensor: try statistics first
                 try:
-                    _stats = conn.execute("""
+                    _stats = conn.execute(
+                        """
                         SELECT st.mean, st.start_ts FROM statistics st
                         JOIN statistics_meta sm ON st.metadata_id = sm.metadata_id
                         WHERE sm.statistic_id = ? AND st.start_ts > ?
                         ORDER BY st.start_ts
-                    """, (temp_eid, cutoff_ts)).fetchall()
+                    """,
+                        (temp_eid, cutoff_ts),
+                    ).fetchall()
                     if _stats:
                         temp_rows = [(str(v), ts) for v, ts in _stats if v is not None]
                 except Exception:
                     pass
                 # Fallback to states if no statistics
                 if not temp_rows:
-                    temp_rows = conn.execute("""
+                    temp_rows = conn.execute(
+                        """
                         SELECT s.state, s.last_changed_ts FROM states s
                         JOIN states_meta sm ON s.metadata_id = sm.metadata_id
                         WHERE sm.entity_id = ? AND s.last_changed_ts > ?
                         ORDER BY s.last_changed_ts
-                    """, (temp_eid, cutoff_ts)).fetchall()
+                    """,
+                        (temp_eid, cutoff_ts),
+                    ).fetchall()
 
         conn.close()
     except Exception as e:
@@ -235,19 +284,25 @@ def _get_daily_energy_and_weather(days: int = 90) -> list[dict]:
         dt = datetime.datetime.strptime(date_str, "%Y-%m-%d")
         temps = daily_temp.get(date_str, [])
 
-        records.append({
-            "date": date_str,
-            "kwh": round(kwh, 2),
-            "avg_temp": round(np.mean(temps), 1) if temps else None,
-            "min_temp": round(min(temps), 1) if temps else None,
-            "max_temp": round(max(temps), 1) if temps else None,
-            "day_of_week": dt.weekday(),
-            "month": dt.month,
-            "is_weekend": dt.weekday() >= 5,
-        })
+        records.append(
+            {
+                "date": date_str,
+                "kwh": round(kwh, 2),
+                "avg_temp": round(np.mean(temps), 1) if temps else None,
+                "min_temp": round(min(temps), 1) if temps else None,
+                "max_temp": round(max(temps), 1) if temps else None,
+                "day_of_week": dt.weekday(),
+                "month": dt.month,
+                "is_weekend": dt.weekday() >= 5,
+            }
+        )
 
-    log.info("energy_forecast: %d daily records (energy=%s, temp=%s)",
-             len(records), energy_eid, temp_eid or "none")
+    log.info(
+        "energy_forecast: %d daily records (energy=%s, temp=%s)",
+        len(records),
+        energy_eid,
+        temp_eid or "none",
+    )
     return records
 
 
@@ -334,15 +389,17 @@ def run_energy_forecast(days_history: int = 90) -> dict[str, Any]:
             predicted_kwh = max(0, float(mean[0]))
             uncertainty = float(std[0])
 
-            forecast_days.append({
-                "date": future_date.isoformat(),
-                "day_name": future_date.strftime("%A"),
-                "predicted_kwh": round(predicted_kwh, 1),
-                "uncertainty_kwh": round(uncertainty, 1),
-                "low_kwh": round(max(0, predicted_kwh - 2 * uncertainty), 1),
-                "high_kwh": round(predicted_kwh + 2 * uncertainty, 1),
-                "is_weekend": future_date.weekday() >= 5,
-            })
+            forecast_days.append(
+                {
+                    "date": future_date.isoformat(),
+                    "day_name": future_date.strftime("%A"),
+                    "predicted_kwh": round(predicted_kwh, 1),
+                    "uncertainty_kwh": round(uncertainty, 1),
+                    "low_kwh": round(max(0, predicted_kwh - 2 * uncertainty), 1),
+                    "high_kwh": round(predicted_kwh + 2 * uncertainty, 1),
+                    "is_weekend": future_date.weekday() >= 5,
+                }
+            )
 
     except Exception as e:
         log.warning("GP forecast failed, using simple averages: %s", e)
@@ -361,15 +418,17 @@ def run_energy_forecast(days_history: int = 90) -> dict[str, Any]:
             mean_kwh = np.mean(values) if values else float(np.mean(y))
             std_kwh = np.std(values) if len(values) > 1 else float(np.std(y))
 
-            forecast_days.append({
-                "date": future_date.isoformat(),
-                "day_name": future_date.strftime("%A"),
-                "predicted_kwh": round(mean_kwh, 1),
-                "uncertainty_kwh": round(std_kwh, 1),
-                "low_kwh": round(max(0, mean_kwh - 2 * std_kwh), 1),
-                "high_kwh": round(mean_kwh + 2 * std_kwh, 1),
-                "is_weekend": future_date.weekday() >= 5,
-            })
+            forecast_days.append(
+                {
+                    "date": future_date.isoformat(),
+                    "day_name": future_date.strftime("%A"),
+                    "predicted_kwh": round(mean_kwh, 1),
+                    "uncertainty_kwh": round(std_kwh, 1),
+                    "low_kwh": round(max(0, mean_kwh - 2 * std_kwh), 1),
+                    "high_kwh": round(mean_kwh + 2 * std_kwh, 1),
+                    "is_weekend": future_date.weekday() >= 5,
+                }
+            )
 
     # Temperature-energy correlation
     temp_correlation = None
@@ -382,9 +441,13 @@ def run_energy_forecast(days_history: int = 90) -> dict[str, Any]:
                 "coefficient": round(corr, 3),
                 "direction": "inverse" if corr < -0.3 else "positive" if corr > 0.3 else "weak",
                 "interpretation": (
-                    "Colder days = more energy (heating dominant)" if corr < -0.3
-                    else "Warmer days = more energy (cooling dominant)" if corr > 0.3
-                    else "Temperature has weak effect on energy usage"
+                    "Colder days = more energy (heating dominant)"
+                    if corr < -0.3
+                    else (
+                        "Warmer days = more energy (cooling dominant)"
+                        if corr > 0.3
+                        else "Temperature has weak effect on energy usage"
+                    )
                 ),
             }
 
@@ -399,7 +462,11 @@ def run_energy_forecast(days_history: int = 90) -> dict[str, Any]:
         "forecast": forecast_days,
         "weekly_total_kwh": round(total_forecast, 1),
         "recent_weekly_avg_kwh": round(avg_recent, 1),
-        "trend": "up" if total_forecast > avg_recent * 1.1 else "down" if total_forecast < avg_recent * 0.9 else "stable",
+        "trend": (
+            "up"
+            if total_forecast > avg_recent * 1.1
+            else "down" if total_forecast < avg_recent * 0.9 else "stable"
+        ),
         "temperature_correlation": temp_correlation,
         "historical_summary": {
             "avg_daily_kwh": round(float(np.mean(y)), 1),
@@ -410,8 +477,13 @@ def run_energy_forecast(days_history: int = 90) -> dict[str, Any]:
     }
 
     from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+
     _atomic_write(FORECAST_PATH, result)
 
-    log.info("energy_forecast: %s model, %d-day forecast, weekly=%.1f kWh",
-             model_type, len(forecast_days), total_forecast)
+    log.info(
+        "energy_forecast: %s model, %d-day forecast, weekly=%.1f kWh",
+        model_type,
+        len(forecast_days),
+        total_forecast,
+    )
     return result

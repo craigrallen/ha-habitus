@@ -36,7 +36,9 @@ def fetch_areas() -> dict[str, Any]:
         r = requests.post(
             f"{HA_URL}/api/template",
             headers=headers,
-            json={"template": "{% for a in areas() %}{{ a }}|{{ area_name(a) }}|{{ area_entities(a) | length }}\n{% endfor %}"},
+            json={
+                "template": "{% for a in areas() %}{{ a }}|{{ area_name(a) }}|{{ area_entities(a) | length }}\n{% endfor %}"
+            },
             timeout=10,
         )
         if r.status_code != 200:
@@ -47,11 +49,13 @@ def fetch_areas() -> dict[str, Any]:
         for line in r.text.strip().split("\n"):
             parts = line.strip().split("|")
             if len(parts) >= 3:
-                areas.append({
-                    "id": parts[0],
-                    "name": parts[1],
-                    "entity_count": int(parts[2]) if parts[2].isdigit() else 0,
-                })
+                areas.append(
+                    {
+                        "id": parts[0],
+                        "name": parts[1],
+                        "entity_count": int(parts[2]) if parts[2].isdigit() else 0,
+                    }
+                )
     except Exception as e:
         log.warning("Area list fetch failed: %s", e)
         return _load_cache()
@@ -62,7 +66,9 @@ def fetch_areas() -> dict[str, Any]:
         r = requests.post(
             f"{HA_URL}/api/template",
             headers=headers,
-            json={"template": "{% for a in areas() %}{% for e in area_entities(a) %}{{ e }}|{{ area_name(a) }}\n{% endfor %}{% endfor %}"},
+            json={
+                "template": "{% for a in areas() %}{% for e in area_entities(a) %}{{ e }}|{{ area_name(a) }}\n{% endfor %}{% endfor %}"
+            },
             timeout=30,
         )
         if r.status_code == 200:
@@ -103,6 +109,7 @@ def get_entities_rooms(entity_ids: list[str]) -> list[str]:
     data = _load_cache()
     e2a = data.get("entity_to_area", {})
     from collections import Counter
+
     room_counts = Counter(e2a[eid] for eid in entity_ids if eid in e2a)
     return [r for r, _ in room_counts.most_common()]
 

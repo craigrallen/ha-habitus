@@ -43,7 +43,8 @@ def _run_blocking(days: int, mode: str) -> None:
     except Exception as exc:
         log.exception("Background training failed")
         try:
-            from datetime import datetime, UTC  # noqa: PLC0415
+            from datetime import UTC, datetime  # noqa: PLC0415
+
             from habitus.main import clear_progress, load_state, save_state  # noqa: PLC0415
 
             state = load_state() or {}

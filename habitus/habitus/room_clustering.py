@@ -71,6 +71,7 @@ def get_entity_area(entity_id: str) -> str | None:
     """Get HA-configured area for entity, falling back to heuristic."""
     try:
         from . import ha_areas
+
         area = ha_areas.get_entity_area(entity_id)
         if area:
             return area
@@ -98,6 +99,7 @@ def get_rooms_for_entities(entity_ids: list[str]) -> list[str]:
     # Pass 1: HA configured areas (authoritative)
     try:
         from . import ha_areas
+
         ha_result = ha_areas.get_entities_rooms(entity_ids)
         if ha_result:
             return ha_result
