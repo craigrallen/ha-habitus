@@ -98,6 +98,35 @@ class TestGenerateSuggestions:
                 parsed = yaml.safe_load(s["yaml"])
                 assert parsed is not None
 
+    def test_personalization_explanation_fields_present(self, sample_features):
+        patterns = discover_patterns(sample_features)
+        suggestions = generate_suggestions(patterns, sample_features, ["person.craig"])
+        assert suggestions
+        for s in suggestions[:5]:
+            assert "why_suggested" in s and s["why_suggested"]
+            assert "confidence_rationale" in s and "Confidence" in s["confidence_rationale"]
+            assert "expected_benefit" in s and s["expected_benefit"]
+            assert "status_badges" in s and isinstance(s["status_badges"], list)
+
+    def test_automation_yaml_is_stabilized_for_add_to_ha(self, sample_features):
+        import yaml
+
+        patterns = discover_patterns(sample_features)
+        suggestions = generate_suggestions(patterns, sample_features, ["person.craig"])
+        seen_ids = set()
+        for s in suggestions:
+            if s.get("category") == "lovelace":
+                continue
+            parsed = yaml.safe_load(s["yaml"])
+            auto = parsed.get("automation", parsed)
+            assert auto.get("alias")
+            assert auto.get("id")
+            assert auto.get("mode") == "single"
+            assert isinstance(auto.get("trigger"), list)
+            assert isinstance(auto.get("action"), list)
+            assert auto["id"] not in seen_ids
+            seen_ids.add(auto["id"])
+
 
 class TestMaxConsecutiveZeros:
     def test_all_zeros(self):
@@ -268,6 +297,59 @@ class TestNewSuggestions:
             if s["id"] in new_ids and s.get("yaml"):
                 parsed = yaml.safe_load(s["yaml"])
                 assert parsed is not None, f"YAML parse failed for {s['id']}"
+
+
+class TestHomeProfilePrioritization:
+    def test_home_profile_ranks_home_suggestions_above_boat(self, sample_features):
+        patterns = discover_patterns(sample_features)
+        stat_ids = [
+            "sensor.total_home_power_w",
+            "binary_sensor.hallway_motion",
+            "light.living_room_ceiling",
+            "person.craig",
+            "climate.living_room_thermostat",
+        ]
+        suggestions = generate_suggestions(patterns, sample_features, stat_ids)
+        assert suggestions
+
+        top_ids = [s["id"] for s in suggestions[:10]]
+        assert "occupancy_lights" in top_ids
+        assert "climate_preheat" in top_ids
+
+        away_idx = next(i for i, s in enumerate(suggestions) if s["id"] == "away_mode")
+        boat_idx = [i for i, s in enumerate(suggestions) if s.get("category") == "boat"]
+        if boat_idx:
+            assert away_idx < min(boat_idx)
+
+        boat = [s for s in suggestions if s.get("category") == "boat"]
+        assert all(s.get("applicable") is False for s in boat)
+
+    def test_home_core_routines_present_when_entities_available(self, sample_features):
+        patterns = discover_patterns(sample_features)
+        stat_ids = [
+            "sensor.total_home_power_w",
+            "binary_sensor.hallway_motion",
+            "light.living_room_ceiling",
+            "person.craig",
+            "climate.living_room_thermostat",
+        ]
+        suggestions = generate_suggestions(patterns, sample_features, stat_ids)
+        ids = {s["id"] for s in suggestions}
+        assert "occupancy_lights" in ids
+        assert "away_mode" in ids
+        assert "overnight_standby" in ids
+        assert "climate_preheat" in ids
+        assert "peak_tariff_alert" in ids
+        assert "sensor_watchdog" in ids
+        assert "anomaly_alert" in ids
+
+        first = suggestions[0]
+        assert "household_rhythm" in first
+        assert set(first["household_rhythm"].keys()) == {
+            "weekday_window",
+            "weekend_window",
+            "homecoming_hour",
+        }
 
 
 class TestRunFunction:

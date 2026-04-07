@@ -1,60 +1,92 @@
 # Changelog
 
-All notable changes to Habitus are documented in this file.
-Format follows [Keep a Changelog](https://keepachangelog.com/).
+All notable changes to this project will be documented in this file.
 
-## [3.1.0] - 2026-04-07
+<!-- Generated from git history on 2026-04-02 -->
+
+## [Unreleased]
+
+
+## [2026-03] - 2026-03-01
 
 ### Added
-
-#### Intelligence Features
-- **Data-driven automation suggestions** (TASK-001) — morning lights, peak tariff, vacancy detection, bilge temperature, and shore+battery alerts generated from discovered patterns
-- **Per-entity z-score anomaly breakdown** (TASK-002) — top-5 entity anomalies when score > 40, persisted to `entity_baselines.json`
-- **Hemisphere-aware seasonal models** (TASK-003) — per-season IsolationForest with `seasonal_models.pkl` bundle and Southern Hemisphere support
-- **HA notification integration** (TASK-004) — `send_notification()`, `persistent_notification()`, daily digest with configurable hour
-- **Energy insights module** (TASK-005) — peak hours, top-5 consumers, off-peak waste estimation, solar self-consumption ratio via `/api/insights`
-- **Enhanced Lovelace cards** (TASK-006) — 4 card types (Pulse, Chip, Detail Panel, Timeline) fetching top-3 anomaly reasons and suggestion confidence from API
-
-#### Sensor Intelligence
-- **5-type sensor classifier** (TASK-015) — `accumulating`, `binary`, `gauge`, `event`, `setpoint` via HA `state_class` + history analysis; stored in `_meta.sensor_type`
-- **Accumulating sensor rate-of-change** (TASK-016) — hourly delta baselines with 24h bootstrap exemption
-- **Binary sensor timing & frequency scoring** (TASK-017) — on-fraction, transition frequency, and duration-based anomaly detection
-- **Per-entity cold start protection** (TASK-018) — entities < 7 days exempt from scoring; low-sample slots weighted 0.5x; lifecycle tracking in `entity_lifecycle.json`
-- **Confidence-weighted anomaly scores** (TASK-019) — per-entity confidence from age, sample count, and sensor type certainty
-- **Adaptive IsolationForest contamination** (TASK-020) — 5-tier ramp (0.005 to 0.05) based on training age; tier changes trigger full retrain
-- **Data quality guard** (TASK-021) — filters impossible values (negative power, temperature/humidity bounds, gauge jumps > 10x, stuck sensors >= 24h); `/api/sensor_health` endpoint
-
-#### Infrastructure
-- Autonomous coding loop (`ralph.sh`) with PRD-driven task management
-- `progress.txt` task completion log
-- `codecov.yml` with 70% project target and 60% patch target
+- Context-aware anomaly scoring — entity criticality weighting + false alarm filtering + user priority overrides (bathroom lights=0.3×, battery=2×)
+- Nuanced anomaly scoring — 5 severity tiers (0-30 elevated, 30-60 anomaly, 60-80 critical, 80-95 critical, 95-100 extreme) instead of binary 0/100
+- Comprehensive NILM dataset integration — 127 appliance signatures from PLAID + UK-DALE + REDD + ECO + GREEND (159 total with boat-specific)
+- Integrate PLAID + UK-DALE appliance signatures — 54 reference appliances, 86 total with boat-specific (boat devices get +20% match boost)
+- Boat appliance library — 30 known devices with wattage ranges, runtime patterns, phase hints for NILM matching
+- NILM appliance management API — manual override, relabel, merge, delete, appliance library (backend infrastructure)
+- Anomaly history tracking + pattern analysis — 7-day event log, recurring entity detection, time patterns
+- Dedicated Anomalies tab — full visibility into current status, active alerts, history, patterns
+- Safety-critical automation protection — detect emergency/alarm patterns, flag with badge, prevent deletion
+- Hybrid power data — use inverter (new) + proxy backfill (2023-2026 estimated from shore+battery+solar)
+- Build power features directly from local DB (bypasses zero-dilution from 3-year behavioral data)
+- Collector reads user settings from run_state.json, backfills from HA history API on startup
+- Local high-resolution timeseries DB — WebSocket collector + SQLite storage, training prefers local data
+- Dual-source data fetching — merge statistics + states for complete power sensor coverage
+- Power proxy UI explainer — how merge works + reminder to retrain after saving
+- Live automation sync — show Habitus automations in HA with delete button; refresh endpoint
+- Solar surplus notification now requires battery >90% SOC + 1.5h headroom to 100%
+- Power proxy sensors — shore+battery fallback fills historical power gaps
+- Testing mode toggle — cache clear+retrain on every start when on, version-stamped smart invalidation when off
+- Add /api/clear_derived_cache endpoint to nuke stale device_library etc.
+- Smart plug ground-truth device template library for NILM (v3.10.12)
+- UI — phase attribution badges and per-phase power summary panel
+- Per-phase weekly profiles in patterns.py
+- Per-phase power columns in build_features()
+- Per-phase NILM edge detection and correlation
 
 ### Changed
-
-#### Code Quality Improvements
-- **`patterns.py` refactored** — monolithic 580-line `generate_suggestions()` split into 6 focused helpers: `_routine_suggestions()`, `_energy_suggestions()`, `_boat_suggestions()`, `_anomaly_suggestions()`, `_pattern_driven_suggestions()`, `_lovelace_suggestions()`
-- **`web.py` decomposed** — 1,263-line inline HTML extracted to `templates/index.html`; now uses Flask `render_template()` with Jinja2 variables (1,554 -> 288 lines)
-- **Pickle replaced with joblib** in `seasonal.py` and `main.py` for safer model serialization (no arbitrary code execution on load)
-- **`automation_gap.py` async consistency** — replaced synchronous `urllib.request` with `aiohttp` to match the async `analyse()` interface
-- **Exception handling narrowed** across 8 modules — broad `except Exception` replaced with specific types (`OSError`, `json.JSONDecodeError`, `FileNotFoundError`, `ValueError`, `EOFError`)
-- **Type annotations added** to all public functions in `automation_gap.py`
-- **Dependency versions pinned** in `requirements.txt` to match `pyproject.toml` floor versions
-- Added `joblib>=1.3` and `aiohttp>=3.9` to both `requirements.txt` and `pyproject.toml`
+- Add Mastervolt Mass Combi Ultra 24/3500 specs to boat metadata
+- Debug: more logging for proxy stats fetch result
+- Debug: add logging to proxy backfill to diagnose why historical data not loading
+- Comprehensive status snapshot and action plan for next session
+- Debug: log local DB power fetch exceptions as warning
+- Debug: add time range logging for local DB merge
+- Incremental training plan + ENABLE_SMART_SAMPLING flag (not yet implemented)
+- Backfill CHANGELOG for 3.10.1–3.10.25 (was stuck at 3.1.0)
+- Bump version to 3.10.10
+- Bump version to 3.10.5
+- Add test_training_0_rows_guard.py regression tests
+- Bump to 3.10.2
+- Bump version to 3.10.0 — major UI reorg + fixes
+- Full tab reorganisation — Home/Suggestions/Automations/Energy/Health/Settings
+- Deduplicate card/yaml/add-to-HA/fetch patterns, shared JS utilities
+- Nilm, scene_detector, routine_predictor, main_utils coverage tests
+- Additional coverage tests for main_utils, activity_hmm + atomic write fixes
+- Additional mock coverage boost tests for 65% target
+- Mock-based coverage for phantom, room_predictor, main fetch functions
+- Set coverage fail_under=40 (realistic baseline; main.py/trainer.py require HA DB)
+- Confidence calibration assertions for suggestion scoring
+- Integration tests for add/remove HA automation flow
+- Add GitHub Actions CI workflow with pytest-cov and Codecov
+- Add standardized fetch/build_features telemetry budgets
+- Hardening(features): tolerate invalid numeric env overrides
 
 ### Fixed
-- **Version mismatch** — `run.sh` displayed hardcoded `v2.27.0` instead of actual version from `config.yaml`; now uses `${HABITUS_VERSION}` from bashio
-- **Hardcoded Lovelace ingress path** — `habitus-card.js` had plugin ID `57582523` hardcoded; now auto-detects from script tags, DOM, or window location
-- **`discover_patterns()` KeyError** — accessing `hourly.loc[h, ...]` for hours missing from sparse data; now checks `h in hourly.index` first
-- Responsive UI for anomaly breakdown table on mobile
-- Theme toggle button and JS function
+- ACTUALLY fix anomaly score 100 with 0 entities — recalculate score from active anomalies only (top 3 z-scores)
+- Anomaly score 100 with 0 entities — reset score to 0 when all anomalies dismissed
+- Update inverter specs — 3× Mastervolt Mass Combi Ultra in 3-phase cluster (10.5kW continuous, 21kW peak)
+- Inverter overload false alarms — add inverter_capacity_w setting (85% threshold), fixes 539W warning on 3500W inverter
+- Update heat pump specs — Fujitsu ASYB12LDC 910W cooling / 1220W heating, max 2.3kW, inverter-driven
+- Update induction hob specs — Siemens EX675FEC1E 7.4kW max, 4 zones, PowerBoost, 17 power levels
+- Add both heater types — 2× 1kW split-phase panel heaters + 2× 2kW portable fan heaters (32 appliances total)
+- Correct heater specs — 2× 1kW split-phase electric heaters (not 2kW fan heaters)
+- Proxy sensor dropdowns reset on load — removed redundant refresh that cleared selected values
+- CRITICAL — prevent auto-detection from overwriting user power_entity settings on every restart
+- Proxy stats uses 'mean' column not 'v' (fetch_stats_sqlite schema)
+- Use fetch_stats_sqlite (not fetch_stats) with correct params for proxy backfill
+- Proxy backfill resolves db_path locally (was undefined in scope)
+- Proxy backfill computes own time range (data_from was undefined in build_features scope)
+- Proxy backfill queries full training window (not just local DB range) to use years of Z-Wave shore power data
+- Reduce false positives — skip sparse baselines during early training, lower contamination thresholds, prefer proxy sensors with full history
+- Train ONLY on hours with power data (no zero-dilution from gaps)
+- Restrict training hours to local DB time range (prevents power dilution by behavioral-only hours)
+- Allow days_history down to 1 day (was minimum 7) for local DB short-window training
+- CRITICAL — build_features reads power_entity from user_settings (not env var)
+- Local DB + hybrid fetch variable scope errors (cutoff_ts → computed from data range)
+- Better error logging for collector startup, remove shadowing os import
+- Missing log instance in web.py
+- Collector runs in background thread with own event loop (Flask isn't async)
+- Training overwrites user's power_entity with auto-detect — now preserves user_settings.power_entity
 
-### Tests
-- **425 total tests** (up from 0 at project start)
-- **25 new edge case tests** in `test_edge_cases.py`:
-  - Empty and minimal DataFrame handling
-  - NaN and Inf value propagation
-  - Corrupt JSON file recovery for 6 modules
-  - Contamination tier boundary conditions
-  - Season detection across all 12 months
-  - Sensor classifier edge cases (short history, all-same values, binary floats)
-- Core module coverage: `patterns.py` 96%, `anomaly_breakdown.py` 96%, `seasonal.py` 93%, `sensor_classifier.py` 99%, `insights.py` 90%

@@ -138,7 +138,7 @@ def train_seasonal_models(features: pd.DataFrame) -> list[str]:
             joblib.dump(model, mpath)
             joblib.dump(scaler, spath)
             with open(meta_path, "w") as _mf:
-                json.dump({"hours": len(subset), "days": len(subset) // 24}, _mf)
+                json.dump({"hours": len(subset), "days": len(subset) // 24}, _mf, default=str)
             bundle_models[season] = model
             bundle_scalers[season] = scaler
             log.info(f"Season {season}: trained on {len(subset)}h ({len(subset) // 24}d)")
@@ -220,7 +220,17 @@ def score_with_best_model(X_raw: Any) -> tuple[int, str]:
             used = "main"
         Xs = scaler.transform(X_raw[:, : len(scaler.mean_)])
         raw = model.score_samples(Xs)[0]
-        score = int(max(0, min(100, (-raw + 0.5) * 100)))
+        # Raw IsolationForest score: ~[-0.5, +0.5]
+        # +0.5 = very normal, -0.5 = very anomalous
+        # Use a square-root curve so moderate deviations don't immediately
+        # spike to 100 — score only reaches 80+ for genuinely extreme readings.
+        # Sensitivity can be controlled via HABITUS_ANOMALY_SENSITIVITY env var:
+        #   low=0.6  medium=1.0 (default)  high=1.5
+        sensitivity = float(os.environ.get("HABITUS_ANOMALY_SENSITIVITY", "1.0"))
+        sensitivity = max(0.3, min(3.0, sensitivity))
+        normalized = max(0.0, (-raw + 0.1) / 0.6)   # 0=normal, 1=anomalous
+        curved = normalized ** (1.5 / sensitivity)   # softer curve at low sensitivity
+        score = int(max(0, min(100, curved * 100)))
         return score, used
     except (FileNotFoundError, ValueError, EOFError, OSError) as e:
         log.error(f"Scoring error: {e}")

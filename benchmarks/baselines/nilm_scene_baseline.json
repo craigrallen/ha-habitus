@@ -1,0 +1,10 @@
+{
+  "source": "ci-baseline-v1",
+  "iterations": 5,
+  "nilm_ms": {
+    "p95": 8.0
+  },
+  "scene_ms": {
+    "p95": 30.0
+  }
+}

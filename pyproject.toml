@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "ha-habitus"
@@ -57,7 +57,7 @@ warn_unused_configs = true
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = [".", "habitus"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-v"
@@ -69,6 +69,8 @@ source = ["habitus/habitus"]
 omit = ["tests/*", "*/web.py"]
 
 [tool.coverage.report]
+show_missing = true
+fail_under = 40
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
@@ -77,4 +79,5 @@ exclude_lines = [
 ]
 
 [tool.setuptools.packages.find]
-where = ["habitus"]
+where = ["."]
+include = ["habitus*"]

@@ -10,19 +10,83 @@ import datetime
 import json
 import logging
 import os
+import pickle
+import sqlite3
 
-import joblib
 import numpy as np
 import pandas as pd
 import requests  # type: ignore[import-untyped]
 import websockets
 
 from . import activity as activity_engine
-from . import anomaly_breakdown, automation_gap, automation_score, drift, phantom, seasonal
+from . import (
+    activity_hmm,
+    anomaly_breakdown,
+    appliance_fingerprint,
+    automation_builder,
+    automation_gap,
+    automation_score,
+    conflict_detector,
+    correlation_engine,
+    drift,
+    dynamic_automations,
+    energy_forecast,
+    ha_areas,
+    markov_chain,
+    nilm_disaggregator,
+    phantom,
+    room_predictor,
+    routine_predictor,
+    scene_detector,
+    seasonal,
+    sequence_miner,
+)
+from . import (
+    automation_health as _automation_health,
+)
+from . import (
+    battery_watchdog as _battery_watchdog,
+)
+from . import (
+    changelog as _changelog,
+)
+from . import (
+    guest_mode as _guest_mode,
+)
+from . import (
+    integration_health as _integration_health,
+)
 from . import patterns as pattern_engine
+from . import (
+    routine_builder as _routine_builder,
+)
+from . import (
+    seasonal_adapter as _seasonal_adapter,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("habitus")
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw in (None, ""):
+        return default
+    with contextlib.suppress(TypeError, ValueError):
+        return int(raw)
+    log.warning("Invalid %s=%r; using default %d", name, raw, default)
+    return default
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    """Parse boolean from environment variable."""
+    raw = os.environ.get(name, "").strip().lower()
+    if raw in {"true", "1", "yes", "on"}:
+        return True
+    if raw in {"false", "0", "no", "off"}:
+        return False
+    return default
+
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 HA_WS_URL = (
@@ -36,36 +100,193 @@ HA_WS = os.environ.get("HA_WS", "ws://supervisor/core/api/websocket")
 HA_TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
 NOTIFY_SVC = os.environ.get("HABITUS_NOTIFY_SERVICE", "notify.notify")
 NOTIFY_ON = os.environ.get("HABITUS_NOTIFY_ON", "true").lower() == "true"
-THRESHOLD = int(os.environ.get("HABITUS_ANOMALY_THRESHOLD", "70"))
+THRESHOLD = _env_int("HABITUS_ANOMALY_THRESHOLD", 70)
 DAILY_DIGEST = os.environ.get("HABITUS_DAILY_DIGEST", "false").lower() == "true"
-DAILY_DIGEST_HOUR = int(os.environ.get("HABITUS_DAILY_DIGEST_HOUR", "8"))
+DAILY_DIGEST_HOUR = _env_int("HABITUS_DAILY_DIGEST_HOUR", 8)
 # Minimum training days before anomaly scoring is trusted — assume normal until then
-MIN_SCORING_DAYS = int(os.environ.get("HABITUS_MIN_SCORING_DAYS", "7"))
+MIN_SCORING_DAYS = _env_int("HABITUS_MIN_SCORING_DAYS", 7)
+# Hard safety guard for very large history pulls (prevents web process OOM).
+# Set <=0 to disable (not recommended).
+FETCH_ROW_BUDGET = _env_int("HABITUS_FETCH_ROW_BUDGET", 1_000_000)
+# When row count exceeds budget, sample every Nth row to fit under budget
+ENABLE_SMART_SAMPLING = _env_bool("HABITUS_SMART_SAMPLING", True)
+FETCH_MIN_WINDOW_DAYS = _env_int("HABITUS_FETCH_MIN_WINDOW_DAYS", 7)
+FETCH_WARN_MS = _env_int("HABITUS_FETCH_WARN_MS", 15000)
+BUILD_FEATURES_WARN_MS = _env_int("HABITUS_BUILD_FEATURES_WARN_MS", 5000)
+
+
+def _fetch_row_budget() -> int:
+    return _env_int("HABITUS_FETCH_ROW_BUDGET", FETCH_ROW_BUDGET)
+
+
+def _fetch_min_window_days() -> int:
+    explicit_min = _env_int("HABITUS_FETCH_MIN_WINDOW_DAYS", FETCH_MIN_WINDOW_DAYS)
+    # Never clamp below the user-requested history depth (set from settings as HABITUS_DAYS).
+    history_days = _env_int("HABITUS_DAYS", 90)
+    return max(explicit_min, history_days)
+
+
+# ── Startup validation ─────────────────────────────────────────────────────────
+
+def _ha_get(url: str, *, token: str = "", timeout: float = 30.0, retries: int = 3) -> "requests.Response":
+    """GET *url* from HA with exponential backoff on transient errors.
+
+    Retries up to *retries* times with delays 1s → 2s → 4s before raising.
+    A 401/403 is considered permanent and is not retried.
+    """
+    import time as _t
+
+    headers = {"Authorization": f"Bearer {token or HA_TOKEN}"}
+    delays = [1, 2, 4]
+    last_exc: Exception | None = None
+
+    for attempt in range(retries):
+        try:
+            r = requests.get(url, headers=headers, timeout=timeout)
+            if r.status_code in (401, 403):
+                # Auth failure — no point retrying
+                log.error("HA API auth failure (HTTP %d) at %s", r.status_code, url)
+                r.raise_for_status()
+            if r.status_code < 500:
+                return r
+            # 5xx — transient, retry
+            last_exc = requests.HTTPError(f"HTTP {r.status_code}", response=r)
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            last_exc = exc
+
+        if attempt < retries - 1:
+            delay = delays[min(attempt, len(delays) - 1)]
+            log.warning(
+                "HA API call failed (attempt %d/%d) — retrying in %ds: %s",
+                attempt + 1, retries, delay, last_exc,
+            )
+            _t.sleep(delay)
+
+    raise last_exc or requests.RequestException(f"HA API unreachable after {retries} attempts")
+
+
+def check_ha_reachable(timeout: float = 5.0) -> bool:
+    """Probe the HA REST API to confirm connectivity.
+
+    Returns True if the /api/ endpoint responds with HTTP 200-299, False
+    otherwise.  The result is written into run_state.json under ``ha_reachable``
+    so the /api/status web endpoint can surface it without re-probing.
+    """
+    ha_url = os.environ.get("HA_URL", HA_URL)
+    token = os.environ.get("SUPERVISOR_TOKEN", os.environ.get("HABITUS_HA_TOKEN", HA_TOKEN))
+    try:
+        r = requests.get(
+            f"{ha_url}/api/",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=timeout,
+        )
+        reachable = r.status_code < 400
+    except Exception as exc:
+        log.warning("HA connectivity check failed: %s", exc)
+        reachable = False
+
+    if not reachable:
+        log.error(
+            "Home Assistant is unreachable at %s — training scheduler will not start "
+            "until HA is reachable. Check HA_URL and SUPERVISOR_TOKEN.",
+            ha_url,
+        )
+
+    # Persist reachability flag in state so web API can surface it
+    try:
+        state = load_state() or {}
+        state["ha_reachable"] = reachable
+        save_state(state)
+    except Exception:
+        pass
+
+    return reachable
+
+
+def summarize_perf_guardrail(
+    stage: str,
+    elapsed_seconds: float,
+    *,
+    rows: int = 0,
+    entities: int = 0,
+    warn_ms: int = 0,
+) -> dict[str, float | int | str | bool]:
+    """Build a normalized performance summary and guardrail verdict."""
+    elapsed_s = max(0.0, float(elapsed_seconds))
+    elapsed_ms = int(round(elapsed_s * 1000))
+    safe_rows = max(0, int(rows))
+    safe_entities = max(0, int(entities))
+    rows_per_sec = round((safe_rows / elapsed_s), 1) if elapsed_s > 0 else 0.0
+    per_entity_rows = round((safe_rows / safe_entities), 1) if safe_entities > 0 else 0.0
+    budget = max(0, int(warn_ms))
+    exceeded = budget > 0 and elapsed_ms > budget
+    return {
+        "stage": stage,
+        "elapsed_ms": elapsed_ms,
+        "rows": safe_rows,
+        "entities": safe_entities,
+        "rows_per_sec": rows_per_sec,
+        "rows_per_entity": per_entity_rows,
+        "warn_ms": budget,
+        "warn_exceeded": exceeded,
+    }
+
+
+def log_perf_guardrail(
+    stage: str,
+    elapsed_seconds: float,
+    *,
+    rows: int = 0,
+    entities: int = 0,
+    warn_ms: int = 0,
+) -> dict[str, float | int | str | bool]:
+    """Log standardized performance telemetry for hot fetch/feature paths."""
+    summary = summarize_perf_guardrail(
+        stage,
+        elapsed_seconds,
+        rows=rows,
+        entities=entities,
+        warn_ms=warn_ms,
+    )
+    msg = (
+        "Perf[{}]: {}ms · rows={} · entities={} · rows/s={:.1f}".format(
+            summary["stage"],
+            summary["elapsed_ms"],
+            summary["rows"],
+            summary["entities"],
+            summary["rows_per_sec"],
+        )
+    )
+    if summary["warn_exceeded"]:
+        log.warning("%s (guardrail %dms exceeded)", msg, summary["warn_ms"])  # noqa: G004
+    else:
+        log.info("%s", msg)
+    return summary
 
 
 def contamination_for_days(days: int) -> float:
     """Return the IsolationForest contamination parameter for the given training age.
 
-    Ramps from very conservative (0.005) during the early warmup phase to the
-    full 0.05 once the model has 90+ days of history.  Low contamination during
-    warmup avoids the excessive false-positive rate that occurs when the model
-    has seen very little historical behaviour.
+    Ramps from ultra-conservative (0.002) during the initial warmup phase to a
+    moderate 0.03 once the model has 90+ days of history. Very low contamination
+    during warmup avoids the excessive false-positive rate that occurs when the
+    model has seen very little historical behaviour and lacks robust baselines.
 
     Args:
         days: Training age in days (0 = no history yet).
 
     Returns:
-        Contamination fraction in the range 0.005–0.05.
+        Contamination fraction in the range 0.002–0.03.
     """
     if days < 7:
-        return 0.005
+        return 0.002  # ultra-conservative: ~0.2% anomaly rate
     if days < 14:
-        return 0.01
+        return 0.005  # very conservative: ~0.5%
     if days < 30:
-        return 0.02
+        return 0.01   # conservative: ~1%
     if days < 90:
-        return 0.04
-    return 0.05
+        return 0.015  # moderate: ~1.5%
+    return 0.02       # established: ~2% expected anomaly rate
 
 
 def contamination_tier_name(days: int) -> str:
@@ -232,28 +453,36 @@ def load_state():
 
 
 def save_state(state):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(STATE_PATH, "w") as f:
-        json.dump(state, f, indent=2)
+    from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+    _atomic_write(STATE_PATH, state)
 
 
 def set_progress(phase, done=0, total=0, rows=0, elapsed=0.0, eta=0.0):
     try:
+        from .utils import atomic_write as _atomic_write  # noqa: PLC0415
         pct = round(done / total * 100) if total else 100
-        with open(PROGRESS_PATH, "w") as f:
-            json.dump(
-                {
-                    "running": True,
-                    "phase": phase,
-                    "done": done,
-                    "total": total,
-                    "pct": pct,
-                    "rows": rows,
-                    "elapsed_min": round(elapsed / 60, 1),
-                    "eta_min": round(eta / 60, 1),
-                },
-                f,
-            )
+        # Preserve started_at from an existing run so staleness detection works correctly.
+        # Only set it on the very first call of a run (when file doesn't exist yet or
+        # was cleared between runs).
+        started_at: str | None = None
+        if os.path.exists(PROGRESS_PATH):
+            with contextlib.suppress(Exception), open(PROGRESS_PATH) as _pf:
+                _prev = json.load(_pf)
+                if _prev.get("running"):
+                    started_at = _prev.get("started_at")
+        if started_at is None:
+            started_at = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+        _atomic_write(PROGRESS_PATH, {
+            "running": True,
+            "phase": phase,
+            "done": done,
+            "total": total,
+            "pct": pct,
+            "rows": rows,
+            "elapsed_min": round(elapsed / 60, 1),
+            "eta_min": round(eta / 60, 1),
+            "started_at": started_at,
+        })
     except Exception:
         pass
 
@@ -261,6 +490,107 @@ def set_progress(phase, done=0, total=0, rows=0, elapsed=0.0, eta=0.0):
 def clear_progress():
     if os.path.exists(PROGRESS_PATH):
         os.remove(PROGRESS_PATH)
+
+
+def write_fetch_failed(reason: str = "fetch returned 0 rows") -> None:
+    """Write a fetch_failed status to progress.json so the UI surfaces the error."""
+    try:
+        from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+        _atomic_write(PROGRESS_PATH, {
+            "running": False,
+            "phase": "fetch_failed",
+            "reason": reason,
+            "failed_at": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+        })
+    except Exception:
+        pass
+
+
+def mark_last_completed_progress(
+    state: dict,
+    phase: str,
+    *,
+    done: int | None = None,
+    total: int | None = None,
+    rows: int | None = None,
+    pct: int | None = None,
+    extra: dict | None = None,
+    completed_at: str | None = None,
+) -> None:
+    """Persist explicit metadata for the most recently completed training phase."""
+    checkpoint = {
+        "phase": str(phase or "unknown"),
+        "completed_at": completed_at
+        or datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+    }
+
+    def _safe_int(value: int | None) -> int | None:
+        if value is None:
+            return None
+        with contextlib.suppress(Exception):
+            return max(0, int(value))
+        return None
+
+    values = {
+        "done": _safe_int(done),
+        "total": _safe_int(total),
+        "rows": _safe_int(rows),
+        "pct": _safe_int(pct),
+    }
+    for key, value in values.items():
+        if value is not None:
+            checkpoint[key] = min(100, value) if key == "pct" else value
+
+    if isinstance(extra, dict):
+        checkpoint["extra"] = extra
+
+    state["last_completed_progress"] = checkpoint
+
+
+def clamp_fetch_window_by_row_budget(
+    start_iso: str,
+    end_iso: str,
+    entity_count: int,
+    row_budget: int | None = None,
+    min_window_days: int | None = None,
+) -> tuple[str, bool, dict[str, int | str]]:
+    """Clamp history window to a deterministic max rows budget.
+
+    Uses a conservative estimate for hourly statistics rows:
+    ``estimated_rows ≈ entities × hours``.
+    """
+    budget = _fetch_row_budget() if row_budget is None else int(row_budget)
+    min_days = _fetch_min_window_days() if min_window_days is None else int(min_window_days)
+    info: dict[str, int | str] = {
+        "requested_hours": 0,
+        "max_hours": 0,
+        "row_budget": budget,
+        "entity_count": max(0, int(entity_count)),
+    }
+
+    if budget <= 0 or entity_count <= 0:
+        return start_iso, False, info
+
+    try:
+        start_dt = pd.to_datetime(start_iso, utc=True)
+        end_dt = pd.to_datetime(end_iso, utc=True)
+    except Exception:
+        return start_iso, False, info
+
+    if end_dt <= start_dt:
+        return start_iso, False, info
+
+    requested_hours = max(1, int((end_dt - start_dt).total_seconds() // 3600))
+    max_hours = max(int(min_days) * 24, max(1, budget // max(1, int(entity_count))))
+    info["requested_hours"] = requested_hours
+    info["max_hours"] = max_hours
+
+    if requested_hours <= max_hours:
+        return start_iso, False, info
+
+    clamped_start = (end_dt - datetime.timedelta(hours=max_hours)).floor("h")
+    clamped_start_iso = clamped_start.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    return clamped_start_iso, True, info
 
 
 # ── WebSocket ──────────────────────────────────────────────────────────────────
@@ -276,71 +606,504 @@ async def ws_connect():
     return ws
 
 
-async def get_stat_ids():
-    ws = await ws_connect()
-    await ws.send(json.dumps({"id": 1, "type": "recorder/list_statistic_ids"}))
-    result = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
-    await ws.close()
-    all_ids = [s["statistic_id"] for s in result.get("result", [])]
-    behavioral = [e for e in all_ids if is_behavioral(e)]
-    log.info(f"Found {len(behavioral)} behavioral sensors (from {len(all_ids)} total)")
-    return behavioral
+def _resolve_db_path() -> str | None:
+    configured = os.environ.get("HABITUS_HA_DB", "").strip()
+    candidates = [
+        configured,
+        "/homeassistant/home-assistant_v2.db",
+        "/config/home-assistant_v2.db",
+        "/mnt/data/supervisor/homeassistant/home-assistant_v2.db",
+    ]
+    for p in candidates:
+        if p and os.path.exists(p):
+            return p
+    return None
+
+
+def _sqlite_connect():
+    if os.environ.get("HABITUS_FORCE_API", "").lower() == "true":
+        return None
+    db_path = _resolve_db_path()
+    if not db_path:
+        log.error("Recorder DB not found (checked HABITUS_HA_DB,/homeassistant,/config,/mnt/data)")
+        return None
+    try:
+        return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except Exception as e:
+        log.error("Failed opening recorder DB (%s): %s", db_path, e)
+        return None
+
+
+async def get_stat_ids() -> tuple[list[str], int]:
+    conn = _sqlite_connect()
+    if not conn:
+        raise RuntimeError("Recorder DB unavailable; direct SQL required")
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT statistic_id FROM statistics_meta")
+        all_ids = [r[0] for r in cur.fetchall()]
+        conn.close()
+        behavioral = [e for e in all_ids if is_behavioral(e)]
+        log.info(
+            "Found %d behavioral sensors with long-term stats (from %d total stats ids)",
+            len(behavioral),
+            len(all_ids),
+        )
+        return behavioral, len(all_ids)
+    except Exception as e:
+        with contextlib.suppress(Exception):
+            conn.close()
+        raise RuntimeError(f"SQLite stats_meta read failed: {e}") from e
+
+
+async def get_behavioral_entity_ids() -> list[str]:
+    """Return behavioral entity ids from recorder metadata (includes non-stat entities)."""
+    conn = _sqlite_connect()
+    if not conn:
+        raise RuntimeError("Recorder DB unavailable; direct SQL required")
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT entity_id FROM states_meta")
+        ids = [r[0] for r in cur.fetchall()]
+        conn.close()
+        return [e for e in ids if e and is_behavioral(e)]
+    except Exception as e:
+        with contextlib.suppress(Exception):
+            conn.close()
+        raise RuntimeError(f"SQLite states_meta read failed: {e}") from e
+
+
+def _state_to_numeric(state: object) -> float | None:
+    """Best-effort conversion of HA state strings to numeric values."""
+    if state is None:
+        return None
+    s = str(state).strip().lower()
+    if s in {"unknown", "unavailable", "none", "null", ""}:
+        return None
+    try:
+        return float(s)
+    except Exception:
+        pass
+    on_states = {"on", "open", "opening", "home", "playing", "heat", "cool", "auto", "true", "armed"}
+    off_states = {"off", "closed", "closing", "not_home", "idle", "standby", "false", "disarmed", "clear"}
+    if s in on_states:
+        return 1.0
+    if s in off_states:
+        return 0.0
+    return None
+
+
+def fetch_recent_raw_history(entity_ids: list[str], start_iso: str, end_iso: str) -> pd.DataFrame:
+    """Fetch raw history for entities that lack long-term recorder statistics.
+
+    Preferred path: direct SQLite read from recorder DB.
+    Fallback path: HA /api/history/period (dev only).
+
+    Includes one latest-state synthetic row for entities with no history rows in
+    the requested range, so sparse/non-changing sensors still participate.
+    """
+    if not entity_ids:
+        return pd.DataFrame()
+
+    conn = _sqlite_connect()
+    if conn:
+        try:
+            start_ts = pd.to_datetime(start_iso, utc=True).timestamp()
+            end_ts = pd.to_datetime(end_iso, utc=True).timestamp()
+            rows: list[dict] = []
+            batch = max(1, _env_int("HABITUS_SQL_BATCH", 40))
+            cur = conn.cursor()
+            for i in range(0, len(entity_ids), batch):
+                chunk = entity_ids[i:i + batch]
+                if not chunk:
+                    continue
+                ph = ",".join(["?"] * len(chunk))
+                q = f"""
+                    SELECT m.entity_id, s.last_updated_ts, s.state
+                    FROM states s
+                    JOIN states_meta m ON s.metadata_id = m.metadata_id
+                    WHERE m.entity_id IN ({ph})
+                      AND s.last_updated_ts >= ? AND s.last_updated_ts <= ?
+                    ORDER BY s.last_updated_ts
+                """
+                cur.execute(q, [*chunk, start_ts, end_ts])
+                for eid, ts, state in cur.fetchall():
+                    val = _state_to_numeric(state)
+                    if not eid or val is None:
+                        continue
+                    rows.append({"entity_id": eid, "ts": ts, "mean": val, "sum": None})
+
+            # Ensure sparse/non-changing entities are still represented once
+            seen = {r["entity_id"] for r in rows}
+            missing = [e for e in entity_ids if e not in seen]
+            if missing:
+                for i in range(0, len(missing), batch):
+                    chunk = missing[i:i + batch]
+                    ph = ",".join(["?"] * len(chunk))
+                    q_latest = f"""
+                        SELECT m.entity_id, s.last_updated_ts AS ts, s.state
+                        FROM states s
+                        JOIN states_meta m ON s.metadata_id = m.metadata_id
+                        JOIN (
+                            SELECT m2.entity_id AS entity_id, MAX(s2.last_updated_ts) AS max_ts
+                            FROM states s2
+                            JOIN states_meta m2 ON s2.metadata_id = m2.metadata_id
+                            WHERE m2.entity_id IN ({ph})
+                            GROUP BY m2.entity_id
+                        ) latest ON latest.entity_id = m.entity_id AND latest.max_ts = s.last_updated_ts
+                    """
+                    cur.execute(q_latest, chunk)
+                    for eid, ts, state in cur.fetchall():
+                        if ts is None:
+                            continue
+                        val = _state_to_numeric(state)
+                        if not eid or val is None:
+                            continue
+                        # stamp at end window so it joins current-hour inference
+                        rows.append({"entity_id": eid, "ts": end_ts, "mean": val, "sum": None})
+            conn.close()
+        except Exception as e:
+            log.warning("SQLite raw history read failed: %s", e)
+            with contextlib.suppress(Exception):
+                conn.close()
+            rows = []
+
+        if rows:
+            df = pd.DataFrame(rows)
+            df["ts"] = pd.to_datetime(df["ts"], unit="s", utc=True, errors="coerce")
+            df = df.dropna(subset=["ts"])
+            if df.empty:
+                return pd.DataFrame()
+            df["hour"] = df["ts"].dt.floor("h")
+            out = df.groupby(["entity_id", "hour"], as_index=False)["mean"].mean()
+            out = out.rename(columns={"hour": "ts"})
+            out["sum"] = None
+            log.info("Fetched raw short-term history for %d non-stat entities (%d hourly rows)", len(entity_ids), len(out))
+            return out[["entity_id", "ts", "mean", "sum"]]
+
+    # Fallback to API (dev only)
+    if os.environ.get("HABITUS_FORCE_API", "").lower() != "true":
+        return pd.DataFrame()
+
+    headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
+    rows: list[dict] = []
+    batch_size = 25
+
+    for i in range(0, len(entity_ids), batch_size):
+        batch = entity_ids[i : i + batch_size]
+        try:
+            params = {
+                "end_time": end_iso,
+                "filter_entity_id": ",".join(batch),
+                "minimal_response": "true",
+                "no_attributes": "true",
+                "significant_changes_only": "false",
+            }
+            r = requests.get(
+                f"{HA_URL}/api/history/period/{start_iso}",
+                headers=headers,
+                params=params,
+                timeout=60,
+            )
+            if r.status_code != 200:
+                continue
+            payload = r.json()
+            if not isinstance(payload, list):
+                continue
+            for series in payload:
+                if not isinstance(series, list):
+                    continue
+                for p in series:
+                    if not isinstance(p, dict):
+                        continue
+                    eid = p.get("entity_id")
+                    val = _state_to_numeric(p.get("state"))
+                    if not eid or val is None:
+                        continue
+                    ts = p.get("last_changed") or p.get("last_updated")
+                    if not ts:
+                        continue
+                    rows.append({"entity_id": eid, "ts": ts, "mean": val, "sum": None})
+        except Exception:
+            continue
+
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    df["ts"] = pd.to_datetime(df["ts"], utc=True, errors="coerce")
+    df = df.dropna(subset=["ts"])
+    if df.empty:
+        return pd.DataFrame()
+
+    df["hour"] = df["ts"].dt.floor("h")
+    out = df.groupby(["entity_id", "hour"], as_index=False)["mean"].mean()
+    out = out.rename(columns={"hour": "ts"})
+    out["sum"] = None
+    log.info("Fetched raw short-term history for %d non-stat entities (%d hourly rows)", len(entity_ids), len(out))
+    return out[["entity_id", "ts", "mean", "sum"]]
+
+
+def get_ha_entity_count() -> int:
+    """Return total number of HA entities (recorder metadata)."""
+    conn = _sqlite_connect()
+    if not conn:
+        return 0
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT count(*) FROM states_meta")
+        total = int(cur.fetchone()[0])
+        conn.close()
+        return total
+    except Exception:
+        with contextlib.suppress(Exception):
+            conn.close()
+        return 0
+
+
+def fetch_stats_sqlite(entity_ids, start_iso, end_iso=None):
+    """Fetch long-term statistics directly from HA SQLite DB.
+
+    Preferred path for Supervisor app/add-on installs.
+    Falls back to API path if DB is unavailable.
+    """
+    import time as _t
+
+    if os.environ.get("HABITUS_FORCE_API", "").lower() == "true":
+        return pd.DataFrame()
+
+    db_path = _resolve_db_path()
+    if not db_path:
+        return pd.DataFrame()
+
+    if end_iso is None:
+        end_iso = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:00:00+00:00")
+
+    start_iso_eff, was_clamped, clamp_info = clamp_fetch_window_by_row_budget(
+        start_iso,
+        end_iso,
+        len(entity_ids),
+    )
+    if was_clamped:
+        log.warning(
+            "Stats fetch window clamped (sqlite): budget=%s rows, entities=%s, requested=%sh, max=%sh, range=%s → %s",
+            clamp_info["row_budget"],
+            clamp_info["entity_count"],
+            clamp_info["requested_hours"],
+            clamp_info["max_hours"],
+            start_iso,
+            start_iso_eff,
+        )
+
+    try:
+        start_ts = pd.to_datetime(start_iso_eff, utc=True).timestamp()
+        end_ts = pd.to_datetime(end_iso, utc=True).timestamp()
+    except Exception:
+        return pd.DataFrame()
+
+    rows = []
+    total = len(entity_ids)
+    done = 0
+    t0 = _t.time()
+    row_budget = max(0, int(_fetch_row_budget()))
+    hit_budget = False
+
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        cur = conn.cursor()
+
+        # Fast path: query in chunks of statistic_ids (much faster than per-sensor loop)
+        batch = max(1, _env_int("HABITUS_SQL_BATCH", 100))
+        for i in range(0, len(entity_ids), batch):
+            chunk = entity_ids[i : i + batch]
+            if not chunk:
+                continue
+            ph = ",".join(["?"] * len(chunk))
+            cur.execute(
+                f"""
+                SELECT sm.statistic_id AS entity_id, s.start_ts AS ts, s.mean AS mean, s.sum AS sum
+                FROM statistics s
+                JOIN statistics_meta sm ON s.metadata_id = sm.id
+                WHERE sm.statistic_id IN ({ph})
+                  AND s.start_ts >= ? AND s.start_ts <= ?
+                ORDER BY sm.statistic_id, s.start_ts
+                """,
+                [*chunk, start_ts, end_ts],
+            )
+            batch_rows = cur.fetchall()
+
+            if row_budget > 0:
+                remaining = row_budget - len(rows)
+                if remaining <= 0:
+                    hit_budget = True
+                    break
+                if len(batch_rows) > remaining:
+                    rows.extend(batch_rows[:remaining])
+                    hit_budget = True
+                else:
+                    rows.extend(batch_rows)
+            else:
+                rows.extend(batch_rows)
+
+            done += len(chunk)
+            elapsed = _t.time() - t0
+            eta = (elapsed / done) * (total - done) if done else 0
+            set_progress("fetching", done, total, len(rows), elapsed, eta)
+            log.info("  %d/%d sensors — %d rows", done, total, len(rows))
+            if hit_budget:
+                break
+
+        conn.close()
+    except Exception as e:
+        log.warning("Direct SQLite stats read failed: %s", e)
+        return pd.DataFrame()
+
+    if not rows:
+        return pd.DataFrame()
+    if hit_budget:
+        log.warning(
+            "Stats fetch row budget reached (sqlite): kept %d rows (budget=%d)",
+            len(rows),
+            row_budget,
+        )
+    df = pd.DataFrame(rows, columns=["entity_id", "ts", "mean", "sum"])
+    df["ts"] = pd.to_datetime(df["ts"], unit="s", utc=True)
+    log.info("Fetched %d rows from SQLite | %s → %s", len(df), df["ts"].min().date(), df["ts"].max().date())
+    log_perf_guardrail(
+        "fetch_sqlite",
+        _t.time() - t0,
+        rows=len(df),
+        entities=len(entity_ids),
+        warn_ms=_env_int("HABITUS_FETCH_WARN_MS", FETCH_WARN_MS),
+    )
+    return df
 
 
 async def fetch_stats(entity_ids, start_iso, end_iso=None):
     """Fetch hourly statistics and return an aggregated DataFrame.
 
-    Memory-efficient: raw per-sensor rows are aggregated to hourly means
-    immediately after each sensor fetch, so peak RAM is bounded by one
-    sensor's worth of rows rather than all sensors combined.
+    Preferred path: direct SQLite reads.
+    Fallback path: batched WebSocket API calls.
     """
     if end_iso is None:
         end_iso = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:00:00+00:00")
-    all_rows = []  # accumulated hourly rows
+    if not entity_ids:
+        return pd.DataFrame()
+
+    start_iso_eff, was_clamped, clamp_info = clamp_fetch_window_by_row_budget(
+        start_iso,
+        end_iso,
+        len(entity_ids),
+    )
+    if was_clamped:
+        log.warning(
+            "Stats fetch window clamped: budget=%s rows, entities=%s, requested=%sh, max=%sh, range=%s → %s",
+            clamp_info["row_budget"],
+            clamp_info["entity_count"],
+            clamp_info["requested_hours"],
+            clamp_info["max_hours"],
+            start_iso,
+            start_iso_eff,
+        )
+
+    df_sql = fetch_stats_sqlite(entity_ids, start_iso_eff, end_iso)
+    if os.environ.get("HABITUS_FORCE_API", "").lower() != "true":
+        return df_sql
+
+    all_rows = []
     done = 0
     total = len(entity_ids)
     import time as _t
 
+    batch_size = max(1, _env_int("HABITUS_STATS_BATCH", 120))
+    max_retries = max(1, _env_int("HABITUS_STATS_RETRIES", 3))
+    row_budget = max(0, int(_fetch_row_budget()))
+    hit_budget = False
+
     t0 = _t.time()
-    for eid in entity_ids:
-        try:
-            ws = await ws_connect()
-            await ws.send(
-                json.dumps(
-                    {
-                        "id": 1,
-                        "type": "recorder/statistics_during_period",
-                        "start_time": start_iso,
-                        "end_time": end_iso,
-                        "statistic_ids": [eid],
-                        "period": "hour",
-                        "types": ["mean", "sum"],
-                    }
-                )
-            )
-            result = json.loads(await asyncio.wait_for(ws.recv(), timeout=30))
-            await ws.close()
-            for sid, points in result.get("result", {}).items():
-                for p in points:
-                    ts = p["start"]
-                    if ts > 1e10:
-                        ts /= 1000
-                    all_rows.append(
-                        {"entity_id": sid, "ts": ts, "mean": p.get("mean"), "sum": p.get("sum")}
+    for i in range(0, total, batch_size):
+        batch = entity_ids[i:i + batch_size]
+        ok = False
+
+        for attempt in range(1, max_retries + 1):
+            ws = None
+            try:
+                ws = await ws_connect()
+                await ws.send(
+                    json.dumps(
+                        {
+                            "id": 1,
+                            "type": "recorder/statistics_during_period",
+                            "start_time": start_iso_eff,
+                            "end_time": end_iso,
+                            "statistic_ids": batch,
+                            "period": "hour",
+                            "types": ["mean", "sum"],
+                        }
                     )
-            done += 1
-            if done % 10 == 0 or done == total:
-                elapsed = _t.time() - t0
-                eta = (elapsed / done) * (total - done) if done else 0
-                set_progress("fetching", done, total, len(all_rows), elapsed, eta)
-                log.info(f"  {done}/{total} sensors — {len(all_rows):,} rows")
-        except Exception as e:
-            log.warning(f"Error {eid}: {e}")
+                )
+                result = json.loads(await asyncio.wait_for(ws.recv(), timeout=90))
+                payload = result.get("result", {}) or {}
+                for sid in sorted(payload.keys()):
+                    points = payload.get(sid) or []
+                    for p in sorted(points, key=lambda x: x.get("start", 0)):
+                        ts = p["start"]
+                        if ts > 1e10:
+                            ts /= 1000
+                        all_rows.append(
+                            {"entity_id": sid, "ts": ts, "mean": p.get("mean"), "sum": p.get("sum")}
+                        )
+                        if row_budget > 0 and len(all_rows) >= row_budget:
+                            hit_budget = True
+                            break
+                    if hit_budget:
+                        break
+                ok = True
+                break
+            except Exception as e:
+                if attempt >= max_retries:
+                    log.warning(
+                        "Batch %d-%d failed after %d attempts: %s",
+                        i,
+                        i + len(batch) - 1,
+                        max_retries,
+                        e,
+                    )
+                else:
+                    await asyncio.sleep(min(5 * attempt, 15))
+            finally:
+                try:
+                    if ws is not None:
+                        await ws.close()
+                except Exception:
+                    pass
+
+        done += len(batch)
+        elapsed = _t.time() - t0
+        eta = (elapsed / done) * (total - done) if done else 0
+        set_progress("fetching", done, total, len(all_rows), elapsed, eta)
+        if ok:
+            log.info("  %d/%d sensors — %d rows", done, total, len(all_rows))
+        if hit_budget:
+            log.warning(
+                "Stats fetch row budget reached (api): kept %d rows (budget=%d)",
+                len(all_rows),
+                row_budget,
+            )
+            break
+
     if not all_rows:
         return pd.DataFrame()
     df = pd.DataFrame(all_rows)
     df["ts"] = pd.to_datetime(df["ts"], unit="s", utc=True)
-    log.info(f"Fetched {len(df):,} rows | {df['ts'].min().date()} → {df['ts'].max().date()}")
+    log.info("Fetched %d rows | %s → %s", len(df), df["ts"].min().date(), df["ts"].max().date())
+    log_perf_guardrail(
+        "fetch_api",
+        _t.time() - t0,
+        rows=len(df),
+        entities=len(entity_ids),
+        warn_ms=_env_int("HABITUS_FETCH_WARN_MS", FETCH_WARN_MS),
+    )
     return df
 
 
@@ -359,6 +1122,10 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         DataFrame with one row per hour and all FEATURE_COLS populated.
     """
+    import time as _t
+
+    t0 = _t.time()
+    source_rows = len(df)
     df = df.copy()
     df["hour"] = df["ts"].dt.floor("h")
     hours = pd.DataFrame({"hour": pd.date_range(df["hour"].min(), df["hour"].max(), freq="h")})
@@ -366,17 +1133,206 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     hours["day_of_week"] = hours["hour"].dt.dayofweek
     hours["is_weekend"] = (hours["day_of_week"] >= 5).astype(int)
     hours["month"] = hours["hour"].dt.month
-    _max_w = int(os.environ.get("HABITUS_MAX_POWER_KW", "25")) * 1000
-    _power_entity = os.environ.get("HABITUS_POWER_ENTITY", "").strip()
+    def _env_float(name: str, default: float) -> float:
+        raw = os.environ.get(name)
+        if raw in (None, ""):
+            return default
+        with contextlib.suppress(TypeError, ValueError):
+            return float(raw)
+        log.warning("Invalid %s=%r; using default %.3f", name, raw, default)
+        return default
+
+    _max_w = _env_float("HABITUS_MAX_POWER_KW", 25.0) * 1000.0
+    
+    # Read power entity from user_settings (run_state.json) first, fallback to proxy, then env var
+    _power_entity = ""
+    _power_proxy = ""
+    try:
+        _state = load_state() or {}
+        _us = _state.get("user_settings", {})
+        if _us.get("power_entity"):
+            _power_entity = _us["power_entity"]
+            log.debug("Using power_entity from user_settings: %s", _power_entity)
+        if _us.get("power_proxy"):
+            _power_proxy = _us["power_proxy"]
+    except Exception:
+        pass
+    
+    # If primary power sensors have insufficient history, prefer proxy sensors (which may have years)
+    if not _power_entity and _power_proxy:
+        _power_entity = _power_proxy
+        log.info("No primary power_entity configured — using proxy sensors as primary: %s", _power_entity)
+    elif not _power_entity:
+        _power_entity = os.environ.get("HABITUS_POWER_ENTITY", "").strip()
+    
     _energy_grid = os.environ.get("HABITUS_ENERGY_GRID", "").strip()
-    _energy_rates = [e for e in os.environ.get("HABITUS_ENERGY_RATES", "").split(",") if e]
+    _energy_rates = [e.strip() for e in os.environ.get("HABITUS_ENERGY_RATES", "").split(",") if e.strip()]
 
     grid_kwh_w = pd.Series(dtype=float, name="grid_kwh_w")  # init before branches
-    if _power_entity:
-        # Explicit override — use as-is (watts)
-        power = df[df["entity_id"] == _power_entity].copy()
-        power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(lower=0, upper=_max_w)
-        total_power = power.groupby("hour")["v"].max().rename("total_power_w")
+    # Support comma-separated multi-phase sensors (e.g. L1,L2,L3 — summed)
+    _power_entities = [e.strip() for e in _power_entity.split(",") if e.strip()] if _power_entity else []
+    # Power proxy sensors — used when primary sensors have insufficient history
+    # e.g. shore_power + battery_output_w covers all operating modes
+    # Read from state.json user_settings first (survives restarts), fallback to env
+    _power_proxy = ""
+    try:
+        _saved = load_state() or {}
+        _us = _saved.get("user_settings", {})
+        if _us.get("power_proxy"):
+            _power_proxy = _us["power_proxy"]
+            log.info("Loaded saved power proxy from settings: %s", _power_proxy)
+    except Exception:
+        pass
+    if not _power_proxy:
+        _power_proxy = os.environ.get("HABITUS_POWER_PROXY", "").strip()
+    _proxy_entities = [e.strip() for e in _power_proxy.split(",") if e.strip()] if _power_proxy else []
+    _phase_series: list[pd.Series] = []  # per-phase columns collected for later join
+    _phase_count = 1
+    _power_from_local_db = False
+    if _power_entities:
+        # Try to build power features directly from local timeseries DB
+        # This bypasses the >95% zeros check because we build the feature
+        # independently and merge by hour — no dilution from 3 years of empty rows
+        try:
+            from . import collector as _collector  # noqa: PLC0415
+            db = _collector.get_db()
+            db_stats = db.get_stats()
+            if db_stats["total_rows"] > 100:
+                # Fetch all hourly data from local DB
+                _now_ts = _t.time()
+                _oldest_ts = db_stats.get("oldest_ts", _now_ts - 86400)
+                local_df = db.fetch_range(_power_entities, _oldest_ts, _now_ts, resolution="1h")
+                
+                if not local_df.empty and len(local_df) > 10:
+                    # Build total_power_w directly from local DB
+                    local_df["hour"] = pd.to_datetime(local_df["timestamp"], unit="s", utc=True).dt.floor("h")
+                    local_df["v"] = pd.to_numeric(local_df["value"], errors="coerce").clip(lower=0, upper=_max_w)
+                    local_total_power = local_df.groupby("hour")["v"].sum().rename("total_power_w")
+                    
+                    # Build per-phase series from local DB
+                    for _ph_i, _ph_eid in enumerate(_power_entities):
+                        _ph_data = local_df[local_df["entity_id"] == _ph_eid]
+                        if not _ph_data.empty:
+                            _ph_series = _ph_data.groupby("hour")["v"].mean().rename(f"phase_L{_ph_i + 1}_w")
+                            _phase_series.append(_ph_series)
+                    
+                    _phase_count = len(_power_entities)
+                    
+                    # CRITICAL: Only train on hours with actual power data to avoid zero-dilution
+                    # Build a new hours DataFrame from the local power data index directly
+                    hours_with_power = pd.DataFrame({"hour": local_total_power.index})
+                    hours_with_power["hour_of_day"] = hours_with_power["hour"].dt.hour
+                    hours_with_power["day_of_week"] = hours_with_power["hour"].dt.dayofweek
+                    hours_with_power["is_weekend"] = (hours_with_power["day_of_week"] >= 5).astype(int)
+                    hours_with_power["month"] = hours_with_power["hour"].dt.month
+                    
+                    # Replace hours DataFrame with power-only subset
+                    hours = hours_with_power.copy()
+                    
+                    # Add power data directly
+                    hours = hours.merge(local_total_power, left_on="hour", right_index=True, how="left")
+                    hours["total_power_w"] = hours["total_power_w"].fillna(0)
+                    
+                    log.info(
+                        f"Local DB training window: {hours['hour'].min()} → {hours['hour'].max()} "
+                        f"({len(hours)} hours with power data)"
+                    )
+                    log.info(
+                        f"Power stats: mean={local_total_power.mean():.0f}W, "
+                        f"max={local_total_power.max():.0f}W, "
+                        f"min={local_total_power.min():.0f}W"
+                    )
+                    
+                    _power_from_local_db = True
+                    
+                    # Backfill historical gaps with proxy calculation (shore + battery + solar)
+                    # This provides estimated power consumption before inverter sensors existed
+                    if _proxy_entities and len(_proxy_entities) >= 2:
+                        try:
+                            log.info(f"Attempting proxy backfill with {len(_proxy_entities)} sensors: {','.join(_proxy_entities[:3])}...")
+                            # Compute proxy time range from configured training window
+                            _state_proxy = load_state() or {}
+                            _us_proxy = _state_proxy.get("user_settings", {})
+                            _proxy_days = int(_us_proxy.get("days_history", os.environ.get("HABITUS_DAYS", "90")))
+                            _proxy_to = pd.Timestamp.now(tz="UTC")
+                            _proxy_from = _proxy_to - pd.Timedelta(days=_proxy_days)
+                            log.info(f"Proxy fetch range: {_proxy_from} → {_proxy_to} ({_proxy_days}d)")
+                            
+                            # Fetch proxy sensors from HA statistics (full training window)
+                            # Uses fetch_stats_sqlite which resolves DB path internally
+                            proxy_stats = fetch_stats_sqlite(
+                                _proxy_entities,
+                                _proxy_from.isoformat(),
+                                _proxy_to.isoformat()
+                            )
+                            
+                            log.info(f"Proxy stats fetched: {len(proxy_stats)} rows, columns: {list(proxy_stats.columns) if not proxy_stats.empty else 'empty'}")
+                            if proxy_stats.empty:
+                                log.warning("Proxy stats empty — check if sensors have HA statistics data")
+                            
+                            if not proxy_stats.empty and len(proxy_stats) > 100:
+                                # Calculate estimated power from proxy sensors
+                                # fetch_stats_sqlite returns 'mean' column, rename to 'v'
+                                proxy_stats["hour"] = pd.to_datetime(proxy_stats["ts"], utc=True).dt.floor("h")
+                                proxy_stats["v"] = pd.to_numeric(proxy_stats["mean"], errors="coerce").clip(lower=0, upper=_max_w)
+                                
+                                # Sum all proxy sensors per hour (shore + battery + solar = total consumption estimate)
+                                proxy_power = proxy_stats.groupby("hour")["v"].sum().rename("proxy_power_w")
+                                
+                                # Find hours where primary (inverter) has no data
+                                existing_hours = set(local_total_power.index)
+                                proxy_hours = set(proxy_power.index) - existing_hours
+                                
+                                if len(proxy_hours) > 100:
+                                    # Build DataFrame for proxy-only hours
+                                    proxy_df = pd.DataFrame({"hour": sorted(proxy_hours)})
+                                    proxy_df["hour_of_day"] = proxy_df["hour"].dt.hour
+                                    proxy_df["day_of_week"] = proxy_df["hour"].dt.dayofweek
+                                    proxy_df["is_weekend"] = (proxy_df["day_of_week"] >= 5).astype(int)
+                                    proxy_df["month"] = proxy_df["hour"].dt.month
+                                    proxy_df = proxy_df.merge(proxy_power, left_on="hour", right_index=True, how="left")
+                                    proxy_df.rename(columns={"proxy_power_w": "total_power_w"}, inplace=True)
+                                    
+                                    # Append proxy hours to training dataset
+                                    hours = pd.concat([hours, proxy_df], ignore_index=True).sort_values("hour").reset_index(drop=True)
+                                    
+                                    proxy_mean = proxy_df["total_power_w"].mean()
+                                    proxy_span_days = (proxy_df["hour"].max() - proxy_df["hour"].min()).days
+                                    
+                                    log.info(
+                                        f"Backfilled {len(proxy_hours)} hours with proxy power estimate "
+                                        f"(mean={proxy_mean:.0f}W, span={proxy_span_days}d)"
+                                    )
+                                    log.info(
+                                        f"Total training window: {hours['hour'].min()} → {hours['hour'].max()} "
+                                        f"({len(hours)} hours: {len(local_total_power)} measured + {len(proxy_hours)} estimated)"
+                                    )
+                        except Exception as proxy_err:
+                            import traceback
+                            log.warning(f"Proxy backfill failed: {proxy_err}\n{traceback.format_exc()}")
+                    
+        except Exception as e:
+            import traceback
+            log.warning(f"Local DB power fetch failed: {e}\n{traceback.format_exc()}")
+        
+        # Sum across all specified phases / sensors
+        # Skip if we already built power features from local DB
+        if not _power_from_local_db:
+            power = df[df["entity_id"].isin(_power_entities)].copy()
+            power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(lower=0, upper=_max_w)
+            total_power = power.groupby("hour")["v"].sum().rename("total_power_w")
+            if len(_power_entities) > 1:
+                log.info("Multi-phase power: summing %d sensors → total_power_w", len(_power_entities))
+                # Build individual per-phase columns alongside the summed total
+                for _ph_i, _ph_eid in enumerate(_power_entities):
+                    _ph_df = df[df["entity_id"] == _ph_eid].copy()
+                    _ph_df["v"] = pd.to_numeric(_ph_df["mean"], errors="coerce").clip(
+                        lower=0, upper=_max_w
+                    )
+                    _ph_col = f"power_l{_ph_i + 1}_w"
+                    _ph_series = _ph_df.groupby("hour")["v"].max().rename(_ph_col)
+                    _phase_series.append(_ph_series)
+                _phase_count = len(_power_entities)
     elif _energy_grid:
         # Grid kWh entity from HA Energy Dashboard — convert hourly delta to W
         grid = df[df["entity_id"] == _energy_grid].copy()
@@ -384,7 +1340,8 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         grid = grid.set_index("hour").sort_index()
         # kWh delta per hour × 1000 = average watts for that hour
         kwh_per_hour = grid["v"].diff().clip(lower=0, upper=_max_w / 1000)
-        total_power = (kwh_per_hour * 1000).rename("total_power_w")
+        grid_kwh_w = (kwh_per_hour * 1000).rename("grid_kwh_w")
+        total_power = grid_kwh_w.rename("total_power_w")
     elif _energy_rates:
         # Per-device watt sensors from Energy Dashboard — sum these (no overlap)
         power = df[df["entity_id"].isin(_energy_rates)].copy()
@@ -404,8 +1361,17 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     avg_temp = temp.groupby("hour")["v"].mean().rename("avg_temp_c")
     activity = df.groupby("hour").size().rename("sensor_changes")
     features = hours.set_index("hour")
-    for s in [total_power, avg_temp, activity, grid_kwh_w]:
+    # Join power features only if not already added from local DB
+    _join_series = [avg_temp, activity, grid_kwh_w]
+    if not _power_from_local_db:
+        _join_series.insert(0, total_power)
+    for s in _join_series:
         features = features.join(s, how="left")
+    # Per-phase power columns (only when multi-phase sensors configured)
+    for _ph_s in _phase_series:
+        features = features.join(_ph_s, how="left")
+        features[_ph_s.name] = features[_ph_s.name].fillna(0.0)
+    features["phase_count"] = _phase_count
     # Merge activity features from activity engine
     try:
         act_features = activity_engine.extract_activity_features(df)
@@ -421,8 +1387,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         )
     ].copy()
     if not water_pump.empty:
+        max_water = _env_float("HABITUS_MAX_WATER_L_H", 5000.0)
         water_pump["v"] = pd.to_numeric(water_pump["mean"], errors="coerce").clip(
-            lower=0, upper=5000
+            lower=0, upper=max_water
         )
         wp_series = water_pump.groupby("hour")["v"].max().rename("water_l_per_h")
         features = features.join(wp_series, how="left")
@@ -432,17 +1399,89 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         df["entity_id"].str.contains("water_leak|bilge.*leak|leak.*detect", case=False, na=False)
     ].copy()
     if not leaks.empty:
-        leaks["v"] = leaks["state"].apply(
-            lambda x: 1.0 if str(x).lower() in ("on", "true", "wet", "detected", "1") else 0.0
-        )
+        leak_col = "state" if "state" in leaks.columns else "mean"
+
+        def _leak_to_float(v) -> float:
+            if pd.isna(v):
+                return 0.0
+            if isinstance(v, str):
+                return 1.0 if v.strip().lower() in {"on", "true", "wet", "detected", "1"} else 0.0
+            with contextlib.suppress(TypeError, ValueError):
+                return 1.0 if float(v) > 0 else 0.0
+            return 0.0
+
+        leaks["v"] = leaks[leak_col].map(_leak_to_float)
         leak_series = leaks.groupby("hour")["v"].max().rename("water_leak")
         features = features.join(leak_series, how="left")
+
+    # Gas meters (m³) — convert cumulative readings to hourly consumption
+    gas_entities = [e.strip() for e in os.environ.get("HABITUS_GAS_ENTITIES", "").split(",") if e.strip()]
+    if gas_entities:
+        gas = df[df["entity_id"].isin(gas_entities)].copy()
+        if not gas.empty:
+            max_gas = _env_float("HABITUS_MAX_GAS_M3_H", 20.0)
+            gas["v"] = pd.to_numeric(gas["mean"], errors="coerce").clip(lower=0)
+            gas = gas.sort_values(["entity_id", "hour"])
+            gas["delta"] = gas.groupby("entity_id")["v"].diff().clip(lower=0, upper=max_gas)
+            gas_series = gas.groupby("hour")["delta"].sum(min_count=1).rename("gas_m3_per_h")
+            features = features.join(gas_series, how="left")
 
     # Ensure all FEATURE_COLS exist (pad with zeros if activity extraction failed)
     for col in FEATURE_COLS:
         if col not in features.columns:
             features[col] = 0.0
-    return features.fillna(0).reset_index()
+    out = features.fillna(0).reset_index()
+
+    # ── Power data quality check ──────────────────────────────────────────────
+    # If total_power_w is mostly zero, the power sensors have insufficient history.
+    # Zero-dominant power features corrupt the model (anything non-zero → score=100).
+    # Drop power columns when >95% of rows are zero — training uses behavioral
+    # features only, which are unaffected.
+    _power_cols = ["total_power_w", "grid_kwh_w"] + [c for c in out.columns if c.startswith("power_l") and c.endswith("_w")]
+    for _pc in _power_cols:
+        if _pc in out.columns:
+            _nonzero_pct = (out[_pc] > 0.5).mean()
+            if _nonzero_pct < 0.05:
+                # Try proxy sensors before giving up on power features entirely.
+                # Proxy pattern: e.g. shore_power + battery_output_w
+                # shore ≈ 0 on battery, battery_out ≈ 0 on shore → sum covers both modes.
+                _proxy_filled = False
+                if _pc == "total_power_w" and _proxy_entities:
+                    _proxy_df = df[df["entity_id"].isin(_proxy_entities)].copy()
+                    if not _proxy_df.empty:
+                        _proxy_df["v"] = pd.to_numeric(_proxy_df["mean"], errors="coerce").clip(lower=0, upper=_max_w)
+                        _proxy_total = _proxy_df.groupby("hour")["v"].sum()
+                        _proxy_nonzero = (_proxy_total > 0.5).mean()
+                        if _proxy_nonzero >= 0.05:
+                            # Merge proxy into out — fill zeros in primary with proxy values
+                            _proxy_aligned = out.set_index("hour")["total_power_w"].copy() if "hour" in out.columns else out["total_power_w"].copy()
+                            _proxy_s = _proxy_total.reindex(_proxy_aligned.index, fill_value=0.0)
+                            # Where primary is 0, use proxy
+                            _merged = _proxy_aligned.where(_proxy_aligned > 0.5, _proxy_s)
+                            out["total_power_w"] = _merged.values if hasattr(_merged, "values") else _merged
+                            log.info(
+                                "Power proxy fallback: '%s' sensors fill total_power_w "
+                                "(%.1f%% non-zero → %.1f%% after proxy merge)",
+                                ",".join(_proxy_entities), _nonzero_pct * 100,
+                                (out["total_power_w"] > 0.5).mean() * 100,
+                            )
+                            _proxy_filled = True
+                if not _proxy_filled:
+                    log.warning(
+                        "Power feature '%s' is %.1f%% non-zero — insufficient history. "
+                        "Dropping from model (behavioral-only mode).",
+                        _pc, _nonzero_pct * 100,
+                    )
+                    out[_pc] = 0.0  # zero it out so it has no discriminative value
+
+    log_perf_guardrail(
+        "build_features",
+        _t.time() - t0,
+        rows=source_rows,
+        entities=int(df["entity_id"].nunique()) if "entity_id" in df.columns else 0,
+        warn_ms=_env_int("HABITUS_BUILD_FEATURES_WARN_MS", BUILD_FEATURES_WARN_MS),
+    )
+    return out
 
 
 # ── Model ──────────────────────────────────────────────────────────────────────
@@ -485,8 +1524,10 @@ def train_model(features: pd.DataFrame, training_days: int = 0) -> tuple:
 
 def save_artifacts(model, scaler, features):
     os.makedirs(DATA_DIR, exist_ok=True)
-    joblib.dump(model, MODEL_PATH)
-    joblib.dump(scaler, SCALER_PATH)
+    with open(MODEL_PATH, "wb") as f:
+        pickle.dump(model, f)
+    with open(SCALER_PATH, "wb") as f:
+        pickle.dump(scaler, f)
     baseline = {}
     for (h, d), g in features.groupby(["hour_of_day", "day_of_week"]):
         baseline[f"{h}_{d}"] = {
@@ -496,7 +1537,7 @@ def save_artifacts(model, scaler, features):
             "n_samples": len(g),
         }
     with open(BASELINE_PATH, "w") as f:
-        json.dump(baseline, f)
+        json.dump(baseline, f, default=str)
     log.info(f"Artifacts saved ({os.path.getsize(MODEL_PATH)//1024}KB model)")
 
 
@@ -520,13 +1561,24 @@ def score_current(features):
     if not row.empty:
         X = row[FEATURE_COLS].values
     else:
-        # Fallback: build a zero-padded row matching FEATURE_COLS exactly
-        zeros = [0.0] * len(FEATURE_COLS)
-        zeros[FEATURE_COLS.index("hour_of_day")] = now.hour
-        zeros[FEATURE_COLS.index("day_of_week")] = now.weekday()
-        zeros[FEATURE_COLS.index("is_weekend")] = int(now.weekday() >= 5)
-        zeros[FEATURE_COLS.index("month")] = now.month
-        X = np.array([zeros])
+        # Fallback: use the closest historical hour with the same hour-of-day and
+        # day-of-week — far better than zeros which score as maximally anomalous.
+        same_slot = features[
+            (features["hour"].dt.hour == now.hour)
+            & (features["hour"].dt.dayofweek == now.weekday())
+        ]
+        if not same_slot.empty:
+            X = same_slot.tail(1)[FEATURE_COLS].values
+            log.info("score_current: using closest same-slot row (no current-hour data)")
+        else:
+            # Last resort: nearest hour to now in the data
+            nearest = features.iloc[(features["hour"] - pd.Timestamp(now)).abs().argsort()[:1]]
+            if not nearest.empty:
+                X = nearest[FEATURE_COLS].values
+                log.info("score_current: using nearest row fallback")
+            else:
+                log.warning("score_current: no rows available, returning 0")
+                return 0
     score, model_used = seasonal.score_with_best_model(X)
     log.info(f"Scored with {model_used} model")
     return score
@@ -534,7 +1586,8 @@ def score_current(features):
 
 # ── Notify ────────────────────────────────────────────────────────────────────
 def send_notification(title, message):
-    if not NOTIFY_ON:
+    notify_on = os.environ.get("HABITUS_NOTIFY_ON", "true").lower() == "true"
+    if not notify_on:
         return
     headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
     service = NOTIFY_SVC.replace(".", "/")
@@ -841,6 +1894,57 @@ def publish_dashboard_entities(
         pass
 
 
+# ── Post-train analysis pipeline ──────────────────────────────────────────────
+
+def _run_post_analysis(
+    state: dict,
+    stat_ids: list[str],
+    raw_df: "pd.DataFrame | None" = None,
+) -> None:
+    """Run all secondary feature modules after the main training pipeline completes.
+
+    Each module is wrapped in try/except so a failure in one never aborts the
+    overall training pipeline.  Timing follows the existing Perf log pattern.
+    """
+    import time as _t
+
+    from . import device_library as _dl  # noqa: PLC0415
+
+    set_progress("post_analysis", 0, 9, 0, 0, 0)
+
+    _steps = [
+        ("routine_builder",     lambda: _routine_builder.run()),
+        ("battery_watchdog",    lambda: _battery_watchdog.save_battery_status(_battery_watchdog.run_battery_check())),
+        ("integration_health",  lambda: _integration_health.save_integration_health(_integration_health.run_integration_health_check())),
+        ("changelog",           lambda: _changelog.run_diff_and_log()),
+        ("conflict_detector",   lambda: conflict_detector.save_conflicts(conflict_detector.detect_conflicts())),
+        ("automation_health",   lambda: _automation_health.save_health(_automation_health.run_health_check())),
+        ("guest_mode",          lambda: _guest_mode.run()),
+        ("seasonal_adapter",    lambda: _seasonal_adapter.run()),
+        ("device_library",      lambda: _dl.save_library(_dl.build_library_from_features(raw_df))),
+    ]
+
+    for i, (name, fn) in enumerate(_steps, 1):
+        t0 = _t.time()
+        try:
+            fn()
+            elapsed = _t.time() - t0
+            log.info("Perf[post_analysis/%s]: %.0fms", name, elapsed * 1000)
+        except Exception as exc:
+            log.warning("post_analysis/%s failed (non-fatal): %s", name, exc)
+        set_progress("post_analysis", i, len(_steps), 0, 0, 0)
+
+    mark_last_completed_progress(
+        state,
+        "post_analysis",
+        done=len(_steps),
+        total=len(_steps),
+        pct=100,
+    )
+    save_state(state)
+    log.info("Post-analysis pipeline complete")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 async def run(days_history: int, mode: str = "full") -> None:
     """Main Habitus run loop — fetch, train (if needed), score, publish.
@@ -859,6 +1963,44 @@ async def run(days_history: int, mode: str = "full") -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
     now_iso = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:00:00+00:00")
     state = load_state()
+
+    # ── Python-side staleness guard ────────────────────────────────────────────
+    # Belt-and-suspenders: if progress.json says running=true but started_at is
+    # >15 minutes old (or file mtime is >15 min old), the previous run crashed.
+    # Mark it stale_aborted so the UI reflects this, then proceed with a fresh run.
+    _STALE_THRESHOLD_S = 15 * 60  # 15 minutes
+    import time as _time  # noqa: PLC0415
+    if os.path.exists(PROGRESS_PATH):
+        _file_age_s = _time.time() - os.path.getmtime(PROGRESS_PATH)
+        with contextlib.suppress(Exception):
+            with open(PROGRESS_PATH) as _pf:
+                _prev_prog = json.load(_pf)
+            if _prev_prog.get("running"):
+                # Check started_at if present, otherwise fall back to file mtime
+                _started_at_str = _prev_prog.get("started_at")
+                if _started_at_str:
+                    try:
+                        _sa = datetime.datetime.fromisoformat(_started_at_str)
+                        _file_age_s = (datetime.datetime.now(datetime.UTC) - _sa).total_seconds()
+                    except Exception:
+                        pass
+                if _file_age_s > _STALE_THRESHOLD_S:
+                    log.warning(
+                        "Stale progress.json detected in Python runner (%.0f min old, running=true) "
+                        "— previous run likely crashed. Marking stale_aborted and proceeding.",
+                        _file_age_s / 60,
+                    )
+                    write_fetch_failed(
+                        f"stale_aborted: run started >15 min ago without completion "
+                        f"(age={_file_age_s/60:.1f}min)"
+                    )
+                    # Overwrite with a clean stale marker
+                    from .utils import atomic_write as _aw  # noqa: PLC0415
+                    _aw(PROGRESS_PATH, {
+                        "running": False,
+                        "phase": "stale_aborted",
+                        "stale_cleared_at": now_iso,
+                    })
 
     # Adaptive contamination — force retrain when training age crosses a tier boundary
     _stored_days = state.get("training_days", 0)
@@ -888,6 +2030,12 @@ async def run(days_history: int, mode: str = "full") -> None:
             mode = "full"
         else:
             log.info("Score-only mode — using existing model")
+            # Run conflict detection on every score cycle (lightweight, real-time)
+            try:
+                conflicts = conflict_detector.detect_conflicts()
+                conflict_detector.save_conflicts(conflicts)
+            except Exception as e:
+                log.warning("Conflict detection failed: %s", e)
             now = datetime.datetime.now(datetime.UTC).replace(minute=0, second=0, microsecond=0)
             X = np.array(
                 [
@@ -924,6 +2072,7 @@ async def run(days_history: int, mode: str = "full") -> None:
                     "last_score": now_iso,
                     "anomaly_score": anomaly_score,
                     "mode": "score",
+                    "requested_days": days_history,
                 }
             )
             save_state(state)
@@ -954,6 +2103,26 @@ async def run(days_history: int, mode: str = "full") -> None:
         if _saved.get("power_entity") and not os.environ.get("HABITUS_POWER_ENTITY"):
             os.environ["HABITUS_POWER_ENTITY"] = _saved["power_entity"]
             log.info("Loaded saved power entity from settings: %s", _saved["power_entity"])
+        if "days_history" in _saved:
+            try:
+                days_history = int(_saved.get("days_history"))
+                os.environ["HABITUS_DAYS"] = str(days_history)
+                log.info("Loaded saved days_history from settings: %s", days_history)
+            except Exception:
+                pass
+        if "notify_on_anomaly" in _saved:
+            os.environ["HABITUS_NOTIFY_ON"] = "true" if bool(_saved.get("notify_on_anomaly")) else "false"
+            log.info("Loaded saved notify setting from settings: %s", os.environ["HABITUS_NOTIFY_ON"])
+        if "anomaly_sensitivity" in _saved:
+            try:
+                sens = float(_saved["anomaly_sensitivity"])
+                os.environ["HABITUS_ANOMALY_SENSITIVITY"] = str(max(0.3, min(3.0, sens)))
+                log.info("Loaded anomaly sensitivity: %s", os.environ["HABITUS_ANOMALY_SENSITIVITY"])
+            except (TypeError, ValueError):
+                pass
+        if _saved.get("power_proxy") and not os.environ.get("HABITUS_POWER_PROXY"):
+            os.environ["HABITUS_POWER_PROXY"] = _saved["power_proxy"]
+            log.info("Loaded saved power proxy from settings: %s", _saved["power_proxy"])
     except Exception:
         pass
 
@@ -978,25 +2147,33 @@ async def run(days_history: int, mode: str = "full") -> None:
                 energy["kwh_price"],
                 os.environ.get("HABITUS_CURRENCY", "kr"),
             )
-            # Prefer a real-time watt sensor over kWh delta — look for _w companion
-            # e.g. sensor.foo_electric_consumption_kwh → sensor.foo_electric_consumption_w
-            kwh_id = energy["grid_kwh"]
-            watt_candidate = kwh_id.replace("_kwh", "_w").replace("_energy", "_power")
-            try:
-                headers = {"Authorization": f"Bearer {HA_TOKEN}"}
-                r = requests.get(
-                    f"{HA_URL}/api/states/{watt_candidate}", headers=headers, timeout=5
-                )
-                if r.status_code == 200:
-                    uom = r.json().get("attributes", {}).get("unit_of_measurement", "")
-                    if uom == "W":
-                        os.environ["HABITUS_POWER_ENTITY"] = watt_candidate
-                        log.info(
-                            "Auto-detected watt sensor companion: %s (preferred over kWh delta)",
-                            watt_candidate,
-                        )
-            except Exception as e:
-                log.debug("Watt companion probe failed: %s", e)
+            # Auto-detect real-time watt sensor ONLY if user hasn't configured power_entity
+            # Prevents overwriting user's saved settings on every restart
+            _state_check = load_state() or {}
+            _user_has_power_entity = bool(_state_check.get("user_settings", {}).get("power_entity"))
+            
+            if not _user_has_power_entity:
+                # Prefer a real-time watt sensor over kWh delta — look for _w companion
+                # e.g. sensor.foo_electric_consumption_kwh → sensor.foo_electric_consumption_w
+                kwh_id = energy["grid_kwh"]
+                watt_candidate = kwh_id.replace("_kwh", "_w").replace("_energy", "_power")
+                try:
+                    headers = {"Authorization": f"Bearer {HA_TOKEN}"}
+                    r = requests.get(
+                        f"{HA_URL}/api/states/{watt_candidate}", headers=headers, timeout=5
+                    )
+                    if r.status_code == 200:
+                        uom = r.json().get("attributes", {}).get("unit_of_measurement", "")
+                        if uom == "W":
+                            os.environ["HABITUS_POWER_ENTITY"] = watt_candidate
+                            log.info(
+                                "Auto-detected watt sensor companion: %s (preferred over kWh delta)",
+                                watt_candidate,
+                            )
+                except Exception as e:
+                    log.debug("Watt companion probe failed: %s", e)
+            else:
+                log.debug("Skipping power entity auto-detection — user has configured power_entity")
         if energy.get("device_rates"):
             os.environ["HABITUS_ENERGY_RATES"] = ",".join(energy["device_rates"])
         if energy.get("gas"):
@@ -1006,19 +2183,94 @@ async def run(days_history: int, mode: str = "full") -> None:
             os.environ["HABITUS_WATER_ENTITIES"] = ",".join(energy["water"])
             log.info("Water meters: %s", energy["water"])
 
-    stat_ids = await get_stat_ids()
-    if not stat_ids:
-        log.error("No behavioral sensors found")
+    # Persist resolved power/energy entities to state so UI and next run see them
+    # BUT: do not overwrite user_settings — only save auto-detected values if user hasn't configured
+    _resolved_power = os.environ.get("HABITUS_POWER_ENTITY", "").strip()
+    _resolved_grid = os.environ.get("HABITUS_ENERGY_GRID", "").strip()
+    
+    # Check if user has explicitly configured power_entity in settings
+    _saved = load_state() or {}
+    _user_configured_power = _saved.get("user_settings", {}).get("power_entity")
+    
+    if _resolved_power and not _user_configured_power:
+        # Auto-detected power entity (no user override) — save to state
+        state["power_entity"] = _resolved_power
+        # Persist per-phase mapping when multiple sensors configured
+        _resolved_power_entities = [e.strip() for e in _resolved_power.split(",") if e.strip()]
+        if len(_resolved_power_entities) > 1:
+            state["power_phases"] = {
+                f"L{i + 1}": eid for i, eid in enumerate(_resolved_power_entities)
+            }
+            state["phase_count"] = len(_resolved_power_entities)
+        else:
+            state.pop("power_phases", None)
+            state["phase_count"] = 1
+    elif _user_configured_power:
+        # User has configured power_entity — preserve their choice
+        state["power_entity"] = _user_configured_power
+        _user_entities = [e.strip() for e in _user_configured_power.split(",") if e.strip()]
+        if len(_user_entities) > 1:
+            state["power_phases"] = {
+                f"L{i + 1}": eid for i, eid in enumerate(_user_entities)
+            }
+            state["phase_count"] = len(_user_entities)
+        else:
+            state.pop("power_phases", None)
+            state["phase_count"] = 1
+    
+    if _resolved_grid:
+        state["energy_grid_entity"] = _resolved_grid
+    if _resolved_power or _resolved_grid or _user_configured_power:
+        save_state(state)
+        log.info("Power entity persisted to state: power=%s grid=%s", 
+                 _user_configured_power or _resolved_power or "—", 
+                 _resolved_grid or "—")
+
+    stat_ids, total_stat_ids = await get_stat_ids()
+    behavioral_entity_ids = await get_behavioral_entity_ids()
+    stat_id_set = set(stat_ids)
+    non_stat_ids = [e for e in behavioral_entity_ids if e not in stat_id_set]
+    tracked_entity_count = len(stat_ids) + len(non_stat_ids)
+
+    if not stat_ids and not non_stat_ids:
+        log.error("No behavioral sensors found — aborting training with fetch_failed status")
+        write_fetch_failed("no_entities: get_stat_ids and get_behavioral_entity_ids both returned empty")
         return
 
-    if state.get("data_to") and os.path.exists(MODEL_PATH):
-        # Incremental
+    total_entities = get_ha_entity_count()
+    log.info(
+        "Behavioral coverage: %d with long-term stats + %d raw-only entities",
+        len(stat_ids),
+        len(non_stat_ids),
+    )
+
+    # Raw DataFrame captured for device library (set in training branches, None if score-only)
+    _raw_df_for_library: pd.DataFrame | None = None
+
+    # Check if incremental update is viable (data_to is recent + model exists)
+    _data_to = state.get("data_to")
+    _can_incremental = False
+    if _data_to and os.path.exists(MODEL_PATH):
+        try:
+            _dt_to = datetime.datetime.fromisoformat(_data_to.replace("+00:00", "")).replace(tzinfo=datetime.UTC)
+            _age_days = (now - _dt_to).days
+            # If data_to is stale (>7 days old), treat as fresh start
+            if _age_days <= 7:
+                _can_incremental = True
+            else:
+                log.info("data_to is %d days old — treating as fresh start (full fetch)", _age_days)
+        except Exception:
+            pass
+
+    if _can_incremental:
+        # Incremental update
         fetch_from = state["data_to"]
         log.info(f"Incremental: {fetch_from} → {now_iso}")
         df_new = await fetch_stats(stat_ids, fetch_from, now_iso)
         if df_new.empty or len(df_new) < 24:
             log.info("Not enough new data — scoring with existing model")
-            model = joblib.load(MODEL_PATH)
+            with open(MODEL_PATH, "rb") as f:
+                model = pickle.load(f)
             anomaly_score = seasonal.score_with_best_model(
                 np.array(
                     [
@@ -1035,7 +2287,7 @@ async def run(days_history: int, mode: str = "full") -> None:
                 )
             )[0]
             training_days = state.get("training_days", 0)
-            entity_count = state.get("entity_count", len(stat_ids))
+            entity_count = state.get("entity_count", tracked_entity_count)
         else:
             cap = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days_history)
             cap_iso = cap.strftime("%Y-%m-%dT%H:00:00+00:00")
@@ -1043,14 +2295,82 @@ async def run(days_history: int, mode: str = "full") -> None:
             full_from = saved if saved > cap_iso else cap_iso
             log.info(f"Retraining {days_history}d window {full_from} → {now_iso}")
             set_progress("fetching", 0, len(stat_ids), 0, 0, 0)
-            df = await fetch_stats(stat_ids, full_from, now_iso)
-            if df.empty:
-                log.warning("No data")
+            df_stats = await fetch_stats(stat_ids, full_from, now_iso) if stat_ids else pd.DataFrame()
+
+            raw_max_days = max(1, _env_int("HABITUS_RAW_MAX_DAYS", 3650))
+            raw_days = min(days_history, raw_max_days)
+            raw_from = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=raw_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            raw_to = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            raw_entity_limit = max(1, _env_int("HABITUS_RAW_MAX_ENTITIES", 300))
+            if len(non_stat_ids) > raw_entity_limit:
+                log.warning(
+                    "Skipping raw history: %d non-stat entities exceeds limit %d",
+                    len(non_stat_ids),
+                    raw_entity_limit,
+                )
+                df_raw = pd.DataFrame()
+            else:
+                log.info("Fetching raw history for %d non-stat entities (%dd)", len(non_stat_ids), raw_days)
+                df_raw = fetch_recent_raw_history(non_stat_ids, raw_from, raw_to)
+                log.info("Raw history fetch complete (%d rows)", len(df_raw))
+
+            frames = [x for x in (df_stats, df_raw) if x is not None and not x.empty]
+            if not frames:
+                log.error(
+                    "fetch returned 0 rows for %d stat entities and %d raw entities — "
+                    "aborting training. Check DB path, HA connectivity, and history window.",
+                    len(stat_ids),
+                    len(non_stat_ids),
+                )
+                write_fetch_failed(
+                    f"fetch returned 0 rows (stat_entities={len(stat_ids)}, "
+                    f"raw_entities={len(non_stat_ids)})"
+                )
                 return
+            df = pd.concat(frames, ignore_index=True)
+            if len(df) == 0:
+                log.error("DataFrame is empty after concat — aborting with fetch_failed")
+                write_fetch_failed("empty_df: concat of stat+raw frames produced 0 rows")
+                return
+            log.info("Post-fetch: computing unique entity count...")
+            unique_entity_count = int(df["entity_id"].nunique())
+            log.info("Post-fetch: unique entities=%d", unique_entity_count)
+            mark_last_completed_progress(
+                state,
+                "fetching",
+                done=len(stat_ids),
+                total=len(stat_ids),
+                rows=len(df),
+                pct=100,
+                extra={"unique_entities": unique_entity_count},
+            )
+            log.info("Post-fetch: saving run state checkpoint...")
+            save_state(state)
+            log.info("Post-fetch: state checkpoint saved")
+
             set_progress("building_baselines", len(stat_ids), len(stat_ids), len(df), 0, 0)
             log.info("Building entity baselines...")
             anomaly_breakdown.build_entity_baselines(df)
-            features = build_features(df)
+            mark_last_completed_progress(
+                state,
+                "building_baselines",
+                done=len(stat_ids),
+                total=len(stat_ids),
+                rows=len(df),
+                pct=100,
+            )
+            save_state(state)
+            try:
+                log.info("Building feature matrix...")
+                features = build_features(df)
+                log.info("Feature matrix built: %d rows", len(features))
+            except Exception as e:
+                import traceback
+                log.error("CRASH in build_features: %s", e)
+                traceback.print_exc()
+                raise
+            _fetch_row_count = len(df)  # capture before del for state.json
+            _raw_df_for_library = df  # capture for device library before deletion
             del df
             set_progress("training", len(stat_ids), len(stat_ids), len(features), 0, 0)
             log.info(f"Training IsolationForest on {len(features):,} rows...")
@@ -1061,6 +2381,7 @@ async def run(days_history: int, mode: str = "full") -> None:
             save_artifacts(model, scaler, features)
             # Partial score after training — baseline + initial anomaly data visible
             _partial_score = score_current(features)
+            training_days = _train_days
             _warming_up = training_days < MIN_SCORING_DAYS
             state.update(
                 {
@@ -1070,7 +2391,19 @@ async def run(days_history: int, mode: str = "full") -> None:
                     "warming_up": training_days < MIN_SCORING_DAYS,
                     "warmup_days_remaining": max(0, MIN_SCORING_DAYS - training_days),
                     "contamination_tier": contamination_tier_name(_train_days),
+                    "data_from": full_from,
+                    "data_to": now_iso,
+                    "last_run": now_iso,
                 }
+            )
+            mark_last_completed_progress(
+                state,
+                "training",
+                done=len(stat_ids),
+                total=len(stat_ids),
+                rows=len(features),
+                pct=100,
+                extra={"training_days": _train_days, "anomaly_score": _partial_score},
             )
             save_state(state)
             log.info(f"Model ready — preliminary score {_partial_score}/100")
@@ -1089,6 +2422,15 @@ async def run(days_history: int, mode: str = "full") -> None:
             set_progress("pattern_analysis", len(stat_ids), len(stat_ids), len(features), 0, 0)
             log.info("Discovering patterns...")
             pattern_engine.run(features, stat_ids)
+            mark_last_completed_progress(
+                state,
+                "pattern_analysis",
+                done=len(stat_ids),
+                total=len(stat_ids),
+                rows=len(features),
+                pct=100,
+            )
+            save_state(state)
 
             # ── Novel ML features (incremental) ──
             log.info("Running phantom load detection...")
@@ -1118,29 +2460,206 @@ async def run(days_history: int, mode: str = "full") -> None:
             except Exception as e:
                 log.warning("Automation gap analysis failed: %s", e)
 
+            # Scene detection and smart automation suggestions
+            try:
+                try:
+                    ha_areas.fetch_areas()
+                except Exception as e:
+                    log.warning("HA area fetch failed: %s", e)
+                log.info("Running scene detection...")
+                scenes = scene_detector.detect_scenes(days=min(days_history, 30))
+                scene_detector.save(scenes)
+                log.info("Detected %d implicit scenes", len(scenes))
+
+                log.info("Running scene analysis...")
+                try:
+                    from . import scene_analysis as _scene_analysis
+                    sa_results = _scene_analysis.analyse_scenes(discovered_scenes=scenes)
+                    _scene_analysis.save_analysis(sa_results)
+                    log.info("Scene analysis: %d improvement suggestions", len(sa_results))
+                except Exception as e:
+                    log.warning("Scene analysis failed: %s", e)
+
+                log.info("Running room prediction...")
+                try:
+                    area_data = ha_areas._load_cache()
+                    e2a = area_data.get("entity_to_area", {})
+                    if e2a:
+                        room_predictor.run_room_prediction(e2a, days=min(days_history, 30))
+                except Exception as e:
+                    log.warning("Room prediction failed: %s", e)
+
+                log.info("Running routine prediction...")
+                try:
+                    routine_predictor.run_routine_prediction(days=min(days_history, 30))
+                except Exception as e:
+                    log.warning("Routine prediction failed: %s", e)
+
+                log.info("Running deep correlation analysis...")
+                try:
+                    area_data2 = ha_areas._load_cache()
+                    e2a2 = area_data2.get("entity_to_area", {})
+                    correlation_engine.run_correlation_analysis(e2a2, days=min(days_history, 30))
+                except Exception as e:
+                    log.warning("Correlation analysis failed: %s", e)
+
+                log.info("Running sequence mining (PrefixSpan)...")
+                try:
+                    area_data3 = ha_areas._load_cache()
+                    e2a3 = area_data3.get("entity_to_area", {})
+                    sequence_miner.mine_sequences(e2a3, days=min(days_history, 30))
+                except Exception as e:
+                    log.warning("Sequence mining failed: %s", e)
+
+                log.info("Running Markov chain next-action model...")
+                try:
+                    area_data4 = ha_areas._load_cache()
+                    e2a4 = area_data4.get("entity_to_area", {})
+                    markov_chain.build_markov_model(e2a4, days=min(days_history, 30))
+                except Exception as e:
+                    log.warning("Markov chain failed: %s", e)
+
+                log.info("Running HMM activity state model...")
+                try:
+                    import signal
+                    def timeout_handler(signum, frame):
+                        raise TimeoutError("HMM training exceeded 60s timeout")
+                    signal.signal(signal.SIGALRM, timeout_handler)
+                    signal.alarm(60)  # 60-second timeout
+                    try:
+                        area_data5 = ha_areas._load_cache()
+                        e2a5 = area_data5.get("entity_to_area", {})
+                        activity_hmm.train_activity_model(e2a5, days=min(days_history, 30))
+                    finally:
+                        signal.alarm(0)  # Cancel alarm
+                except Exception as e:
+                    log.warning("HMM activity model failed: %s", e)
+
+                log.info("Running energy forecast...")
+                try:
+                    energy_forecast.run_energy_forecast(days_history=min(days_history, 90))
+                except Exception as e:
+                    log.warning("Energy forecast failed: %s", e)
+
+                log.info("Running dynamic automation analysis...")
+                try:
+                    area_data6 = ha_areas._load_cache()
+                    e2a6 = area_data6.get("entity_to_area", {})
+                    dynamic_automations.run_dynamic_analysis(e2a6, days=min(days_history, 30))
+                except Exception as e:
+                    log.warning("Dynamic automation analysis failed: %s", e)
+
+                log.info("Running appliance fingerprinting...")
+                try:
+                    appliance_fingerprint.run_fingerprinting(days=min(days_history, 30))
+                except Exception as e:
+                    log.warning("Appliance fingerprinting failed: %s", e)
+
+                log.info("Running NILM disaggregation...")
+                try:
+                    nilm_disaggregator.run_disaggregation(days=min(days_history, 7))
+                except Exception as e:
+                    log.warning("NILM disaggregation failed: %s", e)
+
+                log.info("Building smart automation suggestions...")
+                if os.path.exists(SUGGESTIONS_PATH):
+                    with open(SUGGESTIONS_PATH) as _f:
+                        existing_sug = json.loads(_f.read())
+                else:
+                    existing_sug = []
+                patterns_data = {}
+                if os.path.exists(os.path.join(DATA_DIR, "patterns.json")):
+                    with open(os.path.join(DATA_DIR, "patterns.json")) as _f:
+                        patterns_data = json.loads(_f.read())
+                smart_sug = automation_builder.generate_smart_suggestions(
+                    scenes, patterns_data, existing_sug
+                )
+                automation_builder.save_smart_suggestions(smart_sug)
+            except Exception as e:
+                log.warning("Scene detection / automation builder failed: %s", e)
+
             anomaly_score = score_current(features)
             training_days = round(
                 (features["hour"].max() - features["hour"].min()).total_seconds() / 86400
             )
-            entity_count = len(stat_ids)
+            entity_count = tracked_entity_count
     else:
         # First run — all history
         cap = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days_history)
         full_from = cap.strftime("%Y-%m-%dT%H:00:00+00:00")
         log.info(f"First run: fetching last {days_history} days from {full_from}")
         set_progress("fetching", 0, len(stat_ids), 0, 0, 0)
-        df = await fetch_stats(stat_ids, full_from, now_iso)
-        if df.empty:
-            log.warning("No data returned")
+        df_stats = await fetch_stats(stat_ids, full_from, now_iso) if stat_ids else pd.DataFrame()
+
+        raw_max_days = max(1, _env_int("HABITUS_RAW_MAX_DAYS", 3650))
+        raw_days = min(days_history, raw_max_days)
+        raw_from = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=raw_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        raw_to = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        raw_entity_limit = max(1, _env_int("HABITUS_RAW_MAX_ENTITIES", 300))
+        if len(non_stat_ids) > raw_entity_limit:
+            log.warning(
+                "Skipping raw history: %d non-stat entities exceeds limit %d",
+                len(non_stat_ids),
+                raw_entity_limit,
+            )
+            df_raw = pd.DataFrame()
+        else:
+            log.info("Fetching raw history for %d non-stat entities (%dd)", len(non_stat_ids), raw_days)
+            df_raw = fetch_recent_raw_history(non_stat_ids, raw_from, raw_to)
+            log.info("Raw history fetch complete (%d rows)", len(df_raw))
+
+        frames = [x for x in (df_stats, df_raw) if x is not None and not x.empty]
+        if not frames:
+            log.error(
+                "fetch returned 0 rows for %d stat entities and %d raw entities — "
+                "aborting training. Check DB path, HA connectivity, and history window.",
+                len(stat_ids),
+                len(non_stat_ids),
+            )
+            write_fetch_failed(
+                f"fetch returned 0 rows (stat_entities={len(stat_ids)}, "
+                f"raw_entities={len(non_stat_ids)})"
+            )
             return
+        df = pd.concat(frames, ignore_index=True)
+        if len(df) == 0:
+            log.error("DataFrame is empty after concat — aborting with fetch_failed")
+            write_fetch_failed("empty_df: concat of stat+raw frames produced 0 rows")
+            return
+        log.info("Post-fetch: computing unique entity count...")
+        unique_entity_count = int(df["entity_id"].nunique())
+        log.info("Post-fetch: unique entities=%d", unique_entity_count)
+        mark_last_completed_progress(
+            state,
+            "fetching",
+            done=len(stat_ids),
+            total=len(stat_ids),
+            rows=len(df),
+            pct=100,
+            extra={"unique_entities": unique_entity_count},
+        )
+        log.info("Post-fetch: saving run state checkpoint...")
+        save_state(state)
+        log.info("Post-fetch: state checkpoint saved")
+
         set_progress("building_baselines", len(stat_ids), len(stat_ids), len(df), 0, 0)
         log.info("Building entity baselines...")
         anomaly_breakdown.build_entity_baselines(df)
         activity_engine.build_activity_baseline(activity_engine.extract_activity_features(df))
+        mark_last_completed_progress(
+            state,
+            "building_baselines",
+            done=len(stat_ids),
+            total=len(stat_ids),
+            rows=len(df),
+            pct=100,
+        )
         # Partial state write — unblocks UI baseline tab
-        state.update({"phase": "baselines_ready", "entity_count": len(stat_ids)})
+        state.update({"phase": "baselines_ready", "entity_count": tracked_entity_count})
         save_state(state)
         features = build_features(df)
+        _fetch_row_count = len(df)  # capture before del for state.json
+        _raw_df_for_library = df  # capture for device library before deletion
         del df
         set_progress("training", len(stat_ids), len(stat_ids), len(features), 0, 0)
         log.info(f"Training IsolationForest on {len(features):,} rows...")
@@ -1156,7 +2675,19 @@ async def run(days_history: int, mode: str = "full") -> None:
                 "anomaly_score": _partial_score,
                 "training_days": _train_days,
                 "contamination_tier": contamination_tier_name(_train_days),
+                "data_from": full_from,
+                "data_to": now_iso,
+                "last_run": now_iso,
             }
+        )
+        mark_last_completed_progress(
+            state,
+            "training",
+            done=len(stat_ids),
+            total=len(stat_ids),
+            rows=len(features),
+            pct=100,
+            extra={"training_days": _train_days, "anomaly_score": _partial_score},
         )
         save_state(state)
         log.info(f"Model ready — preliminary score {_partial_score}/100")
@@ -1173,6 +2704,15 @@ async def run(days_history: int, mode: str = "full") -> None:
         set_progress("pattern_analysis", len(stat_ids), len(stat_ids), len(features), 0, 0)
         log.info("Discovering patterns...")
         pattern_engine.run(features, stat_ids)
+        mark_last_completed_progress(
+            state,
+            "pattern_analysis",
+            done=len(stat_ids),
+            total=len(stat_ids),
+            rows=len(features),
+            pct=100,
+        )
+        save_state(state)
 
         # ── Novel ML features ──
         log.info("Running phantom load detection...")
@@ -1185,8 +2725,15 @@ async def run(days_history: int, mode: str = "full") -> None:
 
         log.info("Scoring automation effectiveness...")
         try:
-            auto_scores = await automation_score.score_all(HA_URL, HA_TOKEN)
+            # Timeout after 20 seconds to prevent add-on restart
+            auto_scores = await asyncio.wait_for(
+                automation_score.score_all(HA_URL, HA_TOKEN),
+                timeout=20.0
+            )
             automation_score.save(auto_scores)
+        except TimeoutError:
+            log.warning("Automation scoring timed out after 20s — skipping to allow training to complete")
+            auto_scores = []
         except Exception as e:
             log.warning("Automation scoring failed: %s", e)
             auto_scores = []
@@ -1202,17 +2749,134 @@ async def run(days_history: int, mode: str = "full") -> None:
         except Exception as e:
             log.warning("Automation gap analysis failed: %s", e)
 
+        # Scene detection and smart automation suggestions
+        try:
+            try:
+                ha_areas.fetch_areas()
+            except Exception as e:
+                log.warning("HA area fetch failed: %s", e)
+            log.info("Running scene detection...")
+            scenes = scene_detector.detect_scenes(days=min(days_history, 30))
+            scene_detector.save(scenes)
+            log.info("Detected %d implicit scenes", len(scenes))
+
+            log.info("Running scene analysis...")
+            try:
+                from . import scene_analysis as _scene_analysis
+                sa_results = _scene_analysis.analyse_scenes(discovered_scenes=scenes)
+                _scene_analysis.save_analysis(sa_results)
+                log.info("Scene analysis: %d improvement suggestions", len(sa_results))
+            except Exception as e:
+                log.warning("Scene analysis failed: %s", e)
+
+            log.info("Running room prediction...")
+            try:
+                area_data = ha_areas._load_cache()
+                e2a = area_data.get("entity_to_area", {})
+                if e2a:
+                    room_predictor.run_room_prediction(e2a, days=min(days_history, 30))
+            except Exception as e:
+                log.warning("Room prediction failed: %s", e)
+
+            log.info("Running routine prediction...")
+            try:
+                routine_predictor.run_routine_prediction(days=min(days_history, 30))
+            except Exception as e:
+                log.warning("Routine prediction failed: %s", e)
+
+            log.info("Running deep correlation analysis...")
+            try:
+                area_data2 = ha_areas._load_cache()
+                e2a2 = area_data2.get("entity_to_area", {})
+                correlation_engine.run_correlation_analysis(e2a2, days=min(days_history, 30))
+            except Exception as e:
+                log.warning("Correlation analysis failed: %s", e)
+
+            log.info("Running sequence mining (PrefixSpan)...")
+            try:
+                e2a_sm = ha_areas._load_cache().get("entity_to_area", {})
+                sequence_miner.mine_sequences(e2a_sm, days=min(days_history, 30))
+            except Exception as e:
+                log.warning("Sequence mining failed: %s", e)
+
+            log.info("Running Markov chain next-action model...")
+            try:
+                e2a_mk = ha_areas._load_cache().get("entity_to_area", {})
+                markov_chain.build_markov_model(e2a_mk, days=min(days_history, 30))
+            except Exception as e:
+                log.warning("Markov chain failed: %s", e)
+
+            log.info("Running HMM activity state model...")
+            try:
+                import signal
+                def timeout_handler(signum, frame):
+                    raise TimeoutError("HMM training exceeded 60s timeout")
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(60)  # 60-second timeout
+                try:
+                    e2a_hm = ha_areas._load_cache().get("entity_to_area", {})
+                    activity_hmm.train_activity_model(e2a_hm, days=min(days_history, 30))
+                finally:
+                    signal.alarm(0)  # Cancel alarm
+            except Exception as e:
+                log.warning("HMM activity model failed: %s", e)
+
+            log.info("Running energy forecast...")
+            try:
+                energy_forecast.run_energy_forecast(days_history=min(days_history, 90))
+            except Exception as e:
+                log.warning("Energy forecast failed: %s", e)
+
+            log.info("Running dynamic automation analysis...")
+            try:
+                e2a_da = ha_areas._load_cache().get("entity_to_area", {})
+                dynamic_automations.run_dynamic_analysis(e2a_da, days=min(days_history, 30))
+            except Exception as e:
+                log.warning("Dynamic automation analysis failed: %s", e)
+
+            log.info("Running appliance fingerprinting...")
+            try:
+                appliance_fingerprint.run_fingerprinting(days=min(days_history, 30))
+            except Exception as e:
+                log.warning("Appliance fingerprinting failed: %s", e)
+
+            log.info("Running NILM disaggregation...")
+            try:
+                nilm_disaggregator.run_disaggregation(days=min(days_history, 7))
+            except Exception as e:
+                log.warning("NILM disaggregation failed: %s", e)
+
+            log.info("Building smart automation suggestions...")
+            if os.path.exists(SUGGESTIONS_PATH):
+                with open(SUGGESTIONS_PATH) as _f:
+                    existing_sug = json.loads(_f.read())
+            else:
+                existing_sug = []
+            patterns_data = {}
+            if os.path.exists(os.path.join(DATA_DIR, "patterns.json")):
+                with open(os.path.join(DATA_DIR, "patterns.json")) as _f:
+                    patterns_data = json.loads(_f.read())
+            smart_sug = automation_builder.generate_smart_suggestions(
+                scenes, patterns_data, existing_sug
+            )
+            automation_builder.save_smart_suggestions(smart_sug)
+        except Exception as e:
+            log.warning("Scene detection / automation builder failed: %s", e)
+
         anomaly_score = score_current(features)
         training_days = round(
             (features["hour"].max() - features["hour"].min()).total_seconds() / 86400
         )
-        entity_count = len(stat_ids)
+        entity_count = tracked_entity_count
         state["data_from"] = full_from
         # Record actual first data point date (not the query start)
         # actual_start logic moved earlier (before del df)
         # if not df.empty and "hour" in df.columns:
         #     actual_start = df["hour"].min().strftime("%Y-%m-%dT%H:%M:%S+00:00")
         #     state["data_from"] = actual_start
+
+    # ── Post-analysis pipeline — runs secondary feature modules ──────────────
+    _run_post_analysis(state, stat_ids, raw_df=_raw_df_for_library)
 
     # Per-entity and activity scoring
     entity_anomalies = anomaly_breakdown.score_entities()
@@ -1221,20 +2885,42 @@ async def run(days_history: int, mode: str = "full") -> None:
         log.info("Confidence-weighted entity score: %.3f", weighted_entity_score)
     activity_summary = activity_engine.get_activity_summary()
     top_anomaly = entity_anomalies[0]["description"] if entity_anomalies else None
+    
+    # Record anomalies to history for trend analysis
+    try:
+        from . import anomaly_history
+        anomaly_history.record_anomalies(anomaly_score, entity_anomalies)
+    except Exception as e:
+        log.warning(f"Anomaly history recording failed: {e}")
 
     state.update(
         {
+            "phase": "idle",
             "last_run": now_iso,
             "version": os.environ.get("HABITUS_VERSION", os.environ.get("BUILD_VERSION", "?")),
-            "max_power_kw": int(os.environ.get("HABITUS_MAX_POWER_KW", "25")),
+            "max_power_kw": _env_int("HABITUS_MAX_POWER_KW", 25),
             "data_to": now_iso,
             "training_days": training_days,
+            "requested_days": days_history,
             "entity_count": entity_count,
+            "total_stat_ids": total_stat_ids,
+            "total_entities": total_entities,
             "anomaly_score": anomaly_score,
             "top_anomaly": top_anomaly,
             "seasonal_models": seasonal.seasonal_status(),
             "contamination_tier": contamination_tier_name(training_days),
+            "fetch_row_count": locals().get("_fetch_row_count", 0),
         }
+    )
+    mark_last_completed_progress(
+        state,
+        "complete",
+        done=len(stat_ids),
+        total=len(stat_ids),
+        rows=len(features),
+        pct=100,
+        extra={"training_days": training_days, "anomaly_score": anomaly_score},
+        completed_at=now_iso,
     )
     save_state(state)
     clear_progress()
@@ -1330,31 +3016,6 @@ def _publish_sensors(
     )
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Habitus ML engine — trains behavioral model and scores current state."
-    )
-    parser.add_argument(
-        "--days",
-        type=int,
-        default=365,
-        help="Maximum history window in days (HA limits to what it has)",
-    )
-    parser.add_argument(
-        "--mode",
-        choices=["full", "score"],
-        default="full",
-        help=(
-            "full: fetch new data, retrain model, score, publish. "
-            "score: skip training, only score current state and publish. "
-            "In overnight schedule, daytime runs use 'score' to avoid "
-            "resource-intensive training during active hours."
-        ),
-    )
-    args = parser.parse_args()
-    asyncio.run(run(days_history=args.days, mode=args.mode))
-
-
 async def _register_lovelace_card():
     """Register Habitus Lovelace card resource and inject into default dashboard."""
     import json
@@ -1426,3 +3087,28 @@ async def _register_lovelace_card():
         import logging
 
         logging.getLogger("habitus").warning("Lovelace card registration failed: %s", exc)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Habitus ML engine — trains behavioral model and scores current state."
+    )
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=365,
+        help="Maximum history window in days (HA limits to what it has)",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["full", "score"],
+        default="full",
+        help=(
+            "full: fetch new data, retrain model, score, publish. "
+            "score: skip training, only score current state and publish. "
+            "In overnight schedule, daytime runs use 'score' to avoid "
+            "resource-intensive training during active hours."
+        ),
+    )
+    args = parser.parse_args()
+    asyncio.run(run(days_history=args.days, mode=args.mode))

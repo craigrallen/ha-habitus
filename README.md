@@ -8,6 +8,8 @@
   <strong>Behavioral intelligence for Home Assistant — 100% local, zero cloud, zero compromise.</strong>
 </p>
 
+Habitus is building a smarter kind of smart home: one that understands behavior, not just triggers. Running fully local in Home Assistant, it learns routines, predicts likely needs, explains energy usage, and adapts automations as life changes — with transparent approvals, user feedback loops, and privacy-by-default architecture. Built in Europe, Habitus treats your data like your home: private property, never platform fuel.
+
 <p align="center">
   <a href="https://github.com/craigrallen/ha-habitus/actions/workflows/ci.yml">
     <img src="https://github.com/craigrallen/ha-habitus/actions/workflows/ci.yml/badge.svg" alt="CI">
@@ -33,10 +35,13 @@ Every byte of analysis happens on your Home Assistant device. No data is sent to
 
 This isn't a marketing claim. It's architectural:
 
+> Also, yes — the docs hide subtle 70s/80s/90s references. Consider it a side quest.
+
 - **No outbound network calls** from the add-on (only to your own HA instance)
 - **No telemetry** of any kind
 - **No cloud model** — the ML runs on your hardware
 - **Offline-first** — works without internet after install
+- **Signal over spectacle** — clarity first, hype last
 - **Open source** — audit every line yourself
 
 ---
@@ -83,6 +88,58 @@ A polished web UI served via HA ingress (sidebar button):
 
 ---
 
+## Feature Catalogue (Current)
+
+Below is the practical feature set currently in the repo (see `habitus/CHANGELOG.md` for version-by-version detail).
+
+### Detection & Scoring
+- Whole-home anomaly score (`sensor.habitus_anomaly_score`) with thresholded anomaly binary sensor
+- Per-entity anomaly breakdown with confidence weighting and sensor-type-aware scoring
+- Sensor classifier taxonomy (`accumulating`, `binary`, `gauge`, `event`, `setpoint`)
+- Data-quality guards, impossible-value filtering, and cold-start protection
+- Adaptive contamination / training-age-aware model behavior
+
+### Behavioral Learning
+- Activity baseline engine (motion, lights, doors, media, presence, person/device-tracker signals)
+- Routine predictor (humidity/temperature-derived shower, bath, cooking pattern detection)
+- Sequence mining (PrefixSpan) for ordered behavior flows
+- Markov chain next-action prediction
+- Hidden Markov Model (HMM) activity-state inference
+- Behavior drift analysis for “what changed” over time
+
+### Energy Intelligence
+- Power shape classification (`steady`, `cycling`, `decaying`, `phased`)
+- Appliance fingerprinting/event detection from power signatures
+- Deep correlation engine for statistically significant cross-entity patterns
+- Energy forecast with uncertainty estimates
+- Overnight baseline / phantom-load style analysis and cost-aware insights
+
+### Smart Home Automation
+- Scene detector (implicit scenes from co-occurrence patterns)
+- Automation builder (time/state/scene-based YAML suggestions)
+- Automation gap and automation score engines
+- Conflict detector (wasteful or contradictory states) with suggested fix-it automations
+- Dynamic automation generation with confidence thresholds
+- Existing HA automation import + overlap detection against suggested automations
+
+### Home Assistant Integration
+- Area registry integration with room-aware predictions
+- Room predictor based on area mapping + time/day context
+- Notification support for anomalies and actionable insights
+- Ingress web app with Smart Home + Geek views and API endpoints for state/insights/suggestions
+
+### Feedback, Training & Controls
+- User feedback loop (confirm/dismiss anomalies) to tighten/widen per-entity thresholds
+- Device training mode for user-labeled signatures (start/stop capture + naming)
+- Configurable history depth windows (30d → all history)
+- Full-train endpoint and progressive training flow
+- Seasonal model handling that extends knowledge without regressing stronger models
+
+### Privacy & Architecture
+- 100% local processing on your HA host
+- No required cloud account or outbound telemetry path for core operation
+- Stores model artifacts, not raw mirrored history
+
 ## Installation
 
 1. In Home Assistant: **Settings → Add-ons → Add-on Store → ⋮ → Repositories**
@@ -103,7 +160,11 @@ days_history: 3650           # Training window — set high, HA limits to what i
 notify_service: notify.notify # HA notify service for anomaly alerts
 notify_on_anomaly: true       # Send notification when anomaly detected
 anomaly_threshold: 70         # Score threshold for anomaly notification (0–100)
+fetch_row_budget: 1000000     # Safety cap for stats rows per fetch (prevents OOM)
+fetch_min_window_days: 7      # Never clamp below this many days
 ```
+
+`fetch_row_budget` applies to both direct SQLite and WebSocket stats fetch paths. If a requested history window would exceed the budget, Habitus deterministically clamps to the newest window that fits and logs the clamp.
 
 ---
 

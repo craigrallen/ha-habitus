@@ -313,7 +313,7 @@ def build_activity_baseline(activity_features: pd.DataFrame) -> dict[str, Any]:
             baseline[key] = slot
 
     with open(ACTIVITY_BASELINE_PATH, "w") as f:
-        json.dump(baseline, f, indent=2)
+        json.dump(baseline, f, indent=2, default=str)
 
     log.info(
         "Activity baseline saved — %d time slots, %d feature types",
@@ -356,6 +356,8 @@ def score_activity_anomalies(current_states: dict[str, float] | None = None) -> 
     # Derive current activity features from live states
     current = _derive_current_features(current_states)
 
+    day_name = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][now.weekday()]
+
     anomalies = []
     for feat, stats in slot.items():
         if stats["std"] < 0.01:
@@ -366,7 +368,6 @@ def score_activity_anomalies(current_states: dict[str, float] | None = None) -> 
             continue
 
         direction = "high" if val > stats["mean"] else "low"
-        day_name = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][now.weekday()]
 
         anomalies.append(
             {
@@ -397,7 +398,7 @@ def score_activity_anomalies(current_states: dict[str, float] | None = None) -> 
     }
 
     with open(ACTIVITY_ANOMALIES_PATH, "w") as f:
-        json.dump(result, f, indent=2)
+        json.dump(result, f, indent=2, default=str)
 
     return result
 

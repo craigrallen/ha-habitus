@@ -17,6 +17,32 @@ MIN_TRIGGERS = 10
 # Time window to look for manual override after automation trigger (seconds)
 OVERRIDE_WINDOW_S = 300  # 5 minutes
 
+# Safety-critical automation patterns (low run count is GOOD, not bad)
+SAFETY_PATTERNS = [
+    "bilge",
+    "pump",
+    "flood",
+    "leak",
+    "water",
+    "battery low",
+    "battery critical",
+    "fire",
+    "smoke",
+    "gas",
+    "co2",
+    "carbon monoxide",
+    "emergency",
+    "alarm",
+    "intrusion",
+    "break-in",
+    "freeze",
+    "temperature critical",
+    "overheat",
+    "tank overflow",
+    "dry run",
+    "sump",
+]
+
 
 async def score_all(ha_url: str | None = None, ha_token: str | None = None) -> list[Any]:
     """Score all HA automations by override rate.
@@ -84,7 +110,24 @@ async def score_all(ha_url: str | None = None, ha_token: str | None = None) -> l
                         or "triggered" in str(e.get("message", "")).lower()
                     ]
 
+                    # Check if safety-critical automation (emergency/alarm)
+                    is_safety = is_safety_critical(friendly, auto_id)
+                    
                     if len(triggers) < MIN_TRIGGERS:
+                        # Safety automations are scored even with low triggers
+                        if is_safety:
+                            results.append(
+                                {
+                                    "entity_id": auto_id,
+                                    "name": friendly,
+                                    "triggers_7d": len(triggers),
+                                    "overrides": 0,
+                                    "override_rate": 0,
+                                    "score": 100,
+                                    "safety_critical": True,
+                                    "note": "Emergency automation — low run count is healthy",
+                                }
+                            )
                         continue
 
                     # Get target entities from automation attributes
@@ -136,16 +179,21 @@ async def score_all(ha_url: str | None = None, ha_token: str | None = None) -> l
                     override_rate = round(overrides / len(triggers) * 100) if triggers else 0
                     score = max(0, 100 - override_rate)
 
-                    results.append(
-                        {
-                            "entity_id": auto_id,
-                            "name": friendly,
-                            "triggers_7d": len(triggers),
-                            "overrides": overrides,
-                            "override_rate": override_rate,
-                            "score": score,
-                        }
-                    )
+                    result = {
+                        "entity_id": auto_id,
+                        "name": friendly,
+                        "triggers_7d": len(triggers),
+                        "overrides": overrides,
+                        "override_rate": override_rate,
+                        "score": score,
+                    }
+                    
+                    # Mark safety-critical automations
+                    if is_safety:
+                        result["safety_critical"] = True
+                        result["note"] = "Emergency automation — protected from deletion"
+                    
+                    results.append(result)
 
                 except Exception as e:
                     log.warning("Error scoring %s: %s", auto_id, e)
@@ -195,11 +243,27 @@ def _add_seconds(iso_str: str, seconds: int) -> str:
         return iso_str
 
 
+def is_safety_critical(automation_name: str, automation_id: str) -> bool:
+    """Detect if an automation is safety-critical (emergency/alarm).
+    
+    Safety automations should NOT be penalized for low run counts — 
+    zero recent runs means the system is healthy.
+    
+    Args:
+        automation_name: Friendly name of the automation.
+        automation_id: Entity ID (e.g., automation.bilge_pump_alarm).
+    
+    Returns:
+        True if automation matches safety patterns.
+    """
+    combined = f"{automation_name} {automation_id}".lower()
+    return any(pattern in combined for pattern in SAFETY_PATTERNS)
+
+
 def save(results: list) -> None:
     """Save automation scores to disk."""
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(SCORES_PATH, "w") as f:
-        json.dump(results, f, indent=2)
+    from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+    _atomic_write(SCORES_PATH, results)
     log.info("Automation scores saved: %d automations scored", len(results))
 
 

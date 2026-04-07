@@ -243,7 +243,7 @@ def _persist_data_quality(issues: list[dict]) -> None:
         existing[issue["entity_id"]] = issue
 
     with open(dq_path, "w") as f:
-        json.dump(list(existing.values()), f, indent=2)
+        json.dump(list(existing.values()), f, indent=2, default=str)
     log.info("Data quality report updated: %d issue(s)", len(existing))
 
 
@@ -380,7 +380,7 @@ def build_entity_baselines(df: pd.DataFrame):
             baselines[state_key] = existing[state_key]
 
     with open(ENTITY_BASELINES_PATH, "w") as f:
-        json.dump(baselines, f)
+        json.dump(baselines, f, default=str)
     log.info(f"Entity baselines saved for {len(baselines)} entities")
 
 
@@ -582,10 +582,31 @@ def score_entities(current_states: dict | None = None) -> list:
                     item.get("entity_id", "") for item in _dq_data if item.get("issue") == "stuck"
                 }
 
+    # ── Exclusion patterns ──────────────────────────────────────────────────
+    # Sensors that should never contribute to anomaly scoring because they
+    # represent external data (markets), reactive power noise, or network
+    # metadata rather than actual home behaviour.
+    EXCLUDE_PATTERNS = [
+        "xbt_",          # Bitcoin / crypto price feeds
+        "xrp_",
+        "eth_",
+        "_kvar",         # Reactive power (kvar/kvarh) — noise, not load
+        "_memory_utilization",  # Switch/router memory — infra noise
+        "_cpu_utilization",     # Network device CPU — infra noise
+    ]
+    # Minimum z-score to be included in the anomaly list.  Below this,
+    # the deviation is within normal operating variance and should be ignored.
+    MIN_Z_SCORE = 3.0
+
     anomalies = []
     for eid, bl in baselines.items():
         if eid.startswith("_"):
             continue  # skip metadata keys (_z_score_run, _accumulating_state, …)
+
+        # Skip entities matching exclusion patterns
+        eid_lower = eid.lower()
+        if any(pat in eid_lower for pat in EXCLUDE_PATTERNS):
+            continue
 
         # Skip entities flagged as stuck sensors in data_quality.json
         if eid in stuck_entities:
@@ -622,6 +643,12 @@ def score_entities(current_states: dict | None = None) -> list:
 
         # Constant sensor guard (Bernoulli std near 0 ≡ always-off binary sensor)
         if b.get("std", 1.0) < 0.01:
+            continue
+        
+        # Skip entities with very sparse baselines during early training
+        # (0% batteries, sensors that rarely report, etc. — not real anomalies)
+        n_samples = b.get("n", 0)
+        if n_samples < 3 and days_of_data < 30:
             continue
 
         current = current_states.get(eid)
@@ -737,6 +764,10 @@ def score_entities(current_states: dict | None = None) -> list:
 
             slot_n = b.get("n", 0)
             sensor_type_str = meta.get("sensor_type", "binary")
+            # Skip low z-scores — within normal operating variance
+            if z < MIN_Z_SCORE:
+                continue
+
             confidence = compute_entity_confidence(days_of_data, slot_n, sensor_type_str)
             pct_conf = round(confidence * 100)
             days_int = int(days_of_data)
@@ -822,6 +853,10 @@ def score_entities(current_states: dict | None = None) -> list:
 
         slot_n = b.get("n", 0)
         sensor_type_str = meta.get("sensor_type", "gauge")
+        # Skip low z-scores — within normal operating variance
+        if z < MIN_Z_SCORE:
+            continue
+
         confidence = compute_entity_confidence(days_of_data, slot_n, sensor_type_str)
         pct_conf = round(confidence * 100)
         days_int = int(days_of_data)
@@ -839,6 +874,7 @@ def score_entities(current_states: dict | None = None) -> list:
                 "unit": unit,
                 "description": description,
                 "direction": "high" if score_val > b["mean"] else "low",
+                "sensor_type": sensor_type_str,
                 "confidence": round(confidence, 3),
                 "confidence_label": confidence_label,
             }
@@ -853,9 +889,25 @@ def score_entities(current_states: dict | None = None) -> list:
     if bin_state_changed:
         baselines["_binary_state"] = bin_state_updated
     with open(ENTITY_BASELINES_PATH, "w") as f:
-        json.dump(baselines, f, indent=2)
+        json.dump(baselines, f, indent=2, default=str)
 
-    anomalies.sort(key=lambda x: x["z_score"], reverse=True)
+    # Apply false alarm filter
+    try:
+        from . import false_alarm_filter
+        anomalies = false_alarm_filter.filter_anomalies(anomalies)
+    except Exception as e:
+        log.warning(f"False alarm filter failed: {e}")
+    
+    # Apply criticality weighting
+    try:
+        from . import entity_criticality
+        anomalies = entity_criticality.apply_criticality_weighting(anomalies)
+        # Re-sort by weighted z-score (critical entities bubble to top)
+        anomalies.sort(key=lambda x: x.get("weighted_z_score", x["z_score"]), reverse=True)
+    except Exception as e:
+        log.warning(f"Criticality weighting failed: {e}")
+        anomalies.sort(key=lambda x: x["z_score"], reverse=True)
+    
     top = anomalies[:20]
 
     weighted_score = compute_weighted_score(top)
@@ -906,7 +958,7 @@ def compute_breakdown(anomaly_score: float, current_states: dict | None = None) 
         "learning_entities": baselines.get("_learning_entities", []),
     }
     with open(ENTITY_BASELINES_PATH, "w") as f:
-        json.dump(baselines, f, indent=2)
+        json.dump(baselines, f, indent=2, default=str)
 
     log.info(f"Anomaly breakdown computed: score={anomaly_score}, top5={len(top5)} entities")
     return top5
@@ -939,7 +991,7 @@ def _update_entity_lifecycle(new_entity_ids: list[str], now: datetime.datetime) 
             lifecycle[eid]["last_seen"] = now_iso
 
     with open(ENTITY_LIFECYCLE_PATH, "w") as f:
-        json.dump(lifecycle, f, indent=2)
+        json.dump(lifecycle, f, indent=2, default=str)
     log.info(f"Entity lifecycle updated: {len(new_entity_ids)} new entities recorded")
 
 

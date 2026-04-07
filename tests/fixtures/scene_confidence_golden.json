@@ -1,0 +1,53 @@
+[
+  {
+    "name": "night_lounge_two_domain",
+    "entities": ["light.kitchen", "switch.tv"],
+    "time_info": {
+      "count": 10,
+      "best_window_start": 23,
+      "hour_distribution": {"23": 4, "0": 3, "1": 2, "12": 1}
+    },
+    "expected_confidence": 61
+  },
+  {
+    "name": "high_consistency_multi_domain",
+    "entities": [
+      "light.lounge_main",
+      "switch.tv_power",
+      "media_player.lounge_tv",
+      "climate.lounge"
+    ],
+    "time_info": {
+      "count": 24,
+      "best_window_start": 18,
+      "hour_distribution": {"18": 10, "19": 8, "20": 4, "11": 2}
+    },
+    "expected_confidence": 86
+  },
+  {
+    "name": "noisy_single_domain",
+    "entities": ["light.kitchen", "light.hall"],
+    "time_info": {
+      "count": 8,
+      "best_window_start": 7,
+      "hour_distribution": {"7": 2, "8": 1, "9": 1, "12": 1, "15": 1, "20": 2}
+    },
+    "expected_confidence": 31
+  },
+  {
+    "name": "saturated_scene_clamped",
+    "entities": [
+      "light.living_room",
+      "switch.amplifier",
+      "media_player.receiver",
+      "climate.living_room",
+      "binary_sensor.motion"
+    ],
+    "time_info": {
+      "count": 60,
+      "best_window_start": 20,
+      "hour_distribution": {"20": 25, "21": 20, "22": 15}
+    },
+    "expected_confidence": 95
+  }
+]

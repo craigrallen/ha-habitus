@@ -22,29 +22,29 @@ from habitus.habitus.main import (
 
 class TestContaminationForDays:
     def test_warmup_tier_below_7_days(self):
-        assert contamination_for_days(0) == 0.005
-        assert contamination_for_days(1) == 0.005
-        assert contamination_for_days(6) == 0.005
+        assert contamination_for_days(0) == 0.002
+        assert contamination_for_days(1) == 0.002
+        assert contamination_for_days(6) == 0.002
 
     def test_early_tier_7_to_13_days(self):
-        assert contamination_for_days(7) == 0.01
-        assert contamination_for_days(10) == 0.01
-        assert contamination_for_days(13) == 0.01
+        assert contamination_for_days(7) == 0.005
+        assert contamination_for_days(10) == 0.005
+        assert contamination_for_days(13) == 0.005
 
     def test_growing_tier_14_to_29_days(self):
-        assert contamination_for_days(14) == 0.02
-        assert contamination_for_days(20) == 0.02
-        assert contamination_for_days(29) == 0.02
+        assert contamination_for_days(14) == 0.01
+        assert contamination_for_days(20) == 0.01
+        assert contamination_for_days(29) == 0.01
 
     def test_mature_tier_30_to_89_days(self):
-        assert contamination_for_days(30) == 0.04
-        assert contamination_for_days(60) == 0.04
-        assert contamination_for_days(89) == 0.04
+        assert contamination_for_days(30) == 0.015
+        assert contamination_for_days(60) == 0.015
+        assert contamination_for_days(89) == 0.015
 
     def test_established_tier_90_plus_days(self):
-        assert contamination_for_days(90) == 0.05
-        assert contamination_for_days(180) == 0.05
-        assert contamination_for_days(365) == 0.05
+        assert contamination_for_days(90) == 0.02
+        assert contamination_for_days(180) == 0.02
+        assert contamination_for_days(365) == 0.02
 
     def test_values_are_monotonically_non_decreasing(self):
         breakpoints = [0, 7, 14, 30, 90]
@@ -172,7 +172,7 @@ class TestTrainModelContamination:
             train_model(features, training_days=5)
 
         assert len(captured) == 1
-        assert captured[0] == pytest.approx(0.005)
+        assert captured[0] == pytest.approx(0.002)
 
     def test_established_contamination(self):
         """train_model with 120 days should use contamination=0.05."""
@@ -191,7 +191,7 @@ class TestTrainModelContamination:
             train_model(features, training_days=120)
 
         assert len(captured) == 1
-        assert captured[0] == pytest.approx(0.05)
+        assert captured[0] == pytest.approx(0.02)
 
     def test_default_training_days_zero_uses_warmup(self):
         """Default training_days=0 should give warmup contamination."""
@@ -209,7 +209,7 @@ class TestTrainModelContamination:
         with patch("sklearn.ensemble.IsolationForest", side_effect=patched_iso):
             train_model(features)
 
-        assert captured[0] == pytest.approx(0.005)
+        assert captured[0] == pytest.approx(0.002)
 
     def test_returns_model_and_scaler(self):
         """train_model should return (model, scaler) regardless of days."""
