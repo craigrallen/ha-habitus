@@ -437,6 +437,107 @@ def api_weekly_report():
     return jsonify(report)
 
 
+# ── Sleep Quality ─────────────────────────────────────────────────────────────
+
+
+@app.route("/api/sleep")
+@app.route("/ingress/api/sleep")
+def api_sleep():
+    """Return sleep quality report."""
+    from habitus import sleep_quality as _sleep  # noqa: PLC0415
+
+    return jsonify(_sleep.load())
+
+
+# ── Comfort Score ────────────────────────────────────────────────────────────
+
+
+@app.route("/api/comfort")
+@app.route("/ingress/api/comfort")
+def api_comfort():
+    """Return comfort intelligence report."""
+    from habitus import comfort_score as _comfort  # noqa: PLC0415
+
+    return jsonify(_comfort.load())
+
+
+# ── NILM Disaggregation ─────────────────────────────────────────────────────
+
+
+@app.route("/api/nilm_breakdown")
+@app.route("/ingress/api/nilm_breakdown")
+def api_nilm_breakdown():
+    """Return NILM seq2point disaggregation results."""
+    return jsonify(_read(os.path.join(DATA_DIR, "nilm_seq2point.json")) or {})
+
+
+# ── Room Thresholds ──────────────────────────────────────────────────────────
+
+
+@app.route("/api/room_thresholds")
+@app.route("/ingress/api/room_thresholds")
+def api_room_thresholds():
+    """Return per-entity zone mapping and threshold multipliers."""
+    from habitus import room_thresholds as _rt  # noqa: PLC0415
+
+    baselines = _read(os.path.join(DATA_DIR, "entity_baselines.json")) or {}
+    entity_ids = [k for k in baselines if not k.startswith("_")]
+    return jsonify(_rt.get_zone_map(entity_ids))
+
+
+@app.route("/api/room_thresholds/override", methods=["POST"])
+@app.route("/ingress/api/room_thresholds/override", methods=["POST"])
+def api_room_threshold_override():
+    """Set or remove a per-entity threshold override."""
+    from habitus import room_thresholds as _rt  # noqa: PLC0415
+
+    data = request.get_json() or {}
+    entity_id = data.get("entity_id", "")
+    if not entity_id:
+        return jsonify({"ok": False, "error": "entity_id required"}), 400
+    multiplier = data.get("multiplier")
+    if multiplier is not None:
+        _rt.set_override(entity_id, float(multiplier))
+    else:
+        _rt.remove_override(entity_id)
+    return jsonify({"ok": True})
+
+
+# ── Actionable Notifications ─────────────────────────────────────────────────
+
+
+@app.route("/api/notification_action", methods=["POST"])
+@app.route("/ingress/api/notification_action", methods=["POST"])
+def api_notification_action():
+    """Handle mobile app notification action callback."""
+    from habitus import actionable_notifications as _notif  # noqa: PLC0415
+
+    data = request.get_json() or {}
+    action = data.get("action", "")
+    entity_id = data.get("entity_id", "")
+    return jsonify(_notif.handle_action(action, entity_id))
+
+
+@app.route("/api/snooze", methods=["POST"])
+@app.route("/ingress/api/snooze", methods=["POST"])
+def api_snooze():
+    """Snooze all notifications for N hours."""
+    from habitus import actionable_notifications as _notif  # noqa: PLC0415
+
+    data = request.get_json() or {}
+    hours = data.get("hours", 24)
+    return jsonify(_notif.snooze(int(hours)))
+
+
+@app.route("/api/unsnooze", methods=["POST"])
+@app.route("/ingress/api/unsnooze", methods=["POST"])
+def api_unsnooze():
+    """Cancel notification snooze."""
+    from habitus import actionable_notifications as _notif  # noqa: PLC0415
+
+    return jsonify(_notif.unsnooze())
+
+
 def start_web(port: int = 8099) -> None:
     """Start the Flask web server."""
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
