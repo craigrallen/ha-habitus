@@ -905,16 +905,20 @@ async function load() {
     });
     document.getElementById('hdr-dot').className = 'status-dot warn';
     const winLabel = progress.progressive_window ? ` (${progress.progressive_window}d window)` : '';
-    if(document.getElementById('hdr-version'))document.getElementById('hdr-version').textContent='v'+(progress.version||state.version||'—');
-  document.getElementById('hdr-label').textContent = `Training ${progress.pct||0}%${winLabel}`;
+    if(document.getElementById('hdr-version'))document.getElementById('hdr-version').textContent='v'+(state.version||'—');
+    document.getElementById('hdr-label').textContent = `Training ${progress.pct||0}%${winLabel}`;
     if (!hasData) return;  // only block if no data yet
   }
   document.getElementById('prog-overlay').style.display = 'none';
 
+  // Single source of truth for visible anomaly score: use the same anomaly list
+  // shown in the UI. If there are no entity anomalies, visible score must be 0.
+  const allE = anomalies.anomalies||[];
+
   // Header — treat as normal during warmup grace period
   const warmingUp = state.warming_up || state.phase === 'warming_up';
   const warmupDaysLeft = state.warmup_days_remaining ?? 0;
-  const score = warmingUp ? 0 : (state.anomaly_score ?? 0);
+  const score = warmingUp ? 0 : (allE.length ? (state.anomaly_score ?? 0) : 0);
   document.getElementById('hdr-dot').className = 'status-dot ' + (score>=70?'bad':score>=40?'warn':'ok');
   document.getElementById('hdr-label').textContent = score>=70?'Anomaly Detected':score>=40?'Elevated':'Normal';
   const lr = state.last_run ? new Date(state.last_run).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
@@ -954,7 +958,7 @@ async function load() {
     </div>` : '<div style="color:var(--text3);font-size:.82rem">No patterns yet — run Habitus first.</div>';
 
   // Top anomalies
-  const ents = (anomalies.anomalies||[]).slice(0,5);
+  const ents = allE.slice(0,5);
   document.getElementById('top-anomalies').innerHTML = ents.length
     ? ents.map(e => `
       <div class="anom-item">
@@ -980,7 +984,6 @@ async function load() {
   }).join('');
 
   // Anomaly breakdown
-  const allE = anomalies.anomalies||[];
   const bts = anomalies.timestamp ? 'as of '+new Date(anomalies.timestamp).toLocaleString() : '';
   document.getElementById('bd-ts').textContent = bts;
   document.getElementById('bd-table').innerHTML = allE.length
