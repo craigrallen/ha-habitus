@@ -108,6 +108,34 @@ def api_sensor_health():
     return jsonify(_read(DATA_QUALITY_PATH) or [])
 
 
+@app.route("/api/anomaly_feedback", methods=["GET", "POST"])
+@app.route("/ingress/api/anomaly_feedback", methods=["GET", "POST"])
+def api_anomaly_feedback():
+    from . import feedback
+
+    if request.method == "GET":
+        return jsonify(feedback.get_feedback_stats())
+
+    data = request.get_json(silent=True) or {}
+    anomaly_id = str(data.get("anomaly_id", "")).strip() or str(data.get("entity_id", "")).strip() or "unknown"
+    action = str(data.get("action", "")).strip()
+    entity_id = str(data.get("entity_id", "")).strip()
+    score = float(data.get("score", 0) or 0)
+    details = str(data.get("details", "")).strip()
+
+    if action not in {"confirmed", "dismissed", "false_positive"}:
+        return jsonify({"ok": False, "error": "invalid action"}), 400
+
+    entry = feedback.record_feedback(
+        anomaly_id=anomaly_id,
+        action=action,
+        entity_id=entity_id,
+        score=score,
+        details=details,
+    )
+    return jsonify({"ok": True, "entry": entry, "stats": feedback.get_feedback_stats()})
+
+
 @app.route("/api/rescan", methods=["POST"])
 @app.route("/ingress/api/rescan", methods=["POST"])
 @app.route("/api/full_train", methods=["POST"])

@@ -600,8 +600,8 @@ body { padding-bottom: 72px; }
       <span class="sec-sub" id="bd-ts"></span>
     </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Sensor</th><th>Current</th><th>Baseline</th><th>Deviation</th><th>Confidence</th><th style="width:90px"></th></tr></thead>
-      <tbody id="bd-table"><tr><td colspan="6" style="color:var(--text3);padding:16px">No entity data yet.</td></tr></tbody>
+      <thead><tr><th>Sensor</th><th>Current</th><th>Baseline</th><th>Deviation</th><th>Confidence</th><th style="width:90px"></th><th style="width:180px">Feedback</th></tr></thead>
+      <tbody id="bd-table"><tr><td colspan="7" style="color:var(--text3);padding:16px">No entity data yet.</td></tr></tbody>
     </table></div>
   </div>
 
@@ -1000,6 +1000,26 @@ function toast(msg, type='ts') {
   setTimeout(()=>el.className='toast', 3000);
 }
 
+async function anomalyFeedback(anomalyId, action, entityId, score, removeRow=false) {
+  try {
+    const r = await fetch('api/anomaly_feedback', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ anomaly_id: anomalyId, action, entity_id: entityId, score })
+    }).then(r=>r.json());
+    if (!r.ok) throw new Error(r.error || 'feedback failed');
+    if (removeRow && entityId) {
+      const row = document.getElementById('anom-row-' + entityId.replace(/[^a-zA-Z0-9_-]/g,'_'));
+      if (row) row.remove();
+    }
+    toast(action === 'false_positive' ? 'Marked as false alarm' : 'Marked as real anomaly');
+    setTimeout(load, 300);
+  } catch (e) {
+    toast('Could not save feedback','te');
+    console.error(e);
+  }
+}
+
 function filterSug(cat, btn) {
   currentFilter = cat;
   document.querySelectorAll('.ftab').forEach(b=>b.classList.remove('active'));
@@ -1310,15 +1330,22 @@ async function load() {
         const col=z>=3?'var(--red)':z>=1.5?'var(--amber)':'var(--green)';
         const bc=z>=3?'b-alert':z>=1.5?'b-warn':'b-ok';
         const confLabel=e.confidence_label||'';
-        return`<tr>
+        const anomalyId = (e.entity_id || e.name || 'unknown').replace(/'/g, "\\'");
+        const entityId = (e.entity_id || '').replace(/'/g, "\\'");
+        const rowId = 'anom-row-' + (e.entity_id || '').replace(/[^a-zA-Z0-9_-]/g,'_');
+        return`<tr id="${rowId}">
           <td><div style="font-weight:500">${e.name}</div><div style="font-size:.7rem;color:var(--text3)">${e.entity_id}</div></td>
           <td style="font-weight:600">${e.current_value}${e.unit}</td>
           <td style="color:var(--text3)">${e.baseline_mean}${e.unit} <span style="color:var(--text3);font-size:.7rem">±${e.baseline_std}${e.unit}</span></td>
           <td><span class="badge ${bc}">${z}σ</span></td>
           <td style="font-size:.75rem;color:var(--text3)">${confLabel}</td>
           <td><div class="bar-wrap"><div class="bar" style="width:${pct}%;background:${col}"></div></div></td>
+          <td style="white-space:nowrap">
+            <button class="btn" style="padding:4px 8px;font-size:.72rem;margin-right:6px" onclick="anomalyFeedback('${anomalyId}','confirmed','${entityId}',${z})">Real</button>
+            <button class="btn" style="padding:4px 8px;font-size:.72rem" onclick="anomalyFeedback('${anomalyId}','false_positive','${entityId}',${z}, true)">False alarm</button>
+          </td>
         </tr>`;}).join('')
-    : '<tr><td colspan="6" style="color:var(--text3);padding:16px">No entity anomalies detected.</td></tr>';
+    : '<tr><td colspan="7" style="color:var(--text3);padding:16px">No entity anomalies detected.</td></tr>';
 
   // Suggestions — load HA automations first to show installed status
   allSuggestions = suggestions;
