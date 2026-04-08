@@ -3261,7 +3261,7 @@ async def _register_lovelace_card():
                         "id": msg_id,
                         "type": "lovelace/resources/create",
                         "res_type": "module",
-                        "url": resource_url + "?v=2.52.0",
+                        "url": resource_url + "?v=4.1.2",
                     }
                 )
             )

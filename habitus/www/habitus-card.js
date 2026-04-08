@@ -74,13 +74,14 @@ class HabitusCard extends HTMLElement {
   set hass(h) { this._hass = h; this._render(); }
   _render() {
     const h = this._hass;
-    const score = _hes(h, 'sensor.habitus_anomaly_score');
+    const rawScore = _hes(h, 'sensor.habitus_anomaly_score');
     const anom = _hes(h, 'binary_sensor.habitus_anomaly_detected') === 'on';
     const top = _hes(h, 'sensor.habitus_top_anomaly');
     const time = _hlc(h, 'sensor.habitus_anomaly_score');
-    const color = _hsc(score);
-    const label = _hsl(score);
-    const s = parseInt(score, 10);
+    const normalizedScore = (!anom || !top || top === 'None detected' || top === 'No anomalies detected') ? '0' : rawScore;
+    const color = _hsc(normalizedScore);
+    const label = _hsl(normalizedScore);
+    const s = parseInt(normalizedScore, 10);
     const pulseCSS = anom ? `
       @keyframes pulse-ring { 0% { transform: scale(1); opacity: 0.6; } 100% { transform: scale(1.8); opacity: 0; } }
       .pr { animation: pulse-ring 1.5s ease-out infinite; }
@@ -120,10 +121,11 @@ class HabitusCardMinimal extends HTMLElement {
   set hass(h) { this._hass = h; this._render(); }
   _render() {
     const h = this._hass;
-    const score = _hes(h, 'sensor.habitus_anomaly_score');
+    const rawScore = _hes(h, 'sensor.habitus_anomaly_score');
+    const top = _hes(h, 'sensor.habitus_top_anomaly');
+    const score = (_hes(h, 'binary_sensor.habitus_anomaly_detected') !== 'on' || !top || top === 'None detected' || top === 'No anomalies detected') ? '0' : rawScore;
     const color = _hsc(score);
     const label = _hsl(score);
-    const top = _hes(h, 'sensor.habitus_top_anomaly');
     const sug = _hes(h, 'sensor.habitus_suggestion_1');
     const ex = this._exp;
     this.shadowRoot.innerHTML = `<style>
@@ -195,7 +197,9 @@ class HabitusCardDetail extends HTMLElement {
   }
   _render() {
     const h = this._hass;
-    const score = _hes(h, 'sensor.habitus_anomaly_score');
+    const rawScore = _hes(h, 'sensor.habitus_anomaly_score');
+    const topSensor = _hes(h, 'sensor.habitus_top_anomaly');
+    const score = (_hes(h, 'binary_sensor.habitus_anomaly_detected') !== 'on' || !topSensor || topSensor === 'None detected' || topSensor === 'No anomalies detected') ? '0' : rawScore;
     const s = parseInt(score,10)||0;
     const color = _hsc(score);
     const label = _hsl(score);
@@ -318,7 +322,9 @@ class HabitusCardGraph extends HTMLElement {
   }
   _render() {
     const h = this._hass;
-    const score = _hes(h, 'sensor.habitus_anomaly_score');
+    const rawScore = _hes(h, 'sensor.habitus_anomaly_score');
+    const top = _hes(h, 'sensor.habitus_top_anomaly');
+    const score = (_hes(h, 'binary_sensor.habitus_anomaly_detected') !== 'on' || !top || top === 'None detected' || top === 'No anomalies detected') ? '0' : rawScore;
     const color = _hsc(score);
     const label = _hsl(score);
     const now = new Date().getHours();
