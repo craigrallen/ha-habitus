@@ -106,6 +106,25 @@ def get_feedback_stats() -> dict:
     }
 
 
+def get_suppressed_entities() -> set[str]:
+    """Return entities that should be hidden immediately from anomaly output.
+
+    Rule: if the latest feedback entry for an entity is dismissed/false_positive,
+    suppress it until a later confirmed entry or a feedback reset.
+    """
+    data = _load_feedback()
+    latest: dict[str, str] = {}
+    for e in data.get("entries", []):
+        eid = e.get("entity_id", "")
+        act = e.get("action", "")
+        if eid:
+            latest[eid] = act
+    return {
+        eid for eid, act in latest.items()
+        if act in ("dismissed", "false_positive")
+    }
+
+
 def set_sharing(enabled: bool):
     """Toggle anonymous data sharing."""
     data = _load_feedback()

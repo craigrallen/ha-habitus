@@ -80,7 +80,15 @@ def api_suggestions():
 @app.route("/api/anomalies")
 @app.route("/ingress/api/anomalies")
 def api_anomalies():
-    return jsonify(_read(ANOMALIES_PATH) or {})
+    data = _read(ANOMALIES_PATH) or {}
+    try:
+        from . import feedback
+        suppressed = feedback.get_suppressed_entities()
+        if suppressed and isinstance(data.get("anomalies"), list):
+            data["anomalies"] = [a for a in data.get("anomalies", []) if a.get("entity_id") not in suppressed]
+    except Exception:
+        pass
+    return jsonify(data)
 
 
 @app.route("/api/anomaly_breakdown")
@@ -93,6 +101,13 @@ def api_anomaly_breakdown():
     ``confidence_label`` fields for UI display.
     """
     data = _read(ANOMALIES_PATH) or {}
+    try:
+        from . import feedback
+        suppressed = feedback.get_suppressed_entities()
+        if suppressed and isinstance(data.get("anomalies"), list):
+            data["anomalies"] = [a for a in data.get("anomalies", []) if a.get("entity_id") not in suppressed]
+    except Exception:
+        pass
     return jsonify(data)
 
 

@@ -899,6 +899,20 @@ def score_entities(current_states: dict | None = None) -> list:
     except Exception as e:
         log.warning(f"False alarm filter failed: {e}")
 
+    # Apply user feedback suppression immediately
+    try:
+        from . import feedback
+
+        suppressed = feedback.get_suppressed_entities()
+        if suppressed:
+            before = len(anomalies)
+            anomalies = [a for a in anomalies if a.get("entity_id") not in suppressed]
+            removed = before - len(anomalies)
+            if removed > 0:
+                log.info("Feedback suppression removed %d anomalies", removed)
+    except Exception as e:
+        log.warning(f"Feedback suppression failed: {e}")
+
     # Apply criticality weighting
     try:
         from . import entity_criticality
