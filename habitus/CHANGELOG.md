@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.4] - 2026-05-03
+
+### Fixed
+- Restored broken web API endpoints and wired full training cycle into TrainerManager (CI repair)
+- Updated GitHub Actions workflow to Node 24-compatible action versions (CI runtime hygiene)
+
+### Changed
+- Aligned pyproject.toml package version with add-on manifest (both now 4.1.4)
+
 ## [3.10.25] - 2026-03-10
 
 ### Fixed
