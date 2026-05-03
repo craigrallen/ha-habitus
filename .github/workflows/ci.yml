@@ -11,8 +11,8 @@ jobs:
     name: Lint & Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with: { python-version: "3.11" }
       - name: Install dev deps
         run: pip install ruff black mypy
@@ -28,9 +28,9 @@ jobs:
     name: Prettier (web assets)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: "20" }
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with: { node-version: "24" }
       - run: npx prettier --check "docs/**/*.{md,json}" "*.{json,md}" || true
         # Non-blocking for now — will enforce once docs are formatted
 
@@ -41,8 +41,8 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
@@ -51,7 +51,7 @@ jobs:
       - name: Run tests with coverage
         run: pytest --cov=habitus/habitus --cov-report=xml --cov-report=term-missing -q
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v6
         if: matrix.python-version == '3.11'
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -63,8 +63,8 @@ jobs:
     name: Benchmark (NILM + scene)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: Install dependencies
@@ -79,7 +79,7 @@ jobs:
       - name: Publish benchmark summary
         run: cat benchmark-results/nilm_scene_benchmark.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload benchmark artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nilm-scene-benchmark
           path: benchmark-results/
@@ -88,10 +88,10 @@ jobs:
     name: Docker build (aarch64)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v4
       - name: Build add-on image (no push)
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./habitus
           file: ./habitus/Dockerfile
