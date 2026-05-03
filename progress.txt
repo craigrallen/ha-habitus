@@ -29,3 +29,4 @@
 [2026-04-07 16:10] FEAT: nilm_seq2point.py — seq2point CNN NILM disaggregation with ONNX/TFLite support
 [2026-04-07 16:10] FEAT: actionable_notifications.py — HA companion app notifications with action buttons
 [2026-04-07 16:10] FEAT: room_thresholds.py — per-zone adaptive anomaly sensitivity with night-time adjustments
+[2026-05-03 19:34] MAINT: web API CI repair — restored progress_recovery endpoint, wired full_train into TrainerManager, added /api/automations POST+DELETE endpoints, fixed Jinja2 PAGE/template compatibility in index.html; full pytest suite green

@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 
 import yaml as _yaml  # type: ignore[import-untyped]
 from flask import Flask, jsonify, render_template, request
@@ -25,6 +26,48 @@ DATA_QUALITY_PATH = os.path.join(DATA_DIR, "data_quality.json")
 
 _TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
 app = Flask(__name__, template_folder=_TEMPLATE_DIR)
+
+
+def _load_page() -> str:
+    """Return the index.html template content (used by tests for string assertions)."""
+    _tmpl = os.path.join(_TEMPLATE_DIR, "index.html")
+    try:
+        with open(_tmpl) as _f:
+            return _f.read()
+    except OSError:
+        return ""
+
+
+PAGE: str = _load_page()
+
+
+def _normalize_automation_id(entity_id_or_alias: str) -> str:
+    """Normalize an automation entity_id or alias to a plain ASCII slug.
+
+    Strips the ``automation.`` prefix, replaces unicode dashes with spaces,
+    lowercases, removes non-alphanumeric characters, and collapses runs of
+    spaces/underscores to a single underscore.
+    """
+    s = entity_id_or_alias.strip()
+    prefix = "automation."
+    if s.lower().startswith(prefix):
+        s = s[len(prefix) :]
+    s = s.replace("\u2014", " ").replace("\u2013", " ")  # em-dash, en-dash
+    s = s.lower()
+    s = re.sub(r"[^a-z0-9\s_]", "", s)
+    s = re.sub(r"[\s_]+", "_", s.strip())
+    return s.strip("_")
+
+
+def _unique_alias_id(alias: str, existing_ids: set[str]) -> str:
+    """Return a unique slug for *alias*, appending ``_2``, ``_3``, etc. on collision."""
+    base = _normalize_automation_id(alias)
+    if base not in existing_ids:
+        return base
+    n = 2
+    while f"{base}_{n}" in existing_ids:
+        n += 1
+    return f"{base}_{n}"
 
 
 def _read(path: str, default: object = None) -> object:
@@ -62,7 +105,98 @@ def api_baseline():
 @app.route("/api/progress")
 @app.route("/ingress/api/progress")
 def api_progress():
-    return jsonify(_read(PROGRESS_PATH) or {})
+    """Return training progress with stale-lock recovery and metric normalisation."""
+    import time as _time
+
+    state = _read(STATE_PATH) or {}
+
+    # --- File missing → synthesise idle payload from state ---
+    if not os.path.exists(PROGRESS_PATH):
+        payload: dict = {
+            "running": False,
+            "phase": "idle",
+            "pct": 100,
+            "done": 0,
+            "total": 0,
+            "rows": 0,
+        }
+        if state.get("last_run"):
+            payload["last_run"] = state["last_run"]
+        if state.get("last_completed_progress"):
+            payload["last_completed_progress"] = state["last_completed_progress"]
+        return jsonify(payload)
+
+    raw = _read(PROGRESS_PATH) or {}
+
+    def _sint(v: object) -> int:
+        try:
+            return int(float(str(v)))
+        except (ValueError, TypeError):
+            return 0
+
+    def _sfloat(v: object) -> float:
+        try:
+            return float(str(v))
+        except (ValueError, TypeError):
+            return 0.0
+
+    # --- Stale-lock / dead-trainer recovery ---
+    if raw.get("running"):
+        age = _time.time() - os.path.getmtime(PROGRESS_PATH)
+        stale_sec = int(os.environ.get("HABITUS_PROGRESS_STALE_SEC", "300"))
+        dead_grace_sec = int(os.environ.get("HABITUS_PROGRESS_DEAD_GRACE_SEC", "60"))
+        pct_val = min(100, max(0, _sint(raw.get("pct", 0))))
+
+        should_recover = False
+        if age > stale_sec:
+            should_recover = True
+        elif not _trainer.is_running() and (pct_val >= 100 or age > dead_grace_sec):
+            # Immediate: fetch phase finished (pct=100) but trainer never started
+            should_recover = True
+
+        if should_recover:
+            recovered: dict = {
+                "running": False,
+                "phase": "idle",
+                "stale_recovered": True,
+                "rows": max(0, _sint(raw.get("rows", 0))),
+                "done": _sint(raw.get("done", 0)),
+                "total": _sint(raw.get("total", 0)),
+            }
+            if state.get("last_run"):
+                recovered["last_run"] = state["last_run"]
+            return jsonify(recovered)
+
+    # --- Normalise and clamp metrics ---
+    running = bool(raw.get("running"))
+    phase = str(raw.get("phase") or "fetching")
+    # A running job cannot be in "idle" phase
+    if running and phase == "idle":
+        phase = "fetching"
+
+    pct = min(100, max(0, _sint(raw.get("pct", 0))))
+    done = _sint(raw.get("done", 0))
+    total = _sint(raw.get("total", 0))
+    if total > 0 and done > total:
+        done = total
+    rows = max(0, _sint(raw.get("rows", 0)))
+    elapsed_min = _sfloat(raw.get("elapsed_min", 0))
+    eta_min = _sfloat(raw.get("eta_min", 0))
+
+    out: dict = {
+        "running": running,
+        "phase": phase,
+        "pct": pct,
+        "done": done,
+        "total": total,
+        "rows": rows,
+        "elapsed_min": elapsed_min,
+        "eta_min": eta_min,
+    }
+    for key in ("progressive_window", "last_run"):
+        if key in raw:
+            out[key] = raw[key]
+    return jsonify(out)
 
 
 @app.route("/api/patterns")
@@ -83,9 +217,12 @@ def api_anomalies():
     data = _read(ANOMALIES_PATH) or {}
     try:
         from . import feedback
+
         suppressed = feedback.get_suppressed_entities()
         if suppressed and isinstance(data.get("anomalies"), list):
-            data["anomalies"] = [a for a in data.get("anomalies", []) if a.get("entity_id") not in suppressed]
+            data["anomalies"] = [
+                a for a in data.get("anomalies", []) if a.get("entity_id") not in suppressed
+            ]
     except Exception:
         pass
     return jsonify(data)
@@ -103,9 +240,12 @@ def api_anomaly_breakdown():
     data = _read(ANOMALIES_PATH) or {}
     try:
         from . import feedback
+
         suppressed = feedback.get_suppressed_entities()
         if suppressed and isinstance(data.get("anomalies"), list):
-            data["anomalies"] = [a for a in data.get("anomalies", []) if a.get("entity_id") not in suppressed]
+            data["anomalies"] = [
+                a for a in data.get("anomalies", []) if a.get("entity_id") not in suppressed
+            ]
     except Exception:
         pass
     return jsonify(data)
@@ -132,7 +272,11 @@ def api_anomaly_feedback():
         return jsonify(feedback.get_feedback_stats())
 
     data = request.get_json(silent=True) or {}
-    anomaly_id = str(data.get("anomaly_id", "")).strip() or str(data.get("entity_id", "")).strip() or "unknown"
+    anomaly_id = (
+        str(data.get("anomaly_id", "")).strip()
+        or str(data.get("entity_id", "")).strip()
+        or "unknown"
+    )
     action = str(data.get("action", "")).strip()
     entity_id = str(data.get("entity_id", "")).strip()
     score = float(data.get("score", 0) or 0)
@@ -156,42 +300,12 @@ def api_anomaly_feedback():
 @app.route("/api/full_train", methods=["POST"])
 @app.route("/ingress/api/full_train", methods=["POST"])
 def api_full_train():
-    """Trigger a full 365-day training run without progressive steps."""
-    import asyncio
-    from concurrent.futures import ThreadPoolExecutor
-
-    from .main import run
-
-    def do_train():
-        asyncio.run(run(days_history=365, mode="full"))
-
-    with ThreadPoolExecutor() as pool:
-        pool.submit(do_train)
-    return jsonify({"ok": True, "message": "Full 365d training started"})
-
-
-def api_rescan():
-    try:
-        import glob as _glob  # noqa: PLC0415
-
-        for p in _glob.glob(os.path.join(DATA_DIR, "*.pkl")) + [
-            STATE_PATH,
-            BASELINE_PATH,
-            PATTERNS_PATH,
-            SUGGESTIONS_PATH,
-        ]:
-            if os.path.exists(p):
-                os.remove(p)
-        days = int(os.environ.get("HABITUS_DAYS", "365"))
-        # Use progressive training: 30d → 60d → 90d → 180d → max
-        from . import progressive as _prog  # noqa: PLC0415
-
-        if _prog.is_expanding():
-            return jsonify({"ok": False, "error": "Progressive training already running"}), 409
-        _prog.start_progressive(max_days=days)
-        return jsonify({"ok": True, "started": True, "progressive": True})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    """Trigger a full training run via the trainer manager."""
+    days = int(os.environ.get("HABITUS_DAYS", "365"))
+    started = _trainer.start(days, mode="full")
+    if not started:
+        return jsonify({"ok": False, "error": "Training already running"}), 409
+    return jsonify({"ok": True, "message": f"Full training started ({days}d)"})
 
 
 @app.route("/api/training_status")
@@ -264,33 +378,94 @@ def api_settings():
 @app.route("/api/add_automation", methods=["POST"])
 @app.route("/ingress/api/add_automation", methods=["POST"])
 def api_add_automation():
+    """Create a new automation in Home Assistant from YAML, with unique ID generation."""
     import requests as req
 
-    data = request.get_json()
-    yaml_str = data.get("yaml", "")
-    ha_url = os.environ.get("HA_URL", "http://supervisor/core")
-    token = os.environ.get("SUPERVISOR_TOKEN", "")
+    data = request.get_json() or {}
+    yaml_str = (data.get("yaml") or "").strip()
+
+    if not yaml_str:
+        return jsonify({"ok": False, "error": "yaml is required"}), 400
+
     try:
         parsed = _yaml.safe_load(yaml_str)
-        auto = parsed.get("automation", parsed)
-        alias = (
-            auto.get("alias", "habitus_auto")
-            .lower()
-            .replace(" ", "_")
-            .replace("—", "")
-            .replace("–", "")
+    except _yaml.YAMLError as exc:
+        return jsonify({"ok": False, "error": f"invalid YAML: {exc}"}), 400
+
+    if not isinstance(parsed, dict):
+        return jsonify({"ok": False, "error": "invalid YAML: expected a mapping"}), 400
+
+    auto = parsed.get("automation", parsed)
+    if not isinstance(auto, dict):
+        return jsonify({"ok": False, "error": "invalid YAML: automation must be a mapping"}), 400
+
+    alias = str(auto.get("alias") or "").strip()
+    if not alias:
+        return jsonify({"ok": False, "error": "automation alias is required"}), 400
+
+    ha_url = os.environ.get("HA_URL", "http://supervisor/core")
+    token = os.environ.get("SUPERVISOR_TOKEN", "")
+
+    # Fetch existing automations to detect ID collisions
+    existing_ids: set[str] = set()
+    try:
+        r_states = req.get(
+            f"{ha_url}/api/states",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=8,
         )
+        for s in r_states.json():
+            eid = s.get("entity_id", "")
+            if eid.startswith("automation."):
+                existing_ids.add(_normalize_automation_id(eid))
+    except Exception:
+        pass
+
+    automation_id = _unique_alias_id(alias, existing_ids)
+    try:
         r = req.post(
-            f"{ha_url}/api/config/automation/config/{alias}",
+            f"{ha_url}/api/config/automation/config/{automation_id}",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             json=auto,
             timeout=10,
         )
         if r.status_code in (200, 201, 204):
-            return jsonify({"ok": True})
-        return jsonify({"ok": False, "error": f"HA {r.status_code}"}), 400
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+            return jsonify({"ok": True, "automation_id": automation_id})
+        return jsonify({"ok": False, "error": f"HA {r.status_code}: {r.text}"}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": f"failed to add automation: {exc}"}), 500
+
+
+@app.route("/api/remove_automation", methods=["POST"])
+@app.route("/ingress/api/remove_automation", methods=["POST"])
+def api_remove_automation():
+    """Remove an automation from Home Assistant by entity_id or alias."""
+    import requests as req
+
+    data = request.get_json() or {}
+    entity_id = str(data.get("entity_id") or "").strip()
+    alias = str(data.get("alias") or "").strip()
+
+    automation_id = _normalize_automation_id(entity_id or alias)
+    if not automation_id:
+        return jsonify({"ok": False, "error": "entity_id or alias is required"}), 400
+
+    ha_url = os.environ.get("HA_URL", "http://supervisor/core")
+    token = os.environ.get("SUPERVISOR_TOKEN", "")
+
+    try:
+        r = req.delete(
+            f"{ha_url}/api/config/automation/config/{automation_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+        if r.status_code in (200, 204):
+            return jsonify({"ok": True, "automation_id": automation_id})
+        if r.status_code == 404:
+            return jsonify({"ok": False, "error": "automation not found"}), 404
+        return jsonify({"ok": False, "error": f"HA {r.status_code}: {r.text}"}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": f"failed to remove automation: {exc}"}), 500
 
 
 @app.route("/api/phantom")
