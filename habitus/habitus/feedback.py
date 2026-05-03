@@ -119,10 +119,7 @@ def get_suppressed_entities() -> set[str]:
         act = e.get("action", "")
         if eid:
             latest[eid] = act
-    return {
-        eid for eid, act in latest.items()
-        if act in ("dismissed", "false_positive")
-    }
+    return {eid for eid, act in latest.items() if act in ("dismissed", "false_positive")}
 
 
 def set_sharing(enabled: bool):

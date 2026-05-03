@@ -1072,9 +1072,10 @@ function renderSuggestions() {
   document.getElementById('sug-list').innerHTML = list.map(s => {
     const [bc, ic] = catBadge[s.category] || ['b-muted','•'];
     const installed = _isInstalled(s);
-    const installedBadge = installed
+    const status_badges = installed
       ? `<span class="badge" style="background:rgba(67,217,139,.12);color:var(--green);border:1px solid rgba(67,217,139,.25)">✓ In HA${installed.state==='off'?' (disabled)':''}</span>`
       : '';
+    const confidence_rationale = s.confidence_rationale || '';
     const addBtn = installed
       ? `<button class="btn" style="opacity:.5;cursor:default;background:var(--card2);color:var(--green);border:1px solid var(--border)" disabled>✓ Already added</button>`
       : `<button class="btn btn-success" id="add-${s.id}" onclick="addToHA('${s.id}')">+ Add to HA</button>`;
@@ -1082,10 +1083,11 @@ function renderSuggestions() {
     <div class="sug ${s.applicable===false?'na':''}">
       <div class="sug-head">
         <h3>${s.title}</h3>
-        <div style="display:flex;gap:6px;align-items:center">${installedBadge}<span class="badge ${bc}">${ic} ${s.category}</span></div>
+        <div style="display:flex;gap:6px;align-items:center">${status_badges}<span class="badge ${bc}">${ic} ${s.category}</span></div>
       </div>
       <div class="sug-meta">
         <div class="conf-bar"><div class="conf-dots">${confDots(s.confidence)}</div><span style="font-size:.72rem;color:var(--text3)">${s.confidence}% confidence</span></div>
+        ${confidence_rationale?`<div class="sug-why"><strong>Why now:</strong> ${confidence_rationale}</div>`:''}
         ${s.applicable===false?'<span class="badge b-alert">⚠ Entity not in your system</span>':''}
       </div>
       <div class="desc">${s.description}</div>
@@ -1120,7 +1122,7 @@ async function addToHA(id) {
 }
 
 // Add gap automation to HA
-async function addGapToHA(btnId, yamlId) {
+async function addGapToHA(yamlId, btnId) {
   const btn = document.getElementById(btnId);
   const yaml = document.getElementById(yamlId).textContent;
   btn.disabled = true; btn.textContent = 'Adding…';
@@ -1530,7 +1532,7 @@ async function load() {
           : `<span class="badge b-alert">missing</span>`;
         const addBtn = installed
           ? `<button class="btn" style="opacity:.5;cursor:default;background:var(--card2);color:var(--green);border:1px solid var(--border)" disabled>✓ Already added</button>`
-          : `<button class="btn btn-success" id="gap-add-${i}" onclick="addGapToHA('gap-add-${i}','${yid}')">+ Add to HA</button>`;
+          : `<button class="btn btn-success" id="gap-add-${i}" onclick="addGapToHA('${yid}','gap-add-${i}')">+ Add to HA</button>`;
         html += `<div class="sug" style="margin-bottom:10px">
           <div class="sug-head"><h3>${g.suggestion}</h3>${badge}</div>
           ${g.ha_automation_yaml ? `<pre id="${yid}" style="font-size:.72rem">${g.ha_automation_yaml}</pre>
@@ -1643,6 +1645,23 @@ function schedulePoll() {
   _pollTimer = setTimeout(() => { load(); schedulePoll(); }, interval);
 }
 schedulePoll();
+
+// Training status: show last-run-complete state when idle, live % when running
+async function updateTrainingStatus() {
+  try {
+    const p = await fetch('api/progress').then(r=>r.json()).catch(()=>({}));
+    const statusEl = document.getElementById('train-status');
+    if (!statusEl) return;
+    if (p && p.running) {
+      statusEl.textContent = `Training ${p.pct||0}% — ${p.phase||'working'}`;
+    } else {
+      const lastCompleted = p.last_completed_progress;
+      const completedPhase = (lastCompleted && lastCompleted.phase) || 'complete';
+      statusEl.textContent = 'Last run complete';
+      statusEl.title = `last run complete · ${completedPhase}`;
+    }
+  } catch(e) {}
+}
 
 // ── NEW FEATURE LOADERS ─────────────────────────────────────────────────────
 
