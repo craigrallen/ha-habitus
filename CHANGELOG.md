@@ -7,6 +7,16 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 
+## [4.1.4] - 2026-05-03
+
+### Fixed
+- Restored broken web API endpoints and wired full training cycle into TrainerManager (CI repair)
+- Updated GitHub Actions workflow to Node 24-compatible action versions (CI runtime hygiene)
+
+### Changed
+- Aligned pyproject.toml package version with add-on manifest (both now 4.1.4)
+
+
 ## [2026-03] - 2026-03-01
 
 ### Added
