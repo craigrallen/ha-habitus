@@ -243,7 +243,7 @@ mypy habitus/habitus/              # Type check
 
 - All public functions must have docstrings (Google style)
 - Type annotations required on all function signatures
-- New features require tests before merge (70% coverage minimum, enforced by CI)
+- New features require tests before merge (47% coverage minimum enforced by CI; 70% is the project target)
 - Ruff + Black must pass — no exceptions
 - PRs require passing CI before merge
 

@@ -68,7 +68,7 @@ pytest --cov=habitus/habitus --cov-report=term-missing
 
 **Rules:**
 - All four must pass before any commit
-- Minimum 70% test coverage (enforced by CI)
+- Minimum 47% test coverage enforced by CI (project target is 70%)
 - `web.py` is excluded from coverage (Flask routes — integration tested separately)
 - Fix issues rather than suppressing with `# noqa` or `# type: ignore` unless genuinely necessary
 
