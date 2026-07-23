@@ -23,7 +23,7 @@ pip install -e ".[dev]"
 
 ### Tests
 
-All new code must include tests. The CI enforces a 70% coverage floor.
+All new code must include tests. The CI enforces a 47% coverage floor, rising toward a 70% project target.
 
 ```bash
 pytest                     # Must pass
@@ -79,7 +79,7 @@ Every PR runs:
 2. **Black format check** — auto-format must match
 3. **MyPy type check** — no type errors
 4. **pytest** on Python 3.11, 3.12, 3.13
-5. **Codecov** — coverage must not drop below 70%
+5. **Codecov** — coverage must not drop below 47% (target: 70%)
 6. **Docker build** — add-on image must build for aarch64
 
 All checks must pass before merge.

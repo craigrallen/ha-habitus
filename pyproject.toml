@@ -73,7 +73,7 @@ omit = ["tests/*", "*/web.py"]
 
 [tool.coverage.report]
 show_missing = true
-fail_under = 40
+fail_under = 47  # current CI floor; project target is 70%
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
