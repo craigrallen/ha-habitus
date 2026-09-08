@@ -134,17 +134,30 @@ WEATHER_PATTERNS: tuple[str, ...] = (
 )
 
 
-def classify_entity(entity_id: str) -> str | None:
+def classify_entity(entity_id: str, attributes: dict | None = None) -> str | None:
     """Return the behavioural category for an entity, or None if not relevant.
 
     Args:
         entity_id: Full HA entity ID, e.g. ``binary_sensor.hallway_motion``.
+        attributes: Optional Home Assistant attributes, preferred over name hints.
 
     Returns:
         One of ``"motion"``, ``"light"``, ``"presence"``, ``"media"``,
         ``"door"``, ``"weather"``, or ``None`` if not categorised.
     """
     eid = entity_id.lower()
+    device_class = (attributes or {}).get("device_class")
+    if eid.startswith("binary_sensor.") and device_class:
+        return {
+            "motion": "motion",
+            "occupancy": "presence",
+            "presence": "presence",
+            "door": "door",
+            "window": "door",
+            "opening": "door",
+            "garage_door": "door",
+            "light": "light",
+        }.get(device_class)
 
     if any(p in eid for p in MOTION_PATTERNS) and "binary_sensor" in eid:
         return "motion"
@@ -193,7 +206,8 @@ def extract_activity_features(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.copy()
     df["hour"] = pd.to_datetime(df["ts"], utc=True).dt.floor("h")
-    df["category"] = df["entity_id"].apply(classify_entity)
+    metadata = df.attrs.get("entity_metadata", {})
+    df["category"] = df["entity_id"].apply(lambda eid: classify_entity(eid, metadata.get(eid)))
     df["v"] = pd.to_numeric(df["mean"].fillna(df["sum"]), errors="coerce")
 
     active = df.dropna(subset=["category", "v"])
@@ -422,7 +436,7 @@ def _fetch_activity_states() -> dict[str, float]:
         r.raise_for_status()
         for entity in r.json():
             eid = entity["entity_id"]
-            cat = classify_entity(eid)
+            cat = classify_entity(eid, entity.get("attributes", {}))
             if cat is None:
                 continue
             state = entity["state"]

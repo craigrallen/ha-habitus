@@ -9,6 +9,14 @@ import os
 import numpy as np
 import pandas as pd
 
+from .entity_metadata import (
+    SCHEMA_VERSION,
+    apply_override,
+    convert_value,
+    identify,
+    read_overrides,
+    temperature_c,
+)
 from .sensor_classifier import ACCUMULATING, BINARY, classify_sensor
 
 log = logging.getLogger("habitus")
@@ -102,9 +110,15 @@ def apply_data_quality_filters(df: pd.DataFrame) -> tuple[pd.DataFrame, list[dic
         vals: np.ndarray = grp_sorted["v"].values.astype(float)
         ts_vals = grp_sorted["ts"].values
 
-        is_power = _is_power_entity(eid_str)
-        is_temp = _is_temperature_entity(eid_str)
-        is_hum = _is_humidity_entity(eid_str)
+        attrs = df.attrs.get("entity_metadata", {}).get(eid_str)
+        info = identify(eid_str, attrs)
+        is_power = attrs is None and _is_power_entity(eid_str)
+        is_temp = info["quantity"] == "temperature" and info["unit_of_measurement"] in (
+            "°C",
+            "°F",
+            "K",
+        )
+        is_hum = info["quantity"] == "humidity" and info["unit_of_measurement"] == "%"
         # Gauge heuristic: non-binary (>2 unique values) AND non-monotonic (has decreases)
         n_unique = len(np.unique(vals))
         is_gauge_like = len(vals) > 2 and n_unique > 2 and bool((np.diff(vals) < 0).any())
@@ -129,7 +143,8 @@ def apply_data_quality_filters(df: pd.DataFrame) -> tuple[pd.DataFrame, list[dic
                 )
 
         if is_temp:
-            bad = (vals > _TEMP_MAX_C) | (vals < _TEMP_MIN_C)
+            celsius = np.array([temperature_c(float(v), info["unit_of_measurement"]) for v in vals])
+            bad = (celsius > _TEMP_MAX_C) | (celsius < _TEMP_MIN_C)
             if bad.any():
                 bad_positions = np.where(bad)[0]
                 drop_idx.update(idx[i] for i in bad_positions)
@@ -292,7 +307,7 @@ def compute_weighted_score(anomalies: list[dict]) -> float:
     return round(weighted_sum / total_weight, 3) if total_weight > 0 else 0.0
 
 
-def build_entity_baselines(df: pd.DataFrame):
+def build_entity_baselines(df: pd.DataFrame) -> None:
     """Build per-entity baselines by hour-of-day × day-of-week. Saves to entity_baselines.json.
 
     For accumulating sensors (kWh, gas m³, water L), baselines are built on hourly
@@ -315,17 +330,19 @@ def build_entity_baselines(df: pd.DataFrame):
     """
     if df.empty:
         return
+    metadata = df.attrs.get("entity_metadata", {})
     df = df.copy()
     df["v"] = pd.to_numeric(df["mean"].fillna(df["sum"]), errors="coerce")
     df["ts"] = pd.to_datetime(df["ts"], utc=True)
     df["hour_of_day"] = df["ts"].dt.hour
     df["day_of_week"] = df["ts"].dt.dayofweek
-    df = df.dropna(subset=["v"])
+    df = df.replace([np.inf, -np.inf], np.nan).dropna(subset=["v"])
 
     # Apply data quality filters before building baselines
     df, quality_issues = apply_data_quality_filters(df)
-    if quality_issues:
-        _persist_data_quality(quality_issues)
+    quality_path = os.path.join(os.path.dirname(ENTITY_BASELINES_PATH), "data_quality.json")
+    with open(quality_path, "w") as handle:
+        json.dump(quality_issues, handle)
 
     # Load existing baselines to (a) preserve first_seen timestamps and
     # (b) carry over all persisted runtime state keys across retraining cycles.
@@ -340,8 +357,23 @@ def build_entity_baselines(df: pd.DataFrame):
 
         # Classify sensor type before choosing baseline method
         history_vals: list[float] = group.sort_values("ts")["v"].dropna().tolist()
-        sensor_type = classify_sensor(eid, history=history_vals)
+        entity_meta = identify(str(eid), metadata.get(eid))
+        sensor_type = classify_sensor(
+            str(eid),
+            history=history_vals,
+            state_class=entity_meta.get("state_class"),
+            device_class=entity_meta.get("device_class"),
+            unit_of_measurement=(
+                entity_meta.get("unit_of_measurement")
+                if entity_meta["identification_source"] == "metadata"
+                else None
+            ),
+        )
 
+        sensor_type = entity_meta.get("sensor_type", sensor_type)
+        if sensor_type == ACCUMULATING:
+            group = group.copy()
+            group["v"] = pd.to_numeric(group["sum"].fillna(group["mean"]), errors="coerce")
         if sensor_type == ACCUMULATING:
             entity_bl = _build_rate_baseline(group)
         elif sensor_type == BINARY:
@@ -368,6 +400,8 @@ def build_entity_baselines(df: pd.DataFrame):
                 first_seen_ts = existing_first_seen
 
             entity_bl["_meta"] = {
+                **entity_meta,
+                "schema_version": SCHEMA_VERSION,
                 "sensor_type": sensor_type,
                 "first_seen": first_seen_ts,
                 "n_samples": int(len(group)),
@@ -377,7 +411,20 @@ def build_entity_baselines(df: pd.DataFrame):
     # Carry over all runtime state keys so they survive a retraining cycle.
     for state_key in ("_accumulating_state", "_binary_state", "_z_score_run", "_learning_entities"):
         if state_key in existing:
-            baselines[state_key] = existing[state_key]
+            baselines[state_key] = (
+                {
+                    eid: value
+                    for eid, value in existing[state_key].items()
+                    if eid in baselines
+                    and all(
+                        existing.get(eid, {}).get("_meta", {}).get(k)
+                        == baselines[eid].get("_meta", {}).get(k)
+                        for k in ("schema_version", "sensor_type", "unit_of_measurement")
+                    )
+                }
+                if isinstance(existing[state_key], dict)
+                else {}
+            )
 
     with open(ENTITY_BASELINES_PATH, "w") as f:
         json.dump(baselines, f, default=str)
@@ -405,11 +452,12 @@ def _build_rate_baseline(group: pd.DataFrame) -> dict:
     vals = group["v"].values.astype(float)
     ts_arr = pd.to_datetime(group["ts"].values)
 
-    deltas = np.diff(vals)
+    elapsed = np.diff(ts_arr) / np.timedelta64(1, "h")
+    deltas = np.divide(np.diff(vals), elapsed, out=np.full(len(elapsed), np.nan), where=elapsed > 0)
     delta_ts = ts_arr[1:]
 
     # Exclude negative deltas (meter resets or bad readings)
-    valid_mask = deltas >= 0
+    valid_mask = np.isfinite(deltas) & (deltas >= 0)
     deltas = deltas[valid_mask]
     delta_ts = delta_ts[valid_mask]
 
@@ -543,7 +591,7 @@ def score_entities(current_states: dict | None = None) -> list:
     with open(ENTITY_BASELINES_PATH) as f:
         baselines = json.load(f)
 
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
     h, d = now.hour, now.weekday()
     key = f"{h}_{d}"
 
@@ -582,6 +630,7 @@ def score_entities(current_states: dict | None = None) -> list:
                     item.get("entity_id", "") for item in _dq_data if item.get("issue") == "stuck"
                 }
 
+    overrides = read_overrides(os.path.dirname(ENTITY_BASELINES_PATH))
     # ── Exclusion patterns ──────────────────────────────────────────────────
     # Sensors that should never contribute to anomaly scoring because they
     # represent external data (markets), reactive power noise, or network
@@ -622,7 +671,7 @@ def score_entities(current_states: dict | None = None) -> list:
             with contextlib.suppress(ValueError):
                 first_seen_dt = datetime.datetime.fromisoformat(first_seen_str)
                 if first_seen_dt.tzinfo is not None:
-                    first_seen_dt = first_seen_dt.replace(tzinfo=None)
+                    first_seen_dt = first_seen_dt.astimezone(datetime.UTC).replace(tzinfo=None)
                 days_old = (now - first_seen_dt).total_seconds() / 86400.0
                 days_of_data = days_old  # capture for confidence computation
                 if days_old < COLD_START_DAYS:
@@ -655,14 +704,42 @@ def score_entities(current_states: dict | None = None) -> list:
         if current is None:
             continue
         try:
-            val = float(current)
+            live_unit = meta.get("unit_of_measurement", "")
+            if isinstance(current, dict):
+                live_meta = identify(
+                    eid, apply_override(current.get("attributes", {}), overrides.get(eid))
+                )
+                if meta.get("schema_version") != SCHEMA_VERSION or meta.get(
+                    "identification_override", {}
+                ) != overrides.get(eid, {}):
+                    continue
+                live_unit = live_meta["unit_of_measurement"]
+                current = current.get("state")
+                if live_meta.get("sensor_type") and live_meta["sensor_type"] != meta.get(
+                    "sensor_type"
+                ):
+                    continue
+            if current is None:
+                continue
+            if meta.get("sensor_type") == BINARY and current in ("on", "off"):
+                current = 1 if current == "on" else 0
+            val = convert_value(float(current), live_unit, meta.get("unit_of_measurement", ""))
+            if not np.isfinite(val):
+                continue
         except (TypeError, ValueError):
             continue
 
         # ── Current value data quality validation ──────────────────────────────
         # Mirror the same filters applied to historical data in apply_data_quality_filters.
         # Bad current readings must never be surfaced as behavioural anomalies.
-        if _is_temperature_entity(eid) and (val > _TEMP_MAX_C or val < _TEMP_MIN_C):
+        resolved = identify(eid, meta)
+        unit = resolved["unit_of_measurement"]
+        temp_value = (
+            temperature_c(val, unit)
+            if resolved["quantity"] == "temperature" and unit in ("°C", "°F", "K")
+            else None
+        )
+        if temp_value is not None and (temp_value > _TEMP_MAX_C or temp_value < _TEMP_MIN_C):
             log.warning("Data quality: ignoring out-of-range temperature for %s: %.1f°C", eid, val)
             _persist_data_quality(
                 [
@@ -675,9 +752,9 @@ def score_entities(current_states: dict | None = None) -> list:
                 ]
             )
             continue
-        if _is_power_entity(eid) and val < 0:
+        if not meta.get("schema_version") and _is_power_entity(eid) and val < 0:
             val = 0.0  # clamp silently — already logged during baseline build
-        if _is_humidity_entity(eid) and (val < 0 or val > 100):
+        if resolved["quantity"] == "humidity" and unit == "%" and (val < 0 or val > 100):
             val = max(0.0, min(100.0, val))  # clamp
 
         # ── Binary sensor: timing & frequency scoring ──────────────────────────
@@ -743,7 +820,7 @@ def score_entities(current_states: dict | None = None) -> list:
             if z < 0.5:
                 continue
 
-            name = eid.split(".")[-1].replace("_", " ").title()
+            name = meta.get("friendly_name") or eid.split(".")[-1].replace("_", " ").title()
             if z_freq > 0 and z_freq >= max(z_expected, z_dur):
                 description = (
                     f"{name} has {trans_count} transitions this hour — "
@@ -817,6 +894,8 @@ def score_entities(current_states: dict | None = None) -> list:
 
             # No scoring within first 24 h of delta accumulation
             first_dt = datetime.datetime.fromisoformat(first_delta_ts)
+            if first_dt.tzinfo is not None:
+                first_dt = first_dt.astimezone(datetime.UTC).replace(tzinfo=None)
             if (now - first_dt).total_seconds() < 86400:
                 continue
 
@@ -825,7 +904,13 @@ def score_entities(current_states: dict | None = None) -> list:
                 # Negative delta = meter reset or bad reading; skip scoring
                 continue
 
-            score_val = delta
+            prev_dt = datetime.datetime.fromisoformat(prev_info.get("prev_ts", now.isoformat()))
+            if prev_dt.tzinfo is not None:
+                prev_dt = prev_dt.astimezone(datetime.UTC).replace(tzinfo=None)
+            elapsed_hours = (now - prev_dt).total_seconds() / 3600
+            if elapsed_hours <= 0:
+                continue
+            score_val = delta / elapsed_hours
         else:
             score_val = val
 
@@ -837,8 +922,8 @@ def score_entities(current_states: dict | None = None) -> list:
             continue  # not interesting
 
         # Human-readable entity name
-        name = eid.split(".")[-1].replace("_", " ").title()
-        unit = _guess_unit(eid)
+        name = meta.get("friendly_name") or eid.split(".")[-1].replace("_", " ").title()
+        unit = resolved["unit_of_measurement"]
 
         if baseline_type == "rate":
             description = (
@@ -871,7 +956,8 @@ def score_entities(current_states: dict | None = None) -> list:
                 "baseline_mean": round(b["mean"], 6),
                 "baseline_std": round(b["std"], 6),
                 "z_score": round(z, 2),
-                "unit": unit,
+                "unit": f"{unit}/h" if baseline_type == "rate" and unit else unit,
+                "identification_source": resolved["identification_source"],
                 "description": description,
                 "direction": "high" if score_val > b["mean"] else "low",
                 "sensor_type": sensor_type_str,
@@ -1025,29 +1111,14 @@ def _fetch_current_states(entity_ids: list) -> dict:
                 if s["entity_id"] in entity_ids:
                     with contextlib.suppress(ValueError, TypeError):
 
-                        result[s["entity_id"]] = float(s["state"])
+                        result[s["entity_id"]] = s
     except Exception as e:
         log.warning(f"Could not fetch current states: {e}")
     return result
 
 
-def _guess_unit(eid):
-    e = eid.lower()
-    if "temperature" in e:
-        return "°C"
-    if "humidity" in e:
-        return "%"
-    if "_w" in e or "watt" in e or "power" in e:
-        return "W"
-    if "energy" in e or "kwh" in e:
-        return "kWh"
-    if "current" in e or "_a" in e:
-        return "A"
-    if "voltage" in e:
-        return "V"
-    if "pressure" in e:
-        return "hPa"
-    return ""
+def _guess_unit(eid: str) -> str:
+    return str(identify(eid)["unit_of_measurement"])
 
 
 def _fmt(val, unit):

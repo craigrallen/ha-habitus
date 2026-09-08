@@ -86,6 +86,10 @@ class TestPhantomLoad:
         """_run_async() returns expected schema with mocked stats."""
         from habitus.habitus import phantom
         monkeypatch.setenv("HABITUS_ENERGY_GRID", "sensor.grid")
+        monkeypatch.setattr(phantom, "DATA_DIR", str(tmp_data_dir))
+        (tmp_data_dir / "entity_metadata.json").write_text(
+            json.dumps({"sensor.grid": {"unit_of_measurement": "kWh", "device_class": "energy"}})
+        )
 
         import datetime as dt
 

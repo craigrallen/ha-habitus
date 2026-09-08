@@ -214,7 +214,7 @@ class TestScoreEntities:
         build_entity_baselines(sample_df)
         with open(tmp_data_dir / "entity_baselines.json") as f:
             baselines = json.load(f)
-        now = datetime.datetime.now()
+        now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
         # Use the current time's slot so score_entities() looks up the same slot we read
         current_key = f"{now.hour}_{now.weekday()}"
         for eid, slots in baselines.items():
@@ -492,7 +492,7 @@ class TestBinaryScoring:
 
         ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
         ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
-        now = datetime.datetime.now()
+        now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
         h, d = now.hour, now.weekday()
         bern_std = float(np.sqrt(max(on_fraction * (1.0 - on_fraction), 1e-4)))
         baselines = {
@@ -556,7 +556,7 @@ class TestBinaryScoring:
         ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
 
         # Inject binary state: 5 transitions already recorded this hour (sensor currently on)
-        now = datetime.datetime.now()
+        now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
         with open(tmp_data_dir / "entity_baselines.json") as f:
             bl = json.load(f)
         bl["_binary_state"] = {
@@ -589,7 +589,7 @@ class TestBinaryScoring:
         ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
         ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
 
-        now = datetime.datetime.now()
+        now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
         five_hours_ago = (now - datetime.timedelta(hours=5)).isoformat()
         with open(tmp_data_dir / "entity_baselines.json") as f:
             bl = json.load(f)
@@ -665,7 +665,7 @@ class TestColdStartProtection:
         ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
         ab.ENTITY_LIFECYCLE_PATH = str(tmp_data_dir / "entity_lifecycle.json")
 
-        now = datetime.datetime.now()
+        now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
         h, d = now.hour, now.weekday()
         first_seen = (now - datetime.timedelta(days=days_old)).isoformat()
 
@@ -813,7 +813,7 @@ class TestColdStartProtection:
         import habitus.habitus.anomaly_breakdown as ab
 
         # Create two identical baselines: one with n=5 (low), one with n=30 (normal)
-        now = datetime.datetime.now()
+        now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
         h, d = now.hour, now.weekday()
         old_first_seen = (now - datetime.timedelta(days=30)).isoformat()
 
@@ -861,7 +861,7 @@ class TestColdStartProtection:
         import habitus.habitus.anomaly_breakdown as ab
 
         # Write baselines for a different entity
-        now = datetime.datetime.now()
+        now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
         h, d = now.hour, now.weekday()
         old_first_seen = (now - datetime.timedelta(days=30)).isoformat()
         baselines = {
@@ -885,7 +885,7 @@ class TestColdStartProtection:
         """Entity in current_states but absent from baselines must be in entity_lifecycle.json."""
         import habitus.habitus.anomaly_breakdown as ab
 
-        now = datetime.datetime.now()
+        now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
         h, d = now.hour, now.weekday()
         old_first_seen = (now - datetime.timedelta(days=30)).isoformat()
         baselines = {
@@ -1074,7 +1074,7 @@ class TestConfidenceWeighting:
         ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
         ab.ENTITY_LIFECYCLE_PATH = str(tmp_data_dir / "entity_lifecycle.json")
 
-        now = datetime.datetime.now()
+        now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
         h, d = now.hour, now.weekday()
         first_seen = (now - datetime.timedelta(days=days_old)).isoformat()
         baselines = {
@@ -1178,7 +1178,7 @@ class TestConfidenceWeighting:
         """Binary sensor anomalies must also carry 'confidence' and 'confidence_label'."""
         import habitus.habitus.anomaly_breakdown as ab
 
-        now = datetime.datetime.now()
+        now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
         h, d = now.hour, now.weekday()
         first_seen = (now - datetime.timedelta(days=30)).isoformat()
         bern_std = float(np.sqrt(0.05 * 0.95))

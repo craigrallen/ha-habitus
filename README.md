@@ -154,6 +154,9 @@ Below is the practical feature set currently in the repo (see `habitus/CHANGELOG
 
 ## Configuration
 
+For sensor units, classification, and persistent corrections, see
+[Sensor identification](IDENTIFICATION.md).
+
 ```yaml
 scan_interval_hours: 6       # How often to re-score (default: 6h)
 days_history: 3650           # Training window — set high, HA limits to what it has

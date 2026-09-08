@@ -63,6 +63,14 @@ from . import (
 from . import (
     seasonal_adapter as _seasonal_adapter,
 )
+from .entity_metadata import (
+    SCHEMA_VERSION,
+    apply_override,
+    identify,
+    power_factor,
+    read_overrides,
+    temperature_c,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("habitus")
@@ -621,6 +629,50 @@ async def ws_connect():
     return ws
 
 
+_ENTITY_METADATA: dict[str, dict] = {}
+
+
+async def _refresh_entity_metadata() -> None:
+    """Refresh statistic units and live attributes for the training pipeline."""
+    _ENTITY_METADATA.clear()
+    conn = _sqlite_connect()
+    if conn is not None:
+        try:
+            cursor = conn.execute("SELECT * FROM statistics_meta")
+            columns = [column[0] for column in cursor.description]
+            for row in cursor.fetchall():
+                attrs = dict(zip(columns, row, strict=False))
+                _ENTITY_METADATA[attrs["statistic_id"]] = attrs
+        except (sqlite3.Error, TypeError, KeyError):
+            log.warning("Could not read statistic metadata")
+        finally:
+            conn.close()
+    try:
+        response = await asyncio.to_thread(
+            requests.get,
+            f"{HA_URL}/api/states",
+            headers={"Authorization": f"Bearer {HA_TOKEN}"},
+            timeout=10,
+        )
+        response.raise_for_status()
+        for state in response.json():
+            eid = state["entity_id"]
+            if is_behavioral(eid):
+                attrs = dict(state.get("attributes", {}))
+                statistic = _ENTITY_METADATA.get(eid, {})
+                if statistic.get("unit_of_measurement") is not None:
+                    attrs["unit_of_measurement"] = statistic["unit_of_measurement"]
+                _ENTITY_METADATA[eid] = {**statistic, **attrs}
+    except (requests.RequestException, ValueError) as exc:
+        log.warning("Could not enrich sensor metadata: %s", exc)
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(os.path.join(DATA_DIR, "entity_metadata.json"), "w", encoding="utf-8") as handle:
+        json.dump(_ENTITY_METADATA, handle)
+    overrides = read_overrides(DATA_DIR)
+    for eid, attrs in _ENTITY_METADATA.items():
+        _ENTITY_METADATA[eid] = apply_override(attrs, overrides.get(eid))
+
+
 def _resolve_db_path() -> str | None:
     configured = os.environ.get("HABITUS_HA_DB", "").strip()
     candidates = [
@@ -1028,11 +1080,18 @@ def fetch_stats_sqlite(entity_ids, start_iso, end_iso=None):
     return df
 
 
-async def fetch_stats(entity_ids, start_iso, end_iso=None):
-    """Fetch hourly statistics and return an aggregated DataFrame.
+async def fetch_stats(
+    entity_ids: list[str], start_iso: str, end_iso: str | None = None
+) -> pd.DataFrame:
+    """Fetch hourly history with its statistic units attached.
 
-    Preferred path: direct SQLite reads.
-    Fallback path: batched WebSocket API calls.
+    Args:
+        entity_ids: Statistics to fetch.
+        start_iso: Inclusive beginning of the history window.
+        end_iso: End of the window, defaulting to the current hour.
+
+    Returns:
+        Historical observations with entity metadata in DataFrame attributes.
     """
     if end_iso is None:
         end_iso = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:00:00+00:00")
@@ -1144,6 +1203,7 @@ async def fetch_stats(entity_ids, start_iso, end_iso=None):
     if not all_rows:
         return pd.DataFrame()
     df = pd.DataFrame(all_rows)
+    df.attrs["entity_metadata"] = dict(_ENTITY_METADATA)
     df["ts"] = pd.to_datetime(df["ts"], unit="s", utc=True)
     log.info("Fetched %d rows | %s → %s", len(df), df["ts"].min().date(), df["ts"].max().date())
     log_perf_guardrail(
@@ -1176,6 +1236,10 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     t0 = _t.time()
     source_rows = len(df)
     df = df.copy()
+    metadata = df.attrs.get("entity_metadata", {})
+    resolved = {eid: identify(eid, metadata.get(eid)) for eid in df["entity_id"].unique()}
+    factors = {eid: power_factor(meta) for eid, meta in resolved.items()}
+    df["power_w"] = pd.to_numeric(df["mean"], errors="coerce") * df["entity_id"].map(factors)
     df["hour"] = df["ts"].dt.floor("h")
     hours = pd.DataFrame({"hour": pd.date_range(df["hour"].min(), df["hour"].max(), freq="h")})
     hours["hour_of_day"] = hours["hour"].dt.hour
@@ -1267,9 +1331,16 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                     local_df["hour"] = pd.to_datetime(
                         local_df["timestamp"], unit="s", utc=True
                     ).dt.floor("h")
-                    local_df["v"] = pd.to_numeric(local_df["value"], errors="coerce").clip(
-                        lower=0, upper=_max_w
+                    local_scales = (
+                        local_df["unit"].map(
+                            lambda unit: power_factor(identify("", {"unit_of_measurement": unit}))
+                        )
+                        if "unit" in local_df
+                        else local_df["entity_id"].map(factors)
                     )
+                    local_df["v"] = (
+                        pd.to_numeric(local_df["value"], errors="coerce") * local_scales
+                    ).clip(lower=0, upper=_max_w)
                     local_total_power = local_df.groupby("hour")["v"].sum().rename("total_power_w")
 
                     # Build per-phase series from local DB
@@ -1353,8 +1424,12 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                                 proxy_stats["hour"] = pd.to_datetime(
                                     proxy_stats["ts"], utc=True
                                 ).dt.floor("h")
-                                proxy_stats["v"] = pd.to_numeric(
-                                    proxy_stats["mean"], errors="coerce"
+                                proxy_scales = proxy_stats["entity_id"].map(
+                                    lambda eid: power_factor(identify(eid, metadata.get(eid)))
+                                )
+                                proxy_stats["v"] = (
+                                    pd.to_numeric(proxy_stats["mean"], errors="coerce")
+                                    * proxy_scales
                                 ).clip(lower=0, upper=_max_w)
 
                                 # Sum all proxy sensors per hour (shore + battery + solar = total consumption estimate)
@@ -1418,7 +1493,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         # Skip if we already built power features from local DB
         if not _power_from_local_db:
             power = df[df["entity_id"].isin(_power_entities)].copy()
-            power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(lower=0, upper=_max_w)
+            power["v"] = pd.to_numeric(power["power_w"], errors="coerce").clip(
+                lower=0, upper=_max_w
+            )
             total_power = power.groupby("hour")["v"].sum().rename("total_power_w")
             if len(_power_entities) > 1:
                 log.info(
@@ -1427,7 +1504,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                 # Build individual per-phase columns alongside the summed total
                 for _ph_i, _ph_eid in enumerate(_power_entities):
                     _ph_df = df[df["entity_id"] == _ph_eid].copy()
-                    _ph_df["v"] = pd.to_numeric(_ph_df["mean"], errors="coerce").clip(
+                    _ph_df["v"] = pd.to_numeric(_ph_df["power_w"], errors="coerce").clip(
                         lower=0, upper=_max_w
                     )
                     _ph_col = f"power_l{_ph_i + 1}_w"
@@ -1437,28 +1514,38 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     elif _energy_grid:
         # Grid kWh entity from HA Energy Dashboard — convert hourly delta to W
         grid = df[df["entity_id"] == _energy_grid].copy()
-        grid["v"] = pd.to_numeric(grid["mean"], errors="coerce").clip(lower=0)
+        energy_unit = resolved.get(_energy_grid, {}).get("unit_of_measurement", "")
+        scale = {"Wh": 0.001, "kWh": 1.0, "MWh": 1000.0}.get(energy_unit, float("nan"))
+        grid["v"] = pd.to_numeric(grid["sum"].fillna(grid["mean"]), errors="coerce") * scale
         grid = grid.set_index("hour").sort_index()
         # kWh delta per hour × 1000 = average watts for that hour
-        kwh_per_hour = grid["v"].diff().clip(lower=0, upper=_max_w / 1000)
+        kwh_per_hour = (
+            grid["v"].diff() / grid.index.to_series().diff().dt.total_seconds().div(3600)
+        ).clip(lower=0, upper=_max_w / 1000)
         grid_kwh_w = (kwh_per_hour * 1000).rename("grid_kwh_w")
         total_power = grid_kwh_w.rename("total_power_w")
     elif _energy_rates:
         # Per-device watt sensors from Energy Dashboard — sum these (no overlap)
         power = df[df["entity_id"].isin(_energy_rates)].copy()
-        power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(lower=0, upper=_max_w)
+        power["v"] = pd.to_numeric(power["power_w"], errors="coerce").clip(lower=0, upper=_max_w)
         total_power = power.groupby("hour")["v"].sum().rename("total_power_w")
     else:
         # Fallback: max of any power-like sensor (avoids double-counting)
-        power = df[
-            df["entity_id"].str.contains(
-                "consumed_w|watt|power|inverter|load", case=False, na=False
-            )
-        ].copy()
-        power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(lower=0, upper=_max_w)
+        power = df[df["entity_id"].map(factors).notna()].copy()
+        power["v"] = pd.to_numeric(power["power_w"], errors="coerce").clip(lower=0, upper=_max_w)
         total_power = power.groupby("hour")["v"].max().rename("total_power_w")
-    temp = df[df["entity_id"].str.contains("temperature", case=False, na=False)].copy()
-    temp["v"] = pd.to_numeric(temp["mean"], errors="coerce")
+    temp = df[
+        df["entity_id"].map(
+            lambda eid: resolved[eid]["quantity"] == "temperature"
+            and resolved[eid]["unit_of_measurement"] in ("°C", "°F", "K")
+        )
+    ].copy()
+    temp["v"] = [
+        temperature_c(float(value), resolved[eid]["unit_of_measurement"])
+        for eid, value in zip(
+            temp["entity_id"], pd.to_numeric(temp["mean"], errors="coerce"), strict=False
+        )
+    ]
     avg_temp = temp.groupby("hour")["v"].mean().rename("avg_temp_c")
     activity = df.groupby("hour").size().rename("sensor_changes")
     features = hours.set_index("hour")
@@ -1554,7 +1641,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                 if _pc == "total_power_w" and _proxy_entities:
                     _proxy_df = df[df["entity_id"].isin(_proxy_entities)].copy()
                     if not _proxy_df.empty:
-                        _proxy_df["v"] = pd.to_numeric(_proxy_df["mean"], errors="coerce").clip(
+                        _proxy_df["v"] = pd.to_numeric(_proxy_df["power_w"], errors="coerce").clip(
                             lower=0, upper=_max_w
                         )
                         _proxy_total = _proxy_df.groupby("hour")["v"].sum()
@@ -2093,6 +2180,8 @@ async def run(days_history: int, mode: str = "full") -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
     now_iso = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:00:00+00:00")
     state = load_state()
+    if state.get("identification_version") != SCHEMA_VERSION:
+        mode = "full"
 
     # ── Python-side staleness guard ────────────────────────────────────────────
     # Belt-and-suspenders: if progress.json says running=true but started_at is
@@ -2368,6 +2457,7 @@ async def run(days_history: int, mode: str = "full") -> None:
         )
 
     stat_ids, total_stat_ids = await get_stat_ids()
+    await _refresh_entity_metadata()
     behavioral_entity_ids = await get_behavioral_entity_ids()
     stat_id_set = set(stat_ids)
     non_stat_ids = [e for e in behavioral_entity_ids if e not in stat_id_set]
@@ -2407,7 +2497,7 @@ async def run(days_history: int, mode: str = "full") -> None:
         except Exception:
             pass
 
-    if _can_incremental:
+    if _can_incremental and state.get("identification_version") == SCHEMA_VERSION:
         # Incremental update
         fetch_from = state["data_to"]
         log.info(f"Incremental: {fetch_from} → {now_iso}")
@@ -2503,6 +2593,7 @@ async def run(days_history: int, mode: str = "full") -> None:
 
             set_progress("building_baselines", len(stat_ids), len(stat_ids), len(df), 0, 0)
             log.info("Building entity baselines...")
+            df.attrs["entity_metadata"] = dict(_ENTITY_METADATA)
             anomaly_breakdown.build_entity_baselines(df)
             mark_last_completed_progress(
                 state,
@@ -2525,6 +2616,7 @@ async def run(days_history: int, mode: str = "full") -> None:
                 raise
             _fetch_row_count = len(df)  # capture before del for state.json
             _raw_df_for_library = df  # capture for device library before deletion
+            state["identification_version"] = SCHEMA_VERSION
             del df
             set_progress("training", len(stat_ids), len(stat_ids), len(features), 0, 0)
             log.info(f"Training IsolationForest on {len(features):,} rows...")
@@ -2822,6 +2914,7 @@ async def run(days_history: int, mode: str = "full") -> None:
 
         set_progress("building_baselines", len(stat_ids), len(stat_ids), len(df), 0, 0)
         log.info("Building entity baselines...")
+        df.attrs["entity_metadata"] = dict(_ENTITY_METADATA)
         anomaly_breakdown.build_entity_baselines(df)
         activity_engine.build_activity_baseline(activity_engine.extract_activity_features(df))
         mark_last_completed_progress(
@@ -2836,6 +2929,7 @@ async def run(days_history: int, mode: str = "full") -> None:
         state.update({"phase": "baselines_ready", "entity_count": tracked_entity_count})
         save_state(state)
         features = build_features(df)
+        state["identification_version"] = SCHEMA_VERSION
         _fetch_row_count = len(df)  # capture before del for state.json
         _raw_df_for_library = df  # capture for device library before deletion
         del df

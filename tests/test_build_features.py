@@ -39,6 +39,7 @@ def test_build_features_grid_energy_populates_grid_kwh_w(monkeypatch) -> None:
         ]
     )
 
+    df.attrs["entity_metadata"] = {'sensor.grid_energy': {'unit_of_measurement': 'kWh'}}
     features = build_features(df)
     per_hour_grid = dict(zip(features["hour"], features["grid_kwh_w"], strict=False))
     per_hour_power = dict(zip(features["hour"], features["total_power_w"], strict=False))
@@ -83,6 +84,7 @@ def test_build_features_energy_rates_trim_whitespace(monkeypatch) -> None:
         ]
     )
 
+    df.attrs["entity_metadata"] = {'sensor.rate_a': {'unit_of_measurement': 'W'}, 'sensor.rate_b': {'unit_of_measurement': 'W'}}
     features = build_features(df)
     assert float(features.loc[0, "total_power_w"]) == 1000.0
 
@@ -100,6 +102,7 @@ def test_build_features_invalid_max_power_env_uses_default(monkeypatch) -> None:
         ]
     )
 
+    df.attrs["entity_metadata"] = {'sensor.house_power': {'unit_of_measurement': 'W'}}
     features = build_features(df)
     per_hour = dict(zip(features["hour"], features["total_power_w"], strict=False))
 

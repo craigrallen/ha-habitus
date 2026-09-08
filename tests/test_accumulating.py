@@ -44,11 +44,11 @@ def _inject_acc_state(
     """Write a synthetic _accumulating_state into entity_baselines.json."""
     with open(baselines_path) as f:
         baselines = json.load(f)
-    old_ts = (datetime.datetime.now() - datetime.timedelta(hours=hours_ago)).isoformat()
+    old_ts = (datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - datetime.timedelta(hours=hours_ago)).isoformat()
     baselines["_accumulating_state"] = {
         entity_id: {
             "prev_value": prev_value,
-            "prev_ts": old_ts,
+            "prev_ts": (datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - datetime.timedelta(hours=1)).isoformat(),
             "first_delta_ts": old_ts,
         }
     }
@@ -246,7 +246,7 @@ class TestNewEntityBootstrap:
         build_entity_baselines(_make_accumulating_df())
 
         # Inject state with first_delta_ts only 1 h ago → within 24h window
-        recent = (datetime.datetime.now() - datetime.timedelta(hours=1)).isoformat()
+        recent = (datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - datetime.timedelta(hours=1)).isoformat()
         with open(tmp_data_dir / "entity_baselines.json") as f:
             baselines = json.load(f)
         baselines["_accumulating_state"] = {
