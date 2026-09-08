@@ -40,5 +40,22 @@ def _run_blocking(days: int, mode: str) -> None:
         from .main import run  # noqa: PLC0415
 
         asyncio.run(run(days_history=days, mode=mode))
-    except Exception:
+    except Exception as exc:
         log.exception("Background training failed")
+        try:
+            from datetime import UTC, datetime  # noqa: PLC0415
+
+            from habitus.main import clear_progress, load_state, save_state  # noqa: PLC0415
+
+            state = load_state() or {}
+            state.update(
+                {
+                    "phase": "error",
+                    "last_error": str(exc),
+                    "last_error_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+                }
+            )
+            save_state(state)
+            clear_progress()
+        except Exception:
+            pass

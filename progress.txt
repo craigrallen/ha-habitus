@@ -16,4 +16,23 @@
 [2026-03-03 19:05] TASK-019: confidence-weighted anomaly score — compute_entity_confidence() (days/30 × slot_n/20 × type_certainty), compute_weighted_score() (weighted avg z-score), confidence+confidence_label per entity in score_entities(); weighted_score in entity_anomalies.json; /api/anomaly_breakdown endpoint; confidence badge in breakdown UI; 328 tests pass, anomaly_breakdown.py at 95% coverage
 [2026-03-03 20:05] TASK-020: adaptive IsolationForest contamination — contamination_for_days() (5-tier ramp 0.005→0.05), contamination_tier_name(), should_retrain_for_tier_change(); train_model() uses training_days for adaptive contamination; tier stored in run_state.json; tier advance forces full retrain; 30 new tests, 358 total pass
 [2026-03-03 21:05] TASK-021: impossible value & data quality guard — apply_data_quality_filters() (negative power clamp, temp/humidity bounds, gauge jump >10×, stuck ≥24h); _persist_data_quality() to data_quality.json; score_entities() skips stuck entities; /api/sensor_health endpoint; 42 new tests, 400 total pass, anomaly_breakdown.py at 96% coverage
+[2026-03-04 21:42] TASK-022: habitus-card footer now distinguishes configured training window (requested_days via /api/state) from actual trained days (sensor.habitus_training_days) to avoid misleading day counts during sparse-history mode or SQL-only bootstrap
+[2026-03-04 21:43] TASK-023: switch pyproject build backend to setuptools.build_meta (from removed setuptools.backends.legacy) so pip install/build works on modern Python toolchains incl. 3.14
+[2026-04-07 16:00] FEAT: weekly_report.py — weekly intelligence digest (anomalies, energy, drift, sensor health) via HA notification
+[2026-04-07 16:00] FEAT: nl_explanations.py — plain English anomaly descriptions from z-scores
+[2026-04-07 16:00] FEAT: entity_ignore.py — persistent entity ignore list with API
+[2026-04-07 16:00] FEAT: csv_export.py — CSV download for baselines, anomalies, energy, history
+[2026-04-07 16:00] FEAT: vacation_mode.py — auto-detect absence, security-focused scoring profile
+[2026-04-07 16:00] FEAT: device_health.py — sensor degradation tracking and pre-failure alerts
+[2026-04-07 16:10] TASK-012: sleep_quality.py — infer sleep from motion/lights/power, nightly quality score
+[2026-04-07 16:10] TASK-014: comfort_score.py — multi-dimensional comfort scoring (temp+humidity+lighting)
+[2026-04-07 16:10] FEAT: nilm_seq2point.py — seq2point CNN NILM disaggregation with ONNX/TFLite support
+[2026-04-07 16:10] FEAT: actionable_notifications.py — HA companion app notifications with action buttons
+[2026-04-07 16:10] FEAT: room_thresholds.py — per-zone adaptive anomaly sensitivity with night-time adjustments
+[2026-05-03 19:34] MAINT: web API CI repair — restored progress_recovery endpoint, wired full_train into TrainerManager, added /api/automations POST+DELETE endpoints, fixed Jinja2 PAGE/template compatibility in index.html; full pytest suite green
+[2026-05-03 19:56] MAINT: CI runtime hygiene — updated GitHub Actions workflow pins to Node 24-compatible major versions and moved web asset setup-node runtime to Node 24.
+[2026-05-03 20:05] MAINT: version bump to 4.1.4 — config.yaml add-on manifest, pyproject.toml package version aligned; CHANGELOG entry added covering web/API CI repair, CI runtime hygiene, and version alignment.
+[2026-07-18] MAINT: STATUS.md refreshed from tracked repo state (previous copy was a stale 2026-03-20 snapshot of a live add-on instance running v3.11.9, several versions behind current 4.1.4 main); added tests/test_version_alignment.py guarding pyproject.toml/config.yaml/CHANGELOG.md version agreement (the drift class that caused the 4.1.4 alignment fix).
+[2026-07-18] FIX: CLAUDE.md had separately drifted to a stale "Version: 2.9.0" header; corrected to 4.1.4 and extended tests/test_version_alignment.py with a 4th assertion so CLAUDE.md's declared version is guarded against future drift alongside pyproject.toml/config.yaml/CHANGELOG.md.
 [2026-09-08] Sensor identification fixes: preserve HA metadata, normalize units and counter rates, add persistent corrections and 35 regression cases. Validation: 435 tests pass; Ruff, Black, mypy pass; coverage 59%. User authorized commit/PR after coverage limitation was disclosed.
+[2026-09-08] Integrated sensor identification PR with current main: retained SQLite ingestion, template dashboard, multi-phase power and false-alarm suppression; adapted metadata and collector/proxy conversions. Focused integration: 69 tests passed. Full Windows run: 1058 passed before fixture correction, two existing atomic-write failures due to Windows file locking; Linux CI is the merge gate.

@@ -4,7 +4,28 @@
  * Self-contained, no external dependencies
  */
 
-const HABITUS_INGRESS = '/api/hassio_ingress/57582523_habitus';
+// Detect ingress path dynamically from the card's own script URL or fall back to discovery
+const HABITUS_INGRESS = (() => {
+  // Try to find our own script tag to extract the ingress path
+  const scripts = document.querySelectorAll('script[src*="habitus-card"]');
+  for (const s of scripts) {
+    const m = s.src.match(/\/api\/hassio_ingress\/[^/]+/);
+    if (m) return m[0];
+  }
+  // Fall back: search all link/script tags for any hassio_ingress path containing "habitus"
+  for (const el of document.querySelectorAll('script[src*="hassio_ingress"], link[href*="hassio_ingress"]')) {
+    const url = el.src || el.href || '';
+    if (url.includes('habitus')) {
+      const m2 = url.match(/\/api\/hassio_ingress\/[^/]+/);
+      if (m2) return m2[0];
+    }
+  }
+  // Last resort: use the panel URL if we're inside an ingress iframe
+  if (window.location.pathname.includes('/api/hassio_ingress/')) {
+    return window.location.pathname.replace(/\/+$/, '');
+  }
+  return '/api/hassio_ingress/local_habitus';
+})();
 const HABITUS_COLORS = {
   bg: '#0f1117', card: '#1a1d27', card2: '#242736',
   accent: '#6c8ebf', green: '#4caf50', amber: '#ffb300',
@@ -53,13 +74,14 @@ class HabitusCard extends HTMLElement {
   set hass(h) { this._hass = h; this._render(); }
   _render() {
     const h = this._hass;
-    const score = _hes(h, 'sensor.habitus_anomaly_score');
+    const rawScore = _hes(h, 'sensor.habitus_anomaly_score');
     const anom = _hes(h, 'binary_sensor.habitus_anomaly_detected') === 'on';
     const top = _hes(h, 'sensor.habitus_top_anomaly');
     const time = _hlc(h, 'sensor.habitus_anomaly_score');
-    const color = _hsc(score);
-    const label = _hsl(score);
-    const s = parseInt(score, 10);
+    const normalizedScore = (!anom || !top || top === 'None detected' || top === 'No anomalies detected') ? '0' : rawScore;
+    const color = _hsc(normalizedScore);
+    const label = _hsl(normalizedScore);
+    const s = parseInt(normalizedScore, 10);
     const pulseCSS = anom ? `
       @keyframes pulse-ring { 0% { transform: scale(1); opacity: 0.6; } 100% { transform: scale(1.8); opacity: 0; } }
       .pr { animation: pulse-ring 1.5s ease-out infinite; }
@@ -99,10 +121,11 @@ class HabitusCardMinimal extends HTMLElement {
   set hass(h) { this._hass = h; this._render(); }
   _render() {
     const h = this._hass;
-    const score = _hes(h, 'sensor.habitus_anomaly_score');
+    const rawScore = _hes(h, 'sensor.habitus_anomaly_score');
+    const top = _hes(h, 'sensor.habitus_top_anomaly');
+    const score = (_hes(h, 'binary_sensor.habitus_anomaly_detected') !== 'on' || !top || top === 'None detected' || top === 'No anomalies detected') ? '0' : rawScore;
     const color = _hsc(score);
     const label = _hsl(score);
-    const top = _hes(h, 'sensor.habitus_top_anomaly');
     const sug = _hes(h, 'sensor.habitus_suggestion_1');
     const ex = this._exp;
     this.shadowRoot.innerHTML = `<style>
@@ -138,6 +161,7 @@ class HabitusCardDetail extends HTMLElement {
     this._config = {};
     this._anomalies = null;  // top-3 anomaly reason dicts
     this._suggestion = null; // top suggestion with confidence
+    this._stateMeta = null;  // run state (requested_days/training_days)
     this._fetchDone = false;
     this._fetchErr = false;
   }
@@ -150,9 +174,10 @@ class HabitusCardDetail extends HTMLElement {
   async _fetchData() {
     this._fetchDone = true;
     try {
-      const [ar, sr] = await Promise.all([
+      const [ar, sr, st] = await Promise.all([
         fetch(HABITUS_INGRESS + '/api/anomalies'),
         fetch(HABITUS_INGRESS + '/api/suggestions'),
+        fetch(HABITUS_INGRESS + '/api/state'),
       ]);
       if (ar.ok) {
         const ad = await ar.json();
@@ -162,6 +187,9 @@ class HabitusCardDetail extends HTMLElement {
         const sd = await sr.json();
         this._suggestion = Array.isArray(sd) && sd.length ? sd[0] : null;
       }
+      if (st.ok) {
+        this._stateMeta = await st.json();
+      }
     } catch(e) {
       this._fetchErr = true;
     }
@@ -169,11 +197,16 @@ class HabitusCardDetail extends HTMLElement {
   }
   _render() {
     const h = this._hass;
-    const score = _hes(h, 'sensor.habitus_anomaly_score');
+    const rawScore = _hes(h, 'sensor.habitus_anomaly_score');
+    const topSensor = _hes(h, 'sensor.habitus_top_anomaly');
+    const score = (_hes(h, 'binary_sensor.habitus_anomaly_detected') !== 'on' || !topSensor || topSensor === 'None detected' || topSensor === 'No anomalies detected') ? '0' : rawScore;
     const s = parseInt(score,10)||0;
     const color = _hsc(score);
     const label = _hsl(score);
-    const days = _hes(h, 'sensor.habitus_training_days');
+    const daysActual = _hes(h, 'sensor.habitus_training_days');
+    const daysRequested = (this._stateMeta && this._stateMeta.requested_days != null)
+      ? this._stateMeta.requested_days
+      : null;
     const sens = _hes(h, 'sensor.habitus_entity_count');
     const time = _hlc(h, 'sensor.habitus_anomaly_score');
     const pct = Math.min(s, 100);
@@ -241,7 +274,8 @@ class HabitusCardDetail extends HTMLElement {
       ${sugRow}
       <button class="ab" id="ab">Open Habitus Dashboard</button>
       <div class="ft">
-        <span>\uD83D\uDCC5 ${days!=='\u2014'?days+' days trained':'\u2014'}</span>
+        <span>\uD83D\uDCC5 ${daysRequested!=null ? (daysRequested + 'd configured') : (daysActual!=='\u2014' ? daysActual+'d actual' : '\u2014')}</span>
+        <span>\uD83E\uDDEA ${daysActual!=='\u2014' ? daysActual+'d actual' : '\u2014'}</span>
         <span>\uD83D\uDCE1 ${sens!=='\u2014'?sens+' sensors':'\u2014'}</span>
       </div>
     </div>`;
@@ -288,7 +322,9 @@ class HabitusCardGraph extends HTMLElement {
   }
   _render() {
     const h = this._hass;
-    const score = _hes(h, 'sensor.habitus_anomaly_score');
+    const rawScore = _hes(h, 'sensor.habitus_anomaly_score');
+    const top = _hes(h, 'sensor.habitus_top_anomaly');
+    const score = (_hes(h, 'binary_sensor.habitus_anomaly_detected') !== 'on' || !top || top === 'None detected' || top === 'No anomalies detected') ? '0' : rawScore;
     const color = _hsc(score);
     const label = _hsl(score);
     const now = new Date().getHours();

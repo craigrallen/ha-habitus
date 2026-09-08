@@ -149,9 +149,9 @@ def detect_drift(df: pd.DataFrame) -> dict:
 
 def save(data: dict) -> None:
     """Save drift results to disk."""
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(DRIFT_PATH, "w") as f:
-        json.dump(data, f, indent=2)
+    from .utils import atomic_write as _atomic_write  # noqa: PLC0415
+
+    _atomic_write(DRIFT_PATH, data)
     log.info("Drift analysis saved: %s", data.get("summary", ""))
 
 
@@ -163,5 +163,5 @@ def load() -> dict[str, Any]:
         with open(DRIFT_PATH) as f:
             data: dict[str, Any] = json.load(f)
             return data
-    except Exception:
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
         return {}

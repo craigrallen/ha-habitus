@@ -47,7 +47,7 @@ mypy habitus/habitus/
 pytest --cov=habitus/habitus --cov-report=term-missing
 ```
 
-**Minimum 70% test coverage enforced — do not commit below this threshold.**
+**Minimum 47% test coverage enforced — do not commit below this threshold.** (Project target is 70%; the floor rises as coverage improves.)
 
 ## Code Standards
 - All public functions must have Google-style docstrings

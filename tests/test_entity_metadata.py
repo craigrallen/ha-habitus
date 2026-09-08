@@ -168,6 +168,14 @@ async def test_discovery_preserves_statistics_units_and_live_attributes(tmp_path
     from unittest.mock import AsyncMock, Mock
     from habitus.habitus import main
 
+    import sqlite3
+
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        "CREATE TABLE statistics_meta (statistic_id TEXT, unit_of_measurement TEXT, has_sum INTEGER)"
+    )
+    conn.execute("INSERT INTO statistics_meta VALUES (?,?,?)", ("sensor.meter", "Wh", 1))
+    monkeypatch.setattr(main, "_sqlite_connect", lambda: conn)
     ws = AsyncMock()
     ws.recv.return_value = json.dumps(
         {"result": [{"statistic_id": "sensor.meter", "unit_of_measurement": "Wh", "has_sum": True}]}
@@ -186,7 +194,7 @@ async def test_discovery_preserves_statistics_units_and_live_attributes(tmp_path
     ]
     monkeypatch.setattr(main.requests, "get", Mock(return_value=response))
     monkeypatch.setattr(main, "DATA_DIR", str(tmp_path))
-    assert await main.get_stat_ids() == ["sensor.meter"]
+    await main._refresh_entity_metadata()
     assert main._ENTITY_METADATA["sensor.meter"]["unit_of_measurement"] == "Wh"
     assert main._ENTITY_METADATA["sensor.meter"]["state_class"] == "total_increasing"
 

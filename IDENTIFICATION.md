@@ -43,3 +43,5 @@ Ruff, Black, mypy, and Git whitespace checks passed. Overall coverage is 59%,
 below the 70% commit gate. The user explicitly authorized committing and opening
 a PR after this limitation was reported. Existing
 pandas downcasting warnings remain in the test output.
+
+Integration with current main preserves SQLite history and the template dashboard. The metadata snapshot is refreshed before training and attached after combining raw and statistical history. Final merge validation uses Linux CI; two existing atomic-write tests encounter Windows-specific file locks locally.

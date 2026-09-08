@@ -1,6 +1,6 @@
 name: "Habitus"
 description: "Behavioral intelligence — learns patterns from HA, detects anomalies, proposes automations."
-version: "3.1.0"
+version: "4.1.4"
 slug: "habitus"
 init: false
 arch:
@@ -27,8 +27,13 @@ options:
   overnight_train_time: "02:00"
   max_power_kw: 25
   power_entity: ""
+  power_entity_phase1: ""
+  power_entity_phase2: ""
+  power_entity_phase3: ""
   kwh_price: 3.0
   currency: "kr"
+  fetch_row_budget: 1000000
+  fetch_min_window_days: 7
 schema:
   scan_interval_hours: int
   days_history: int?
@@ -39,5 +44,10 @@ schema:
   overnight_train_time: str
   max_power_kw: int?
   power_entity: str?
+  power_entity_phase1: str?
+  power_entity_phase2: str?
+  power_entity_phase3: str?
   kwh_price: float?
   currency: str?
+  fetch_row_budget: int?
+  fetch_min_window_days: int?

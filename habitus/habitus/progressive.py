@@ -66,8 +66,13 @@ def _loop(windows: list[int]) -> None:
         log.info("Progressive: training on last %d days", days)
         try:
             asyncio.run(run(days_history=days, mode="full"))
-        except Exception:
-            log.exception("Progressive training failed at %d days", days)
+        except Exception as e:
+            import sys
+            import traceback
+
+            log.error("Progressive training failed at %d days: %s", days, e)
+            traceback.print_exc(file=sys.stderr)
+            print(f"PROGRESSIVE CRASH: {e}", file=sys.stderr, flush=True)
             break
         # Brief pause between windows so the device breathes
         time.sleep(10)

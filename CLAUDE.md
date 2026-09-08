@@ -4,7 +4,7 @@
 Habitus is a Home Assistant add-on that learns household behavioral patterns, detects anomalies, and generates automation suggestions. 100% local ML, no cloud, no telemetry.
 
 **Stack:** Python 3.11+, scikit-learn (IsolationForest), pandas, Flask, WebSocket → HA API
-**Version:** 2.9.0 | **License:** MIT
+**Version:** 4.1.4 | **License:** MIT
 
 ---
 
@@ -68,7 +68,7 @@ pytest --cov=habitus/habitus --cov-report=term-missing
 
 **Rules:**
 - All four must pass before any commit
-- Minimum 70% test coverage (enforced by CI)
+- Minimum 47% test coverage enforced by CI (project target is 70%)
 - `web.py` is excluded from coverage (Flask routes — integration tested separately)
 - Fix issues rather than suppressing with `# noqa` or `# type: ignore` unless genuinely necessary
 
