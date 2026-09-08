@@ -8,6 +8,7 @@ scoring modules consume ``sensor_type`` to apply type-appropriate algorithms.
 from __future__ import annotations
 
 import logging
+import math
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -29,6 +30,8 @@ def classify_sensor(
     entity_id: str,
     state_class: str | None = None,
     history: Sequence[float] | None = None,
+    device_class: str | None = None,
+    unit_of_measurement: str | None = None,
 ) -> str:
     """Classify an HA entity into a sensor type.
 
@@ -45,6 +48,8 @@ def classify_sensor(
         entity_id: HA entity ID (used only for debug logging).
         state_class: HA ``state_class`` attribute (e.g. ``"total_increasing"``).
         history: Ordered sequence of numeric sensor values for pattern analysis.
+        device_class: Reported physical measurement category.
+        unit_of_measurement: Reported measurement unit.
 
     Returns:
         One of ``"accumulating"``, ``"binary"``, ``"gauge"``, ``"event"``,
@@ -55,11 +60,20 @@ def classify_sensor(
         log.debug("classify_sensor: %s → accumulating (state_class)", entity_id)
         return ACCUMULATING
 
-    if not history:
+    if entity_id.startswith(("binary_sensor.", "switch.", "light.")):
+        return BINARY
+    if entity_id.startswith(("input_number.", "number.")):
+        return SETPOINT
+    if state_class == "total":
+        return ACCUMULATING
+    if state_class == "measurement" or device_class or unit_of_measurement:
+        return GAUGE
+
+    if history is None or len(history) == 0:
         log.debug("classify_sensor: %s → gauge (no history)", entity_id)
         return GAUGE
 
-    vals = [float(v) for v in history if v is not None]
+    vals = [float(v) for v in history if v is not None and math.isfinite(float(v))]
     if len(vals) < 2:
         return GAUGE
 
@@ -119,7 +133,12 @@ def classify_entities_from_ha_states(ha_states: list[dict]) -> dict[str, str]:
             continue
         attrs = state.get("attributes", {})
         state_class = attrs.get("state_class")
-        result[eid] = classify_sensor(eid, state_class=state_class)
+        result[eid] = classify_sensor(
+            eid,
+            state_class=state_class,
+            device_class=attrs.get("device_class"),
+            unit_of_measurement=attrs.get("unit_of_measurement"),
+        )
     return result
 
 

@@ -20,6 +20,14 @@ import websockets
 from . import activity as activity_engine
 from . import anomaly_breakdown, automation_gap, automation_score, drift, phantom, seasonal
 from . import patterns as pattern_engine
+from .entity_metadata import (
+    SCHEMA_VERSION,
+    apply_override,
+    identify,
+    power_factor,
+    read_overrides,
+    temperature_c,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("habitus")
@@ -276,18 +284,66 @@ async def ws_connect():
     return ws
 
 
-async def get_stat_ids():
+_ENTITY_METADATA: dict[str, dict] = {}
+
+
+async def get_stat_ids() -> list[str]:
+    """Discover statistics and preserve metadata for training.
+
+    Returns:
+        Behavioral statistic identifiers available from Home Assistant.
+    """
     ws = await ws_connect()
     await ws.send(json.dumps({"id": 1, "type": "recorder/list_statistic_ids"}))
     result = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
     await ws.close()
-    all_ids = [s["statistic_id"] for s in result.get("result", [])]
+    stats = result.get("result", [])
+    _ENTITY_METADATA.clear()
+    for stat in stats:
+        _ENTITY_METADATA[stat["statistic_id"]] = dict(stat)
+    try:
+        response = await asyncio.to_thread(
+            requests.get,
+            f"{HA_URL}/api/states",
+            headers={"Authorization": f"Bearer {HA_TOKEN}"},
+            timeout=10,
+        )
+        response.raise_for_status()
+        for state in response.json():
+            eid = state["entity_id"]
+            if eid in _ENTITY_METADATA:
+                attrs = dict(state.get("attributes", {}))
+                statistic = _ENTITY_METADATA[eid]
+                if statistic.get("unit_of_measurement") is not None:
+                    attrs["unit_of_measurement"] = statistic["unit_of_measurement"]
+                _ENTITY_METADATA[eid] = {**statistic, **attrs}
+    except (requests.RequestException, ValueError) as exc:
+        log.warning("Could not enrich sensor metadata: %s", exc)
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(os.path.join(DATA_DIR, "entity_metadata.json"), "w", encoding="utf-8") as handle:
+        json.dump(_ENTITY_METADATA, handle)
+    overrides = read_overrides(DATA_DIR)
+    for eid, attrs in _ENTITY_METADATA.items():
+        _ENTITY_METADATA[eid] = apply_override(attrs, overrides.get(eid))
+    all_ids = [s["statistic_id"] for s in stats]
     behavioral = [e for e in all_ids if is_behavioral(e)]
     log.info(f"Found {len(behavioral)} behavioral sensors (from {len(all_ids)} total)")
     return behavioral
 
 
-async def fetch_stats(entity_ids, start_iso, end_iso=None):
+async def fetch_stats(
+    entity_ids: list[str], start_iso: str, end_iso: str | None = None
+) -> pd.DataFrame:
+    """Fetch hourly history with its statistic units attached.
+
+    Args:
+        entity_ids: Statistics to fetch.
+        start_iso: Inclusive beginning of the history window.
+        end_iso: End of the window, defaulting to the current hour.
+
+    Returns:
+        Historical observations with entity metadata in DataFrame attributes.
+    """
     """Fetch hourly statistics and return an aggregated DataFrame.
 
     Memory-efficient: raw per-sensor rows are aggregated to hourly means
@@ -339,6 +395,7 @@ async def fetch_stats(entity_ids, start_iso, end_iso=None):
     if not all_rows:
         return pd.DataFrame()
     df = pd.DataFrame(all_rows)
+    df.attrs["entity_metadata"] = dict(_ENTITY_METADATA)
     df["ts"] = pd.to_datetime(df["ts"], unit="s", utc=True)
     log.info(f"Fetched {len(df):,} rows | {df['ts'].min().date()} → {df['ts'].max().date()}")
     return df
@@ -360,6 +417,10 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         DataFrame with one row per hour and all FEATURE_COLS populated.
     """
     df = df.copy()
+    metadata = df.attrs.get("entity_metadata", {})
+    resolved = {eid: identify(eid, metadata.get(eid)) for eid in df["entity_id"].unique()}
+    factors = {eid: power_factor(meta) for eid, meta in resolved.items()}
+    df["power_w"] = pd.to_numeric(df["mean"], errors="coerce") * df["entity_id"].map(factors)
     df["hour"] = df["ts"].dt.floor("h")
     hours = pd.DataFrame({"hour": pd.date_range(df["hour"].min(), df["hour"].max(), freq="h")})
     hours["hour_of_day"] = hours["hour"].dt.hour
@@ -375,32 +436,42 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     if _power_entity:
         # Explicit override — use as-is (watts)
         power = df[df["entity_id"] == _power_entity].copy()
-        power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(lower=0, upper=_max_w)
+        power["v"] = pd.to_numeric(power["power_w"], errors="coerce").clip(lower=0, upper=_max_w)
         total_power = power.groupby("hour")["v"].max().rename("total_power_w")
     elif _energy_grid:
         # Grid kWh entity from HA Energy Dashboard — convert hourly delta to W
         grid = df[df["entity_id"] == _energy_grid].copy()
-        grid["v"] = pd.to_numeric(grid["mean"], errors="coerce").clip(lower=0)
+        energy_unit = resolved.get(_energy_grid, {}).get("unit_of_measurement", "")
+        scale = {"Wh": 0.001, "kWh": 1.0, "MWh": 1000.0}.get(energy_unit, float("nan"))
+        grid["v"] = pd.to_numeric(grid["sum"].fillna(grid["mean"]), errors="coerce") * scale
         grid = grid.set_index("hour").sort_index()
         # kWh delta per hour × 1000 = average watts for that hour
-        kwh_per_hour = grid["v"].diff().clip(lower=0, upper=_max_w / 1000)
+        kwh_per_hour = (
+            grid["v"].diff() / grid.index.to_series().diff().dt.total_seconds().div(3600)
+        ).clip(lower=0, upper=_max_w / 1000)
         total_power = (kwh_per_hour * 1000).rename("total_power_w")
     elif _energy_rates:
         # Per-device watt sensors from Energy Dashboard — sum these (no overlap)
         power = df[df["entity_id"].isin(_energy_rates)].copy()
-        power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(lower=0, upper=_max_w)
+        power["v"] = pd.to_numeric(power["power_w"], errors="coerce").clip(lower=0, upper=_max_w)
         total_power = power.groupby("hour")["v"].sum().rename("total_power_w")
     else:
         # Fallback: max of any power-like sensor (avoids double-counting)
-        power = df[
-            df["entity_id"].str.contains(
-                "consumed_w|watt|power|inverter|load", case=False, na=False
-            )
-        ].copy()
-        power["v"] = pd.to_numeric(power["mean"], errors="coerce").clip(lower=0, upper=_max_w)
+        power = df[df["entity_id"].map(factors).notna()].copy()
+        power["v"] = pd.to_numeric(power["power_w"], errors="coerce").clip(lower=0, upper=_max_w)
         total_power = power.groupby("hour")["v"].max().rename("total_power_w")
-    temp = df[df["entity_id"].str.contains("temperature", case=False, na=False)].copy()
-    temp["v"] = pd.to_numeric(temp["mean"], errors="coerce")
+    temp = df[
+        df["entity_id"].map(
+            lambda eid: resolved[eid]["quantity"] == "temperature"
+            and resolved[eid]["unit_of_measurement"] in ("°C", "°F", "K")
+        )
+    ].copy()
+    temp["v"] = [
+        temperature_c(float(value), resolved[eid]["unit_of_measurement"])
+        for eid, value in zip(
+            temp["entity_id"], pd.to_numeric(temp["mean"], errors="coerce"), strict=False
+        )
+    ]
     avg_temp = temp.groupby("hour")["v"].mean().rename("avg_temp_c")
     activity = df.groupby("hour").size().rename("sensor_changes")
     features = hours.set_index("hour")
@@ -861,6 +932,8 @@ async def run(days_history: int, mode: str = "full") -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
     now_iso = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:00:00+00:00")
     state = load_state()
+    if state.get("identification_version") != SCHEMA_VERSION:
+        mode = "full"
 
     # Adaptive contamination — force retrain when training age crosses a tier boundary
     _stored_days = state.get("training_days", 0)
@@ -1013,7 +1086,11 @@ async def run(days_history: int, mode: str = "full") -> None:
         log.error("No behavioral sensors found")
         return
 
-    if state.get("data_to") and os.path.exists(MODEL_PATH):
+    if (
+        state.get("identification_version") == SCHEMA_VERSION
+        and state.get("data_to")
+        and os.path.exists(MODEL_PATH)
+    ):
         # Incremental
         fetch_from = state["data_to"]
         log.info(f"Incremental: {fetch_from} → {now_iso}")
@@ -1054,6 +1131,7 @@ async def run(days_history: int, mode: str = "full") -> None:
             log.info("Building entity baselines...")
             anomaly_breakdown.build_entity_baselines(df)
             features = build_features(df)
+            state["identification_version"] = SCHEMA_VERSION
             del df
             set_progress("training", len(stat_ids), len(stat_ids), len(features), 0, 0)
             log.info(f"Training IsolationForest on {len(features):,} rows...")
@@ -1144,6 +1222,7 @@ async def run(days_history: int, mode: str = "full") -> None:
         state.update({"phase": "baselines_ready", "entity_count": len(stat_ids)})
         save_state(state)
         features = build_features(df)
+        state["identification_version"] = SCHEMA_VERSION
         del df
         set_progress("training", len(stat_ids), len(stat_ids), len(features), 0, 0)
         log.info(f"Training IsolationForest on {len(features):,} rows...")

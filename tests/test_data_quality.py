@@ -378,7 +378,7 @@ class TestScoreEntitiesSkipsStuck:
         ab.ENTITY_BASELINES_PATH = str(tmp_data_dir / "entity_baselines.json")
         ab.ENTITY_ANOMALIES_PATH = str(tmp_data_dir / "entity_anomalies.json")
 
-        now = datetime.datetime.now()
+        now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
         h, d = now.hour, now.weekday()
         old_first_seen = (now - datetime.timedelta(days=30)).isoformat()
         baselines = {

@@ -6,7 +6,8 @@ import os
 import yaml as _yaml  # type: ignore[import-untyped]
 from flask import Flask, jsonify, render_template_string, request
 
-from habitus import trainer as _trainer
+from . import trainer as _trainer
+from .entity_metadata import apply_override, identify, power_factor, read_overrides
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 STATE_PATH = os.path.join(DATA_DIR, "run_state.json")
@@ -26,6 +27,97 @@ DATA_QUALITY_PATH = os.path.join(DATA_DIR, "data_quality.json")
 app = Flask(__name__)
 
 
+SENSOR_PAGE = """<!doctype html><html lang="en"><meta charset="utf-8">
+<title>Sensor identification</title>
+<style>body{font:16px system-ui;margin:2rem;background:#101720;color:#e8eef5}
+a{color:#63c9ff}table{border-collapse:collapse;width:100%}td,th{padding:.7rem;border-bottom:1px solid #394454;text-align:left}
+input,select,button{padding:.5rem;margin:.2rem}small{color:#aab9cc}</style>
+<a href="./">Back to Habitus</a><h1>Sensor identification</h1>
+<p>Reported units take priority over names. Corrections apply to future training and live readings.</p>
+{% if message %}<p role="status">{{ message }}</p>{% endif %}
+<table><tr><th>Sensor</th><th>Reported unit</th><th>Selected unit / type</th><th>Source</th></tr>
+{% for row in rows %}<tr><td>{{row.name}}<br><small>{{row.eid}}</small></td>
+<td>{{row.reported}}</td><td>{{row.unit}} / {{row.type}}</td><td>{{row.source}}</td></tr>{% endfor %}</table>
+<h2>Correct a sensor</h2><form method="post">
+<label>Entity <input name="entity_id" list="entities" required></label>
+<datalist id="entities">{% for row in rows %}<option value="{{row.eid}}">{% endfor %}</datalist>
+<label>Unit <input name="unit" placeholder="Leave blank to keep reported unit"></label>
+<label>Behavior <select name="sensor_type"><option value="">Automatic</option>
+{% for type in types %}<option>{{type}}</option>{% endfor %}</select></label>
+<label><input type="checkbox" name="unitless">Unitless</label>
+<button name="action" value="save">Save correction</button>
+<button name="action" value="reset">Restore automatic detection</button></form>
+<p>After saving, use Full retrain on the dashboard. The corrected sensor is paused until its baseline is rebuilt.</p>
+</html>"""
+
+
+@app.route("/sensors", methods=["GET", "POST"])
+@app.route("/ingress/sensors", methods=["GET", "POST"])
+def sensor_identification() -> str | tuple[str, int]:
+    """Inspect sensor metadata and save persistent identification corrections.
+
+    Returns:
+        Escaped HTML with sensor metadata, or a validation error.
+    """
+    from .sensor_classifier import ALL_SENSOR_TYPES, classify_sensor
+
+    metadata = _read(os.path.join(DATA_DIR, "entity_metadata.json"), {})
+    overrides = read_overrides(DATA_DIR)
+    message = ""
+    if request.method == "POST":
+        eid = request.form.get("entity_id", "")
+        if eid not in metadata:
+            return "Unknown entity", 400
+        if _trainer.is_running():
+            return "Wait for the current training run before changing identification.", 409
+        correction = {}
+        if request.form.get("action") != "reset":
+            unit = request.form.get("unit", "").strip()
+            sensor_type = request.form.get("sensor_type", "")
+            if len(unit) > 32 or sensor_type and sensor_type not in ALL_SENSOR_TYPES:
+                return "Invalid unit or sensor type", 400
+            if unit or request.form.get("unitless"):
+                correction["unit_of_measurement"] = unit if not request.form.get("unitless") else ""
+            if sensor_type:
+                correction["sensor_type"] = sensor_type
+        if correction:
+            overrides[eid] = correction
+        else:
+            overrides.pop(eid, None)
+        path = os.path.join(DATA_DIR, "entity_overrides.json")
+        with open(path + ".tmp", "w", encoding="utf-8") as handle:
+            json.dump(overrides, handle)
+        os.replace(path + ".tmp", path)
+        # Force rebuilding instead of reusing a model trained with the old interpretation.
+        state = _read(STATE_PATH, {})
+        state.pop("identification_version", None)
+        with open(STATE_PATH, "w") as handle:
+            json.dump(state, handle)
+        message = "Correction saved. Run Full retrain to rebuild the affected baselines."
+    rows = []
+    for eid, reported in sorted(metadata.items()):
+        attrs = identify(eid, apply_override(reported, overrides.get(eid)))
+        sensor_type = attrs.get("sensor_type") or classify_sensor(
+            eid,
+            state_class=attrs.get("state_class"),
+            device_class=attrs.get("device_class"),
+            unit_of_measurement=attrs.get("unit_of_measurement"),
+        )
+        rows.append(
+            {
+                "eid": eid,
+                "name": attrs.get("friendly_name", eid),
+                "reported": reported.get("unit_of_measurement") or "unitless / unknown",
+                "unit": attrs["unit_of_measurement"] or "unitless / unknown",
+                "type": sensor_type,
+                "source": attrs["identification_source"],
+            }
+        )
+    return render_template_string(
+        SENSOR_PAGE, rows=rows, types=sorted(ALL_SENSOR_TYPES), message=message
+    )
+
+
 def _read(path, default=None):
     try:
         if os.path.exists(path):
@@ -43,7 +135,7 @@ PAGE = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Habitus</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
 
 :root {
   --bg:     #0e1117;
@@ -497,6 +589,7 @@ pre.raw {
 </style>
 </head>
 <body>
+<a href="sensors" style="display:block;padding:12px;color:var(--accent)">Sensor identification and corrections</a>
 
 <div class="header">
   <div class="header-left">
@@ -1380,16 +1473,8 @@ def api_sensor_health():
 @app.route("/ingress/api/full_train", methods=["POST"])
 def api_full_train():
     """Trigger a full 365-day training run without progressive steps."""
-    import asyncio
-    from concurrent.futures import ThreadPoolExecutor
-
-    from habitus.main import run
-
-    def do_train():
-        asyncio.run(run(days_history=365, mode="full"))
-
-    with ThreadPoolExecutor() as pool:
-        pool.submit(do_train)
+    if not _trainer.start(365, mode="full"):
+        return jsonify({"ok": False, "error": "Training already running"}), 409
     return jsonify({"ok": True, "message": "Full 365d training started"})
 
 
@@ -1437,15 +1522,15 @@ def api_power_sensors():
         sensors = []
         for s in r.json():
             eid = s["entity_id"]
-            uom = s["attributes"].get("unit_of_measurement", "")
-            if uom == "W" and eid.startswith("sensor."):
+            factor = power_factor(identify(eid, s["attributes"]))
+            if factor is not None and eid.startswith("sensor."):
                 try:
                     val = float(s["state"])
                     sensors.append(
                         {
                             "entity_id": eid,
                             "name": s["attributes"].get("friendly_name", eid),
-                            "current_w": round(val, 1),
+                            "current_w": round(val * factor, 1),
                         }
                     )
                 except Exception:

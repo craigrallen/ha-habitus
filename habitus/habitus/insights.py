@@ -11,6 +11,8 @@ import logging
 import os
 from typing import Any
 
+from .entity_metadata import identify, power_factor
+
 log = logging.getLogger("habitus")
 
 # Active-hours window: 07:00–21:59
@@ -148,12 +150,16 @@ def compute_top_consumers(entity_baselines: dict[str, Any]) -> list[dict[str, An
     for eid, slots in entity_baselines.items():
         if not isinstance(slots, dict):
             continue
-        if not _is_power_entity(eid):
+        if power_factor(identify(eid, slots.get("_meta"))) is None:
             continue
         hour_means = _entity_hour_means(slots)
         if not hour_means:
             continue
-        overall_mean = sum(hour_means.values()) / len(hour_means)
+        overall_mean = (
+            sum(hour_means.values())
+            / len(hour_means)
+            * (power_factor(identify(eid, slots.get("_meta"))) or 1.0)
+        )
         if overall_mean < _MIN_CONSUMER_W:
             continue
         name = eid.split(".")[-1].replace("_", " ").title()
@@ -187,7 +193,7 @@ def compute_waste(entity_baselines: dict[str, Any]) -> list[dict[str, Any]]:
     for eid, slots in entity_baselines.items():
         if not isinstance(slots, dict):
             continue
-        if not _is_power_entity(eid):
+        if power_factor(identify(eid, slots.get("_meta"))) is None:
             continue
         on_vals: list[float] = []
         off_vals: list[float] = []
@@ -201,7 +207,9 @@ def compute_waste(entity_baselines: dict[str, Any]) -> list[dict[str, Any]]:
                 hour = int(parts[0])
             except ValueError:
                 continue
-            m = float(val.get("mean", 0.0))
+            m = float(val.get("mean", 0.0)) * (
+                power_factor(identify(eid, slots.get("_meta"))) or 1.0
+            )
             if hour in ACTIVE_HOURS:
                 on_vals.append(m)
             else:
@@ -241,7 +249,11 @@ def compute_solar_ratio(entity_baselines: dict[str, Any]) -> dict[str, Any] | No
     """
     solar_eid: str | None = None
     for eid in entity_baselines:
-        if _is_solar_entity(eid):
+        if (
+            isinstance(entity_baselines[eid], dict)
+            and _is_solar_entity(eid)
+            and power_factor(identify(eid, entity_baselines[eid].get("_meta"))) is not None
+        ):
             solar_eid = eid
             break
     if solar_eid is None:
@@ -250,7 +262,10 @@ def compute_solar_ratio(entity_baselines: dict[str, Any]) -> dict[str, Any] | No
     solar_slots = entity_baselines[solar_eid]
     if not isinstance(solar_slots, dict):
         return None
-    solar_hour_means = _entity_hour_means(solar_slots)
+    solar_hour_means = {
+        h: v * (power_factor(identify(solar_eid, solar_slots.get("_meta"))) or 1.0)
+        for h, v in _entity_hour_means(solar_slots).items()
+    }
 
     total_solar = sum(solar_hour_means.values())
     solar_mean_w = round(total_solar / max(len(solar_hour_means), 1), 1)
@@ -270,8 +285,14 @@ def compute_solar_ratio(entity_baselines: dict[str, Any]) -> dict[str, Any] | No
         if eid == solar_eid or not isinstance(slots, dict):
             continue
         eid_lower = eid.lower()
-        if any(kw in eid_lower for kw in _load_keywords):
-            load_hour_means = _entity_hour_means(slots)
+        if (
+            any(kw in eid_lower for kw in _load_keywords)
+            and power_factor(identify(eid, slots.get("_meta"))) is not None
+        ):
+            load_hour_means = {
+                h: v * (power_factor(identify(eid, slots.get("_meta"))) or 1.0)
+                for h, v in _entity_hour_means(slots).items()
+            }
             break
 
     if load_hour_means:

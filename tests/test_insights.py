@@ -34,6 +34,11 @@ def _make_entity_baselines(
             f"{h}_0": {"mean": m, "std": m * 0.1, "n": 10}
             for h, m in hour_means.items()
         }
+        result[eid]["_meta"] = {"unit_of_measurement": "W", "device_class": "power"}
+        if "temperature" in eid:
+            result[eid]["_meta"] = {"unit_of_measurement": "°C", "device_class": "temperature"}
+        elif eid.startswith("binary_sensor."):
+            result[eid]["_meta"] = {"unit_of_measurement": None}
     return result
 
 

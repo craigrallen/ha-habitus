@@ -37,7 +37,7 @@ def start(days: int, mode: str = "full") -> bool:
 def _run_blocking(days: int, mode: str) -> None:
     """Execute the async training pipeline in a fresh event loop."""
     try:
-        from habitus.main import run  # noqa: PLC0415
+        from .main import run  # noqa: PLC0415
 
         asyncio.run(run(days_history=days, mode=mode))
     except Exception:

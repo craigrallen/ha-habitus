@@ -11,6 +11,8 @@ import logging
 import os
 from typing import Any
 
+from .entity_metadata import apply_override, identify, read_overrides
+
 log = logging.getLogger("habitus")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 PHANTOM_PATH = os.path.join(DATA_DIR, "phantom_loads.json")
@@ -122,12 +124,28 @@ def run() -> dict:
         return asyncio.run(_run_async())
 
 
+def _timestamp(value: float) -> datetime.datetime:
+    return datetime.datetime.fromtimestamp(value / 1000 if value > 1e10 else value, datetime.UTC)
+
+
 async def _run_async() -> dict:
     grid_entity = os.environ.get("HABITUS_ENERGY_GRID", "")
     if not grid_entity:
         log.info("No grid entity configured — skipping phantom analysis")
         return {}
 
+    try:
+        with open(os.path.join(DATA_DIR, "entity_metadata.json"), encoding="utf-8") as handle:
+            metadata = json.load(handle)
+    except (OSError, ValueError):
+        metadata = {}
+    attrs = identify(
+        grid_entity,
+        apply_override(metadata.get(grid_entity, {}), read_overrides(DATA_DIR).get(grid_entity)),
+    )
+    scale = {"Wh": 0.001, "kWh": 1.0, "MWh": 1000.0}.get(attrs["unit_of_measurement"])
+    if scale is None or attrs["quantity"] != "energy":
+        return {"reason": "unknown_energy_unit"}
     log.info("Phantom: fetching Energy Dashboard stats for %s", grid_entity)
 
     # Get monthly stats (same data as Energy Dashboard shows)
@@ -136,10 +154,11 @@ async def _run_async() -> dict:
         log.info("No monthly statistics available")
         return {"reason": "no_monthly_stats"}
 
+    monthly = [{**row, "change": (row.get("change") or 0) * scale} for row in monthly]
     # Build monthly breakdown
     months_data = []
     for m in monthly:
-        ts = datetime.datetime.fromtimestamp(m["start"] / 1000, datetime.UTC)
+        ts = _timestamp(m["start"])
         months_data.append({"month": ts.strftime("%Y-%m"), "kwh": round(m.get("change", 0), 1)})
 
     total_12mo = sum(m.get("change", 0) for m in monthly)
@@ -161,17 +180,15 @@ async def _run_async() -> dict:
     # Compare same number of days: first N days of this month vs first N days of last month
     # Use daily stats for accurate day-level comparison
     daily_stats = await _fetch_statistics(grid_entity, "day", 2)
+    daily_stats = sorted(
+        [{**row, "change": (row.get("change") or 0) * scale} for row in daily_stats],
+        key=lambda row: row["start"],
+    )
     this_month_daily = [
-        d
-        for d in daily_stats
-        if datetime.datetime.fromtimestamp(d["start"] / 1000, datetime.UTC).strftime("%Y-%m")
-        == current_month
+        d for d in daily_stats if _timestamp(d["start"]).strftime("%Y-%m") == current_month
     ]
     last_month_daily = [
-        d
-        for d in daily_stats
-        if datetime.datetime.fromtimestamp(d["start"] / 1000, datetime.UTC).strftime("%Y-%m")
-        == last_month_str
+        d for d in daily_stats if _timestamp(d["start"]).strftime("%Y-%m") == last_month_str
     ]
 
     # First N days of each month (N = days into current month)
@@ -189,9 +206,10 @@ async def _run_async() -> dict:
         # Filter to idle hours and calculate average
         idle_changes = []
         for h in hourly:
-            ts = datetime.datetime.fromtimestamp(h["start"] / 1000, datetime.UTC)
+            ts = _timestamp(h["start"])
             if ts.hour in IDLE_HOURS:
                 change = h.get("change", 0)
+                change = change * scale if change is not None else None
                 if change is not None and 0 <= change < 10:  # Sanity: max 10 kWh/hour
                     idle_changes.append(change)
 
@@ -199,11 +217,13 @@ async def _run_async() -> dict:
             avg_idle = sum(idle_changes) / len(idle_changes)
             phantom_info = {
                 "avg_idle_kwh_per_hour": round(avg_idle, 3),
-                "overnight_kwh_year": round(avg_idle * 8760, 0),
+                "overnight_kwh_year": round(avg_idle * len(IDLE_HOURS) * 365, 0),
                 "idle_hours_sampled": len(idle_changes),
             }
             log.info(
-                "Overnight baseline: %.3f kWh/idle-hour → %.0f kWh/year", avg_idle, avg_idle * 8760
+                "Overnight baseline: %.3f kWh/idle-hour → %.0f kWh/year",
+                avg_idle,
+                avg_idle * len(IDLE_HOURS) * 365,
             )
 
     result = {
